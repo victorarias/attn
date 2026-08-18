@@ -56,10 +56,18 @@ type AgentDriverReportCursor struct {
 	Seq        uint64
 }
 
+// ActiveAgentDriverRun is one live external-driver run, as handed back to a
+// driver that reconnects. Seq is the run's report cursor: a replacement driver
+// process has to continue from it, because applyState discards anything that
+// does not advance it.
 type ActiveAgentDriverRun struct {
 	SessionID string
 	RunID     string
 	Metadata  string
+	Seq       uint64
+	// PluginName is filled by ListActiveAgentDriverRuns, whose caller asks
+	// across plugins; the per-plugin listing leaves it empty.
+	PluginName string
 }
 
 // LaunchIntent captures the per-spawn parameters the daemon needs to
@@ -883,6 +891,7 @@ func (s *Store) ListAgentDriverRuns(pluginName string) []ActiveAgentDriverRun {
 				SessionID: sessionID,
 				RunID:     strings.TrimSpace(cursor.RunID),
 				Metadata:  strings.TrimSpace(s.agentMetadata[sessionID]),
+				Seq:       cursor.Seq,
 			})
 		}
 		sort.Slice(runs, func(i, j int) bool { return runs[i].SessionID < runs[j].SessionID })
@@ -890,7 +899,7 @@ func (s *Store) ListAgentDriverRuns(pluginName string) []ActiveAgentDriverRun {
 	}
 
 	rows, err := s.db.Query(`
-		SELECT id, agent_driver_run_id, agent_metadata
+		SELECT id, agent_driver_run_id, agent_metadata, agent_driver_report_seq
 		FROM sessions
 		WHERE agent_driver_plugin_name = ? AND agent_driver_run_id <> ''
 		ORDER BY id`, pluginName)
@@ -901,11 +910,60 @@ func (s *Store) ListAgentDriverRuns(pluginName string) []ActiveAgentDriverRun {
 	var runs []ActiveAgentDriverRun
 	for rows.Next() {
 		var run ActiveAgentDriverRun
-		if err := rows.Scan(&run.SessionID, &run.RunID, &run.Metadata); err != nil {
+		if err := rows.Scan(&run.SessionID, &run.RunID, &run.Metadata, &run.Seq); err != nil {
 			return nil
 		}
 		run.RunID = strings.TrimSpace(run.RunID)
 		run.Metadata = strings.TrimSpace(run.Metadata)
+		runs = append(runs, run)
+	}
+	return runs
+}
+
+// ListActiveAgentDriverRuns returns every live external-driver run with the
+// plugin that owns it. Unlike ListAgentDriverRuns it asks nothing about who is
+// installed: a run whose plugin was removed, or whose manifest no longer loads,
+// is still a session declaring a state nobody refreshes.
+func (s *Store) ListActiveAgentDriverRuns() []ActiveAgentDriverRun {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if s.db == nil {
+		var runs []ActiveAgentDriverRun
+		for sessionID, cursor := range s.agentDriverRuns {
+			if strings.TrimSpace(cursor.RunID) == "" || s.sessions[sessionID] == nil {
+				continue
+			}
+			runs = append(runs, ActiveAgentDriverRun{
+				SessionID:  sessionID,
+				RunID:      strings.TrimSpace(cursor.RunID),
+				Metadata:   strings.TrimSpace(s.agentMetadata[sessionID]),
+				Seq:        cursor.Seq,
+				PluginName: strings.TrimSpace(cursor.PluginName),
+			})
+		}
+		sort.Slice(runs, func(i, j int) bool { return runs[i].SessionID < runs[j].SessionID })
+		return runs
+	}
+
+	rows, err := s.db.Query(`
+		SELECT id, agent_driver_run_id, agent_metadata, agent_driver_report_seq, agent_driver_plugin_name
+		FROM sessions
+		WHERE agent_driver_run_id <> ''
+		ORDER BY id`)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var runs []ActiveAgentDriverRun
+	for rows.Next() {
+		var run ActiveAgentDriverRun
+		if err := rows.Scan(&run.SessionID, &run.RunID, &run.Metadata, &run.Seq, &run.PluginName); err != nil {
+			return nil
+		}
+		run.RunID = strings.TrimSpace(run.RunID)
+		run.Metadata = strings.TrimSpace(run.Metadata)
+		run.PluginName = strings.TrimSpace(run.PluginName)
 		runs = append(runs, run)
 	}
 	return runs

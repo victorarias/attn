@@ -1,0 +1,7 @@
+kind: fixed
+area: apps
+change: >
+  Disabled installed apps now keep their unread facts and resume from their
+  frozen cursor in order. Re-enabling no longer rebuilds or skips the retained
+  backlog, and version-change and gap reconciliation fences stop before every
+  fact the app is still owed.

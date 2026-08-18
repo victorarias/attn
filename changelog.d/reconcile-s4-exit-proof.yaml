@@ -1,0 +1,12 @@
+kind: internal
+area: testing
+change: >
+  A packaged-app scenario walks the whole reconcile story end to end —
+  installing, resuming, moving a version, hitting a real retention trim past a
+  live cursor, being interrupted mid-rebuild by a daemon restart — with a Linux
+  witness that dispatches and rebuilds on a remote daemon.
+notes: >
+  The harness's profile routing now also clears ATTN_DATA_DIR and ATTN_WS_PORT.
+  An attn session exports both into every shell it hosts and each outranks
+  ATTN_PROFILE, so a scenario driven from inside attn could drive the
+  production daemon while reporting the profile it thought it had.

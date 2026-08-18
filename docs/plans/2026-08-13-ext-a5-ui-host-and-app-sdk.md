@@ -570,9 +570,9 @@ Dispatch reuses everything A4 built rather than adding a second path:
 attn-app.toml   [[commands]] name = "approve"
       ↓ codegen
 handlers.ts     type Handlers = {
-                  "subscribe:doc.changed": …   A4
-                  "command:approve": …         ← A5, missing = tsc error
-                }
+                  subscriptions: { "doc.changed": … }   A4
+                  commands: { approve: … }              ← A5,
+                }                                       missing = tsc error
       ↓ apply → sidecar
 runtime         ordinary dispatch: same invocation log, same timeout,
                 same drain on version flip, same failure attribution
@@ -871,14 +871,156 @@ Two left, and neither blocks slice 1.
    which is a schema, a validator and a widget per type. Worth a look at the
    real thing before deciding: a text field is judged by how it feels to
    dock a tile, not by how it reads here.
-2. **React's types, across a React major.** The SDK re-exports `ReactNode`
-   and `ReactElement`, which are React's own. A major that redefines them
-   can fail an app's next `attn app apply` typecheck — loudly, with a
-   filename, and with no running tile affected. The alternative is the SDK
+2. ~~**React's types, across a React major.**~~ **Settled in slice 2 by this
+   doc's own proposal: re-export.** The SDK re-exports `ReactNode` and
+   `ReactElement`, which are React's own. A major that redefines them can
+   fail an app's next `attn app apply` typecheck — loudly, with a filename,
+   and with no running tile affected. The alternative considered was the SDK
    declaring its own aliases, which decouples the app from React's type
    churn and costs a small, permanent translation layer that has to stay
-   honest. Proposal: re-export, accept the loud break, and revisit the first
-   time it actually fires.
+   honest. Revisit the first time the break actually fires.
+
+## Slice 2 as-built
+
+The SDK became a package as designed; four things the design did not name, all
+found by building it.
+
+**React's declarations have to reach the app.** The SDK re-exports React's
+types and a view's JSX resolves its `JSX` namespace through them, so an app
+cannot typecheck a `.tsx` without `@types/react` on disk. It is pinned beside
+the compiler (`ReactTypesVersion`, installed into `<data-dir>/apps/toolchain` by
+the same `bun install` behind the same lock) and the materialized package
+reaches it through one relative symlink — `apps/sdk/<hash>/node_modules` →
+`apps/toolchain/node_modules` — which is also how `csstype` resolves, because
+tsc follows a symlink to its real path before resolving anything further. The
+pin is checked against the frontend's own lockfile by
+`TestReactTypesPinMatchesTheFrontend`: the declarations an author checks against
+have to be the declarations the running frontend provides.
+
+**One React comes from the workspace, not from a build flag.** `sdk/attn-app` is
+a package of the frontend's pnpm workspace (`packages: ['.', '../sdk/attn-app']`)
+and the frontend depends on it as `workspace:*`, so the specifier resolves with
+no vite alias and no tsconfig path — and both arms link to one copy in the pnpm
+store, which is what makes them one module instance. That property is asserted
+directly rather than argued: `app/src/appSdk.oneReact.test.ts` compares the
+SDK's exported hooks with React's by identity, and pins the re-export list.
+
+**The declarations are generated and committed.** `//go:embed` reads files from
+the Go tree, so `tsc --emitDeclarationOnly` writes `internal/appbuild/sdkdist/`
+and those files are committed the way `generated.go` is. `make generate-sdk`
+emits them, `make check-sdk` fails on a stale copy (by `git status`, so a
+declaration the emit newly produces cannot pass as an untracked file), and the
+frontend CI job runs it.
+
+**A third specifier: `jsx-dev-runtime`.** Bundlers reach for the development JSX
+runtime unless told to build for production — measured: `bun build` of a `.tsx`
+entrypoint emits `import … from "@victorarias/attn-app/jsx-dev-runtime"` with no
+`--production`. The SDK carries it so a default flag cannot fail a build. A
+stored version is immutable and content-addressed, so there is no per-run
+dev/prod split: slice 1 should build views in production mode, and slice 3's
+import map should carry the entry regardless, since a bundle that names it must
+still link.
+
+**What slice 2 deliberately did not build.** `useQuery` and `useCommand` (slices
+4 and 5), the components (slice 5), the import map and the fixed-name frontend
+chunks (slice 3). An app's *handler* bundle still carries no SDK JavaScript and
+is not built with `--external`, so a handler importing an SDK **value** fails at
+bundle time with a resolution error naming the specifier — unchanged from A4,
+where the ambient declaration had no JavaScript either.
+
+## Slice 4 as-built
+
+The four envelopes and `useQuery` landed as designed. Four things the design did
+not name, all found by building it.
+
+**The refusal and the ending are one envelope.** The design gave
+`doc_subscription_ended` the post-acceptance codes and left refusals implicit. On
+a multiplexed connection a refusal has to name the subscription it refused, and
+`command_error` cannot — so every way a subscription is not running arrives as
+`doc_subscription_ended`, told apart by code: `invalid_query`,
+`undeclared_collection` and `subscription_limit` refuse one that never started,
+`collection_undefined` and `collection_redeclared` end one that did. A client has
+exactly one place to learn a query is not being served.
+
+**The subscribe never goes through the outbound queue.** The frontend queues a
+command issued while the socket is down and flushes it on the next open — and the
+connect handler also re-sends every wanted subscription, because the daemon lost
+them all with the old connection. Both together would send one subscription
+twice, and the second is refused as an id already open. So a subscribe is sent
+only over an open socket; when there is none, the registry alone carries it and
+the connect handler is what sends it. That registry is also what makes a resume
+correct across a reconnect rather than only across a remount: each subscriber is
+asked for its `have()` at re-send time, not at first subscribe.
+
+**`useQuery`'s cache outlives its mount, so it needs a bound.** Resume-by-`have`
+means the bodies survive unmount, which makes them a module-level cache keyed by
+the query's identity. It keeps 64, the same receipt as the per-client
+subscription tripwire: a client cannot hold more live queries than that, so
+retaining more caches is retaining for tiles that cannot all exist. Eviction
+costs one fuller first delivery and nothing else, which is why this bound is the
+one limit in the slice that is deliberately silent.
+
+**The host composes the namespace; the SDK cannot.** `sdk/attn-app` is its own
+package and cannot import the app's socket, so it exports the seam
+(`AppViewRuntimeProvider`, `AppViewRuntime`) and `AppTileHost` implements it —
+handing over `app/<app>` and the frontend's `subscribeDocuments`. That is what
+makes "a view cannot read another app's documents" structural: a view is given a
+namespace, and there is no call that takes one.
+
+## Slice 5 as-built
+
+Commands, the components, and the scaffold landed as designed. Four departures
+and receipts, all found by building it.
+
+**Kind is structure, not a prefix on a key.** The design drew
+`"subscribe:doc.changed"` beside `"command:approve"` in one flat map, and the
+first build of this slice shipped half of that — raw patterns for subscriptions,
+a `command:` prefix for commands — defended by a proof that the two can never
+collide, since a colon appears in neither an event pattern nor a command name.
+That proof is a rule someone can break later. A bundle exports one map per kind
+instead: `subscriptions`, keyed by the raw event pattern, and `commands`, keyed
+by the bare name. The manifest already separates the kinds, so the bundle mirrors
+it rather than re-encoding kind as a string convention, codegen derives a typed
+group per kind — tsc enforces "every declared command has a command-shaped
+handler" structurally — and the sidecar indexes the map its dispatch context
+names (a fact arrived → `subscriptions`; a command envelope → `commands`),
+constructing no keys at all. Collision becomes inexpressible rather than
+proven-absent.
+
+Invocation **labels** are a separate thing: what `attn app logs` shows, so it
+names the kind — `command:approve`, `subscribe:ticket.*`, `view:approvals`. They
+have no dispatch meaning, which is what makes labelling every kind free.
+
+Existing installed apps export the flat shape and stop dispatching until they are
+re-applied. Pre-release, with no app installed anywhere but a dev profile, that
+costs one `attn app apply` and buys a shape that cannot be got wrong.
+
+**A command carries at most 256KB in either direction.** The same limit as a
+document body, and for the same reason: the payload lands in the sidecar's
+single-threaded loop and in the invocation log's error text. Over it, the
+refusal names the command, the app, the limit and the ask, and says where
+larger data belongs — a document, which is the surface built to hold it.
+
+**The frontend waits longer than the daemon.** `APP_COMMAND_TIMEOUT_MS` is 75s
+against the daemon's 60s dispatch budget. That ordering is the whole point: a
+handler that never yields is abandoned by the daemon, which knows which app and
+which command froze the shared loop, and its refusal reaches the view naming all
+three. A frontend that gave up first would replace that with "the daemon did not
+answer", which no agent can act on. A failed command never advances the app's
+stall clock — that clock exists for a consumer pinning the durable log's
+retention floor, and a docked tile pins nothing, so clicking must not be able to
+disable a healthy app.
+
+**Component styles live in the app, not in the SDK.** A CSS import inside the
+SDK's rollup entry emits an asset the import map's three fixed-name chunks
+cannot link, so the components emit `attn-app-*` class names only and
+`app/src/components/appViews/appSdkComponents.css` — imported by `AppTileHost` —
+carries every rule, over attn's own tokens. A test asserts both directions of
+that pairing, so a component that grows a class without a rule, or a rule with
+no component, fails rather than shipping unstyled. The shipped slice is Button,
+TextInput, TextArea, List, ListRow, EmptyState and Markdown; nothing in them
+animates, which is why the spinner and the relative-time label the design
+excluded stay excluded.
 
 ## Out of scope
 

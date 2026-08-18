@@ -114,6 +114,16 @@ class RecordingDelegate implements RelayDelegate {
   }
 }
 
+// A driver that takes a report and never answers it — what a runtime being
+// replaced looks like from inside pi: the bytes are accepted, the process goes
+// away before it forwards them, and nothing on the wire says so.
+class StallingDelegate extends RecordingDelegate {
+  async suiteReportStop(params: unknown): Promise<void> {
+    this.calls.push({ method: relayMethods.reportStop, params });
+    await new Promise(() => {});
+  }
+}
+
 async function buildHarness(): Promise<{ relay: RelayServer; delegate: RecordingDelegate; socketPath: string }> {
   const socketPath = nextSocketPath();
   const delegate = new RecordingDelegate();
@@ -147,6 +157,7 @@ describe("AttnPiSuite: session_start -> suite.hello", () => {
         pi_session_id: "native-session-1",
         pi_version: "0.80.10",
         reason,
+        pi_state: "idle",
       })),
     );
 
@@ -210,13 +221,14 @@ describe("AttnPiSuite: agent_end + agent_settled -> suite.report_stop", () => {
     expect(delegate.calls.find((call) => call.method === relayMethods.reportStop)?.params).toEqual({
       token: "tok-3",
       assistant_text: "Done, want a review?",
+      aborted: false,
     });
 
     // A second settle without a new agent_end has nothing cached.
     pi.fire("agent_settled", agentSettled, ctx);
     await waitFor(() => delegate.calls.filter((call) => call.method === relayMethods.reportStop).length === 2);
     const stops = delegate.calls.filter((call) => call.method === relayMethods.reportStop);
-    expect(stops[1]?.params).toEqual({ token: "tok-3", assistant_text: "" });
+    expect(stops[1]?.params).toEqual({ token: "tok-3", assistant_text: "", aborted: false });
 
     suite.close();
     relay.close();
@@ -235,6 +247,7 @@ describe("AttnPiSuite: agent_end + agent_settled -> suite.report_stop", () => {
     expect(delegate.calls.find((call) => call.method === relayMethods.reportStop)?.params).toEqual({
       token: "tok-4",
       assistant_text: "",
+      aborted: false,
     });
 
     suite.close();
@@ -345,6 +358,146 @@ describe("AttnPiSuite: auto mode denials -> suite.report_denial", () => {
   });
 });
 
+// The driver process is replaced whenever attn's daemon restarts, and the pi it
+// launched keeps running. The relay path is stable per profile precisely so the
+// suite can find the replacement; these cover it finding one.
+describe("AttnPiSuite: the driver was replaced under a live session", () => {
+  test("re-dials the stable path, names its run again, and reports land on the new driver", async () => {
+    const socketPath = nextSocketPath();
+    const first = new RelayServer({ socketPath, delegate: new RecordingDelegate() });
+    await first.listen();
+
+    const suite = new AttnPiSuite({ socketPath, token: "tok-r", piVersion: "0.80.10" });
+    const pi = new FakePi();
+    suite.register(pi);
+    const ctx = new FakeContext("native-r");
+    pi.fire("session_start", { type: "session_start", reason: "startup" }, ctx);
+    pi.fire("agent_start", { type: "agent_start" }, ctx);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    // The replacement driver: same path, new listener, and no memory of the
+    // connection the first one held.
+    first.close();
+    const replacement = new RecordingDelegate();
+    const second = new RelayServer({ socketPath, delegate: replacement });
+    await second.listen();
+
+    pi.fire("agent_start", { type: "agent_start" }, ctx);
+
+    await waitFor(() => helloCalls(replacement).length >= 1);
+    await waitFor(() => replacement.calls.some((call) => call.method === relayMethods.reportState));
+
+    // The hello comes first: a report that overtook it would be answered
+    // "unknown pi suite token" and dropped.
+    expect(replacement.calls[0]?.method).toBe(relayMethods.hello);
+    expect(helloCalls(replacement)[0]).toEqual({
+      token: "tok-r",
+      pi_session_id: "native-r",
+      pi_version: "0.80.10",
+      reason: "reconnect",
+      pi_state: "idle",
+    });
+
+    suite.close();
+    second.close();
+  });
+
+  test("reconnects without a report to send, so attn can deliver a message to a quiet session", async () => {
+    const socketPath = nextSocketPath();
+    const first = new RelayServer({ socketPath, delegate: new RecordingDelegate() });
+    await first.listen();
+
+    const suite = new AttnPiSuite({ socketPath, token: "tok-q", piVersion: "0.80.10" });
+    const pi = new FakePi();
+    suite.register(pi);
+    const ctx = new FakeContext("native-q");
+    pi.fire("session_start", { type: "session_start", reason: "startup" }, ctx);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    first.close();
+    const replacement = new RecordingDelegate();
+    const second = new RelayServer({ socketPath, delegate: replacement });
+    await second.listen();
+
+    // Nothing fires on pi's side: the session is sitting at its prompt. The
+    // reconnect is what gives the replacement driver a connection at all.
+    await waitFor(() => helloCalls(replacement).length >= 1, 5_000);
+    expect(helloCalls(replacement)[0]).toEqual({
+      token: "tok-q",
+      pi_session_id: "native-q",
+      pi_version: "0.80.10",
+      reason: "reconnect",
+      pi_state: "idle",
+    });
+
+    suite.close();
+    second.close();
+  });
+});
+
+describe("AttnPiSuite: a report the driver never took", () => {
+  test("re-declares the settle to the replacement driver", async () => {
+    const socketPath = nextSocketPath();
+    const stalling = new StallingDelegate();
+    const first = new RelayServer({ socketPath, delegate: stalling });
+    await first.listen();
+
+    const suite = new AttnPiSuite({ socketPath, token: "tok-x", piVersion: "0.80.10" });
+    const pi = new FakePi();
+    suite.register(pi);
+    const ctx = new FakeContext("native-x");
+    pi.fire("session_start", { type: "session_start", reason: "startup" }, ctx);
+
+    const messages: AgentMessageLike[] = [{ role: "assistant", content: [{ type: "text", text: "essay done" }] }];
+    pi.fire("agent_end", { type: "agent_end", messages }, ctx);
+    pi.fire("agent_settled", { type: "agent_settled" }, ctx);
+    await waitFor(() => stalling.calls.some((call) => call.method === relayMethods.reportStop));
+
+    // The driver dies holding the settle. Without the re-declaration attn would
+    // show this session working until its next run, minutes or hours later.
+    first.close();
+    const replacement = new RecordingDelegate();
+    const second = new RelayServer({ socketPath, delegate: replacement });
+    await second.listen();
+
+    await waitFor(() => replacement.calls.some((call) => call.method === relayMethods.reportStop), 5_000);
+    expect(replacement.calls[0]?.method).toBe(relayMethods.hello);
+    expect(replacement.calls.find((call) => call.method === relayMethods.reportStop)?.params).toEqual({
+      token: "tok-x",
+      assistant_text: "essay done",
+      aborted: false,
+    });
+
+    suite.close();
+    second.close();
+  });
+
+  test("keeps trying a socket nothing is listening on yet, and lands the report when a driver appears", async () => {
+    const socketPath = nextSocketPath(); // nothing listening
+    const suite = new AttnPiSuite({ socketPath, token: "tok-y", piVersion: "0.80.10" });
+    const pi = new FakePi();
+    suite.register(pi);
+    const ctx = new FakeContext("native-y");
+    pi.fire("session_start", { type: "session_start", reason: "startup" }, ctx);
+    pi.fire("agent_start", { type: "agent_start" }, ctx);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    const delegate = new RecordingDelegate();
+    const relay = new RelayServer({ socketPath, delegate });
+    await relay.listen();
+
+    await waitFor(() => delegate.calls.some((call) => call.method === relayMethods.reportState), 5_000);
+    expect(delegate.calls[0]?.method).toBe(relayMethods.hello);
+    expect(delegate.calls.find((call) => call.method === relayMethods.reportState)?.params).toEqual({
+      token: "tok-y",
+      state: "working",
+    });
+
+    suite.close();
+    relay.close();
+  });
+});
+
 describe("AttnPiSuite: running outside attn or without a live relay", () => {
   test("missing env registers nothing and makes no connection attempt", () => {
     const suite = new AttnPiSuite({ socketPath: undefined, token: undefined, piVersion: "0.80.10" });
@@ -389,5 +542,185 @@ describe("AttnPiSuite: running outside attn or without a live relay", () => {
     expect(unhandled).toBeUndefined();
 
     suite.close();
+  });
+});
+
+describe("AttnPiSuite: a window where pi is blocked on the user", () => {
+  test("declares pending_approval, then working again when the question is answered", async () => {
+    const { relay, delegate, socketPath } = await buildHarness();
+    const suite = new AttnPiSuite({ socketPath, token: "tok-pa", piVersion: "0.80.10" });
+    const pi = new FakePi();
+    suite.register(pi);
+    const ctx = new FakeContext("native-pa");
+    pi.fire("session_start", { type: "session_start", reason: "startup" }, ctx);
+
+    suite.reportApprovalWindow(true);
+    await waitFor(() => stateCalls(delegate).length === 1);
+    suite.reportApprovalWindow(false);
+    await waitFor(() => stateCalls(delegate).length === 2);
+
+    expect(stateCalls(delegate)).toEqual([
+      { token: "tok-pa", state: "pending_approval" },
+      { token: "tok-pa", state: "working" },
+    ]);
+
+    suite.close();
+    relay.close();
+  });
+
+  test("says it once: a second open declares nothing new", async () => {
+    const { relay, delegate, socketPath } = await buildHarness();
+    const suite = new AttnPiSuite({ socketPath, token: "tok-pa2", piVersion: "0.80.10" });
+    const pi = new FakePi();
+    suite.register(pi);
+    const ctx = new FakeContext("native-pa2");
+    pi.fire("session_start", { type: "session_start", reason: "startup" }, ctx);
+
+    suite.reportApprovalWindow(true);
+    suite.reportApprovalWindow(true);
+    await waitFor(() => stateCalls(delegate).length >= 1);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(stateCalls(delegate)).toEqual([{ token: "tok-pa2", state: "pending_approval" }]);
+
+    suite.close();
+    relay.close();
+  });
+
+  test("a settle closes the window, so the next one is declared rather than swallowed", async () => {
+    const { relay, delegate, socketPath } = await buildHarness();
+    const suite = new AttnPiSuite({ socketPath, token: "tok-pa3", piVersion: "0.80.10" });
+    const pi = new FakePi();
+    suite.register(pi);
+    const ctx = new FakeContext("native-pa3");
+    pi.fire("session_start", { type: "session_start", reason: "startup" }, ctx);
+
+    suite.reportApprovalWindow(true);
+    await waitFor(() => stateCalls(delegate).length === 1);
+    pi.fire("agent_settled", { type: "agent_settled" } as AgentSettledEvent, ctx);
+    await waitFor(() => delegate.calls.some((call) => call.method === relayMethods.reportStop));
+
+    suite.reportApprovalWindow(true);
+    await waitFor(() => stateCalls(delegate).length === 2);
+    expect(stateCalls(delegate)[1]).toEqual({ token: "tok-pa3", state: "pending_approval" });
+
+    suite.close();
+    relay.close();
+  });
+});
+
+describe("AttnPiSuite: the user took the turn back", () => {
+  test("carries pi's abort, so attn settles it without classifying", async () => {
+    const { relay, delegate, socketPath } = await buildHarness();
+    const suite = new AttnPiSuite({ socketPath, token: "tok-ab", piVersion: "0.80.10" });
+    const pi = new FakePi();
+    suite.register(pi);
+    const ctx = new FakeContext("native-ab");
+    pi.fire("session_start", { type: "session_start", reason: "startup" }, ctx);
+
+    const messages: AgentMessageLike[] = [
+      { role: "assistant", content: [{ type: "text", text: "half a par" }], stopReason: "aborted" },
+    ];
+    pi.fire("agent_end", { type: "agent_end", messages } as AgentEndEvent, ctx);
+    pi.fire("agent_settled", { type: "agent_settled" } as AgentSettledEvent, ctx);
+
+    await waitFor(() => delegate.calls.some((call) => call.method === relayMethods.reportStop));
+    expect(delegate.calls.find((call) => call.method === relayMethods.reportStop)?.params).toEqual({
+      token: "tok-ab",
+      assistant_text: "half a par",
+      aborted: true,
+    });
+
+    suite.close();
+    relay.close();
+  });
+
+  test("the abort does not outlive its run: the next settle reports its own ending", async () => {
+    const { relay, delegate, socketPath } = await buildHarness();
+    const suite = new AttnPiSuite({ socketPath, token: "tok-ab2", piVersion: "0.80.10" });
+    const pi = new FakePi();
+    suite.register(pi);
+    const ctx = new FakeContext("native-ab2");
+    pi.fire("session_start", { type: "session_start", reason: "startup" }, ctx);
+
+    pi.fire(
+      "agent_end",
+      { type: "agent_end", messages: [{ role: "assistant", content: [], stopReason: "aborted" }] } as AgentEndEvent,
+      ctx,
+    );
+    pi.fire("agent_settled", { type: "agent_settled" } as AgentSettledEvent, ctx);
+    await waitFor(() => stopCalls(delegate).length === 1);
+
+    pi.fire(
+      "agent_end",
+      {
+        type: "agent_end",
+        messages: [{ role: "assistant", content: [{ type: "text", text: "done" }], stopReason: "stop" }],
+      } as AgentEndEvent,
+      ctx,
+    );
+    pi.fire("agent_settled", { type: "agent_settled" } as AgentSettledEvent, ctx);
+    await waitFor(() => stopCalls(delegate).length === 2);
+
+    expect(stopCalls(delegate)[1]).toEqual({ token: "tok-ab2", assistant_text: "done", aborted: false });
+
+    suite.close();
+    relay.close();
+  });
+});
+
+describe("AttnPiSuite: reports nobody could take", () => {
+  test("counts them and hands the count to the driver that finally answers", async () => {
+    const socketPath = nextSocketPath();
+    const suite = new AttnPiSuite({ socketPath, token: "tok-dr", piVersion: "0.80.10" });
+    const pi = new FakePi();
+    suite.register(pi);
+    const ctx = new FakeContext("native-dr");
+
+    // Nothing is listening yet, so every dial fails and every report is dropped.
+    pi.fire("session_start", { type: "session_start", reason: "startup" }, ctx);
+    suite.reportDenial({ tool: "bash", action: "bash: curl example.com", reason: "no", rule: "envelope", at: "now" });
+    suite.reportDenial({ tool: "bash", action: "bash: nc example.com 80", reason: "no", rule: "envelope", at: "now" });
+    await new Promise((resolve) => setTimeout(resolve, 60));
+
+    const delegate = new RecordingDelegate();
+    const relay = new RelayServer({ socketPath, delegate });
+    await relay.listen();
+
+    await waitFor(() => helloCalls(delegate).length >= 1, 5_000);
+    expect((helloCalls(delegate)[0] as Record<string, unknown>).dropped_reports).toBe(2);
+
+    suite.close();
+    relay.close();
+  });
+});
+
+function stateCalls(delegate: RecordingDelegate): unknown[] {
+  return delegate.calls.filter((call) => call.method === relayMethods.reportState).map((call) => call.params);
+}
+
+function stopCalls(delegate: RecordingDelegate): unknown[] {
+  return delegate.calls.filter((call) => call.method === relayMethods.reportStop).map((call) => call.params);
+}
+
+describe("AttnPiSuite: what a hello says pi is", () => {
+  test("carries working while a run is in flight, and pending_approval while pi is blocked on the user", async () => {
+    const { relay, delegate, socketPath } = await buildHarness();
+    const suite = new AttnPiSuite({ socketPath, token: "tok-hs", piVersion: "0.80.10" });
+    const pi = new FakePi();
+    suite.register(pi);
+    const ctx = new FakeContext("native-hs");
+    ctx.setIdle(false);
+    pi.fire("session_start", { type: "session_start", reason: "startup" }, ctx);
+    await waitFor(() => helloCalls(delegate).length === 1);
+    expect((helloCalls(delegate)[0] as Record<string, unknown>).pi_state).toBe("working");
+
+    suite.reportApprovalWindow(true);
+    pi.fire("session_start", { type: "session_start", reason: "resume" }, ctx);
+    await waitFor(() => helloCalls(delegate).length === 2);
+    expect((helloCalls(delegate)[1] as Record<string, unknown>).pi_state).toBe("pending_approval");
+
+    suite.close();
+    relay.close();
   });
 });

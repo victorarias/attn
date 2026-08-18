@@ -321,6 +321,21 @@ var wireFixtures = map[string]wireFixture{
 		events:  []string{protocol.EventPresentationUpdated},
 		subject: (*wireWorld).presentation,
 	},
+	// All three re-push the whole registry: the frontend mounts app views from
+	// that snapshot, so a version flip, an enable and a removal are the same
+	// invalidation to it.
+	FactAppVersionChanged: {
+		events:  []string{protocol.EventAppsUpdated},
+		subject: func(*wireWorld) string { return "wire-app" },
+	},
+	FactAppEnabledChanged: {
+		events:  []string{protocol.EventAppsUpdated},
+		subject: func(*wireWorld) string { return "wire-app" },
+	},
+	FactAppRemoved: {
+		events:  []string{protocol.EventAppsUpdated},
+		subject: func(*wireWorld) string { return "wire-app" },
+	},
 }
 
 // factsWithoutWire are the declared facts that deliberately produce no WebSocket
@@ -332,9 +347,6 @@ var factsWithoutWire = map[string]string{
 	FactDocumentChanged:              "consumed by the live-query fan-out in documents.go, not by WebSocket clients",
 	FactDocumentCollectionRemoved:    "same consumer as document.changed; ends the subscriptions that read the collection",
 	FactDocumentCollectionRedeclared: "same consumer again; a redeclare that drops a queried field ends live queries at redeclare time",
-	FactAppEnabledChanged:            "the app registry has no UI surface; the consumer is the runtime's dispatch loop",
-	FactAppRemoved:                   "same: the runtime has to stop dispatching to an app the CLI uninstalled",
-	FactAppVersionChanged:            "same: the runtime reloads handlers on an apply or a rollback",
 	FactAppRuntimeChanged:            "supervision state is read back from the supervisor (`attn app runtime status`), never from a copy",
 }
 

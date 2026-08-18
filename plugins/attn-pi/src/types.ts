@@ -53,10 +53,16 @@ export function evaluatePiVersion(value: string): VersionCompatibility {
 
 export type DriverCapabilities = Record<string, boolean>;
 
+// One live run attn hands back when this plugin's driver (re)registers. `seq`
+// is the run's report cursor: attn orders session.report_* by a
+// strictly-increasing seq per run, so a replacement driver process must
+// continue from this value rather than from its own fresh counter. It is absent
+// only from an attn too old to send it.
 export type ActivePluginRun = {
   session_id: string;
   run_id: string;
   metadata?: unknown;
+  seq?: number;
 };
 
 export type DriverRegisterResult = {

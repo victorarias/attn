@@ -1,0 +1,17 @@
+kind: fixed
+area: daemon
+change: >
+  An eviction notice can no longer be lost to a hello that was still in flight
+  when its connection was evicted. The hub evicts on its own goroutine while a
+  hello is mid-processing on the connection being evicted; that hello's tail
+  found the just-filed record, consumed the one-shot notice, and could not
+  deliver it — to a channel the eviction had already closed, or worse, queued to
+  a connection the eviction was about to abort. The client's next connection
+  was then never told why it went away. The eviction now closes the send
+  channel before filing its record, and a notice that still cannot be handed
+  over goes back on file for the next hello. No duplicate is possible: a
+  delivered notice is never re-filed.
+notes: >
+  Found as a roughly 1-in-10 race under the race detector in
+  TestEvictedClientLearnsWhyOnItsNextConnection, which failed a CI run of the
+  epic; now pinned by a deterministic test that stages the race directly.

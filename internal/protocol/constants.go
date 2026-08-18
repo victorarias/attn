@@ -13,9 +13,9 @@ import (
 const ProtocolVersion = "260"
 
 // Error codes. A failed response may carry one beside its message text, naming
-// what a caller can do about it rather than leaving it to match English. Only
-// the document store issues them today; the field is on Response because the
-// question — "is this worth retrying, or is it broken?" — is not specific to it.
+// what a caller can do about it rather than leaving it to match English. The
+// question — "is this worth retrying, or is it broken?" — is not specific to a
+// domain, so document operations and app commands share this vocabulary.
 //
 // A client that does not recognise a code must treat the failure as broken
 // rather than guessing, which is what keeps adding one from being a breaking
@@ -44,11 +44,31 @@ const (
 	// never be answered again as written, so the tile's query is what has to
 	// change; resubscribing unchanged would fail the same way.
 	ErrorCodeCollectionRedeclared = "collection_redeclared"
+	// ErrorCodeSubscriptionLimit refuses a live query because the client already
+	// holds DocSubscriptionsPerClient of them. The refusal names the limit and
+	// the ask, because a silently dropped subscription is a tile that renders
+	// nothing forever with nothing to read.
+	ErrorCodeSubscriptionLimit = "subscription_limit"
+	// ErrorCodeReconcileOwed refuses an app command while the app's collection
+	// rebuild is owed or running. The result carries the current structured
+	// reconcile reason so a caller never has to recover the fence from prose.
+	ErrorCodeReconcileOwed = "reconcile_owed"
 	// ErrorCodeUnauthorizedClient refuses a client_hello whose client_token does
 	// not match the daemon's. Nothing to retry on the same value — read the token
 	// file the message names, or ask the daemon that owns it.
 	ErrorCodeUnauthorizedClient = "unauthorized_client"
 )
+
+// DocSubscriptionsPerClient bounds how many live queries one WebSocket client
+// may hold at once.
+//
+// Measured 2026-08-13 against Victor's production database: seven live
+// workspaces, of which three hold exactly one docked tile and four hold none. A
+// view can reasonably open more than one query, so the healthy ceiling is single
+// digits and this sits an order of magnitude past it. It is a tripwire — a
+// working client never learns it exists — and reaching it is a named refusal,
+// never a dropped subscription.
+const DocSubscriptionsPerClient = 64
 
 // AgentMessageMaxChars bounds one agent_msg. Measured 2026-08-10 against a live
 // session: a bracketed paste through the doorbell's own mechanics arrived intact
@@ -130,6 +150,7 @@ const (
 	CmdDocQuery                              = "doc_query"
 	CmdDocCount                              = "doc_count"
 	CmdDocSubscribe                          = "doc_subscribe"
+	CmdDocUnsubscribe                        = "doc_unsubscribe"
 	CmdAppList                               = "app_list"
 	CmdAppStatus                             = "app_status"
 	CmdAppSetEnabled                         = "app_set_enabled"
@@ -140,6 +161,8 @@ const (
 	CmdAppRuntimeStatus                      = "app_runtime_status"
 	CmdAppRuntimeRestart                     = "app_runtime_restart"
 	CmdAppWatch                              = "app_watch"
+	CmdAppViewCrash                          = "app_view_crash"
+	CmdAppCommand                            = "app_command"
 	CmdGetTicket                             = "get_ticket"
 	CmdTicketChangeStatus                    = "ticket_change_status"
 	CmdTicketAddComment                      = "ticket_add_comment"
@@ -395,6 +418,10 @@ const (
 	EventSessionContextWindowCapResult   = "session_context_window_cap_result"
 	EventTicketsUpdated                  = "tickets_updated"
 	EventGardenSeedsUpdated              = "garden_seeds_updated"
+	EventAppsUpdated                     = "apps_updated"
+	EventAppCommandResult                = "app_command_result"
+	EventDocSubscriptionDelivery         = "doc_subscription_delivery"
+	EventDocSubscriptionEnded            = "doc_subscription_ended"
 	EventCrewUpdated                     = "crew_updated"
 	EventCrewWakeResult                  = "crew_wake_result"
 	EventCrewSleepResult                 = "crew_sleep_result"
@@ -795,6 +822,13 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 		}
 		return peek.Cmd, &msg, nil
 
+	case CmdDocUnsubscribe:
+		var msg DocUnsubscribeMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
 	case CmdAppList:
 		var msg AppListMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
@@ -853,6 +887,20 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 
 	case CmdAppRuntimeRestart:
 		var msg AppRuntimeRestartMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdAppViewCrash:
+		var msg AppViewCrashMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdAppCommand:
+		var msg AppCommandMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, err
 		}

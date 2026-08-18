@@ -7,6 +7,29 @@ existing feature consumes each primitive as it lands. Each stage gets its own
 detailed implementation plan when it starts; this document fixes sequence,
 scope boundaries, and exit criteria.
 
+## Stage status
+
+Kept current as stages land, so this document answers "where are we" without
+archaeology through plan docs and PRs. A stage is *shipped* only with a
+receipt: its merged PR and, where one exists, its plan doc's own status line.
+
+| Stage | Status | Receipt |
+| --- | --- | --- |
+| A1 event bus core | Shipped 2026-08-02 | #710; [plan](2026-08-01-ext-a1-event-bus.md) |
+| A2 broadcaster migration | Believed complete; **unverified** | No dedicated plan doc or PR receipt. Migrations rode A1/A3-era bus work (e.g. #871 pins projections to the wire). Verify remaining legacy broadcasters before relying on "all of it". |
+| A3 doc store + live queries | Shipped 2026-08-03–08-06 | [plan](2026-08-03-ext-a3-doc-store.md) + sub-plans a3.1–a3.4 |
+| A4 registry + shared runtime | Shipped 2026-08-11 | epic merge #843; [plan](2026-08-06-ext-a4-app-registry-and-runtime.md) |
+| A5 UI host + app SDK | Shipped 2026-08-18 | epic merge #943 (exit proof recorded on the PR); [plan](2026-08-13-ext-a5-ui-host-and-app-sdk.md) |
+| B1 durable job queue | Shipped 2026-08-03 | #734; [plan](2026-08-01-ext-b1-job-queue.md). Gate answers recorded there; the cron-ownership gate question resolved itself — `automation_schedule` is a job kind on the queue. |
+| B2 workflow layer | Not started | Gate discussion is the next step. |
+| C1 hook points | Not started | Gate discussion pending; independent of B2. |
+| C2 delegation approval gate | Blocked on B2 + C1 | A5 dependency met 2026-08-18. |
+| C3 Present v2 | Blocked on C2 | — |
+
+The B1 row exists because its absence cost real time: the stage shipped on
+2026-08-03 and was still being planned around as "not started" on 2026-08-18.
+Intent lives here, outcomes lived only in plan docs; this table is the bridge.
+
 ## Sequencing decisions
 
 - **Two parallel tracks.** The dependency graph splits into a spine track

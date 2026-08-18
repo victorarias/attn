@@ -1165,11 +1165,51 @@ CREATE INDEX IF NOT EXISTS idx_automode_denials_recent ON automode_denials(id DE
     idx_automode_proposals_pending_ask
     ON automode_proposals(kind, target, value, proposed_by)
     WHERE state = 'pending';`},
-	// 112 and 113 are burned: they are in flight on another branch and already
-	// applied to real databases, so this one is 114.
 	// Applied by applyMigration114, which carries each single model into its
 	// layer's list and drops the column it came from.
 	{114, "auto mode judges from an ordered model list per layer", ``},
+	// The reconcile tables, at 115 rather than the 108 they were written as.
+	// 108, 111, 112 and 113 are all burned — each was applied to a production
+	// database by a branch still in flight — and migrateDB skips anything at or
+	// below the highest version a database already carries, so a database that
+	// took auto mode's 109/110/114 first would never see a lower number. Every
+	// statement here is IF NOT EXISTS, so a database that did apply an earlier
+	// number re-runs this to the same shape.
+	{115, "record app reconciliation owed across cursor fences", `CREATE TABLE IF NOT EXISTS app_reconcile_requests (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    app_name            TEXT NOT NULL,
+    reason              TEXT NOT NULL,
+    version_id          INTEGER NOT NULL,
+    through_seq         INTEGER NOT NULL,
+    previous_version_id INTEGER,
+    cursor              INTEGER,
+    earliest            INTEGER,
+    missed              INTEGER,
+    created_at          TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_app_reconcile_requests_pending
+    ON app_reconcile_requests(app_name, id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_app_reconcile_requests_gap
+    ON app_reconcile_requests(app_name, cursor, earliest, through_seq)
+    WHERE reason = 'gap';
+CREATE TABLE IF NOT EXISTS app_reconcile_progress (
+    app_name             TEXT PRIMARY KEY,
+    completed_request_id INTEGER NOT NULL,
+    updated_at           TEXT NOT NULL
+);`},
+	// Reconcile attempts are long-lived enough to cross a daemon restart, unlike
+	// the terminal-only handler rows the invocation log held before. The claim
+	// boundary and reason make a retry reconstruct the exact attempt it owes;
+	// finished_at distinguishes a live attempt from one startup must interrupt.
+	//
+	// Existing event columns stay NOT NULL. Older readers and every existing
+	// append call already use their empty-string/zero representation for commands
+	// and view crashes, and rebuilding this history table only to turn those values
+	// into NULL would add migration risk without adding information.
+	// Applied by applyMigration116, whose ALTERs are column-guarded. Besides
+	// tolerating a schema-version rewind in recovery tests, the guard prevents a
+	// rerun from reclassifying reconcile rows as subscriptions.
+	{116, "record app reconcile invocation lifecycles", ``},
 }
 
 // migration99SQL is everything migration 99 does after its guarded ALTER.
@@ -1574,6 +1614,11 @@ func migrateDB(db *sql.DB, dbPath string) error {
 				tx.Rollback()
 				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
 			}
+		} else if m.version == 116 {
+			if err := applyMigration116(tx); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
+			}
 		} else if m.version == 114 {
 			if err := applyMigration114(tx); err != nil {
 				tx.Rollback()
@@ -1616,6 +1661,45 @@ func applyMigration107(tx *sql.Tx) error {
 		return nil
 	}
 	_, err = tx.Exec(`ALTER TABLE ticket_delivery_attention ADD COLUMN delivered_through_seq INTEGER NOT NULL DEFAULT 0`)
+	return err
+}
+
+func applyMigration116(tx *sql.Tx) error {
+	hadKind, err := columnExists(tx, "app_invocations", "kind")
+	if err != nil {
+		return err
+	}
+	columns := []struct {
+		name string
+		sql  string
+	}{
+		{"kind", `ALTER TABLE app_invocations ADD COLUMN kind TEXT NOT NULL DEFAULT 'subscription'`},
+		{"reconcile_reason", `ALTER TABLE app_invocations ADD COLUMN reconcile_reason TEXT NOT NULL DEFAULT ''`},
+		{"through_request_id", `ALTER TABLE app_invocations ADD COLUMN through_request_id INTEGER`},
+		{"through_seq", `ALTER TABLE app_invocations ADD COLUMN through_seq INTEGER`},
+		{"finished_at", `ALTER TABLE app_invocations ADD COLUMN finished_at TEXT`},
+	}
+	for _, column := range columns {
+		exists, err := columnExists(tx, "app_invocations", column.name)
+		if err != nil {
+			return err
+		}
+		if exists {
+			continue
+		}
+		if _, err := tx.Exec(column.sql); err != nil {
+			return err
+		}
+	}
+	if hadKind {
+		return nil
+	}
+	_, err = tx.Exec(`UPDATE app_invocations
+		SET kind = CASE event_name
+			WHEN 'app.command' THEN 'command'
+			WHEN 'app.view.crashed' THEN 'view'
+			ELSE 'subscription'
+		END`)
 	return err
 }
 

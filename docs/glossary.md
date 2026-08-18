@@ -294,6 +294,43 @@ again from there, so the way back from a fix is whatever was running when it was
 applied. The history is not the version list: a version the walk went past is
 still a version, still reachable by name.
 
+A **view** is an app's UI: a React component the app declares in its manifest,
+built for the browser as its own artifact beside the handler bundle. A view docks
+as a tile of kind `app:<app>/<view>`, and the string the user types when docking
+reaches it as `params` — opaque to attn, meaning whatever the app decides. A view
+imports the SDK (`@victorarias/attn-app`) and never React: the specifier is left
+unresolved at build time and answered in the browser by attn's own import map, so
+an app's component and attn's UI share one React instance rather than two that
+cannot share a hook dispatcher.
+
+Views are served over the daemon's own listener at a URL naming the version's
+content hash, so a version flip *is* the reload signal: the URL a docked tile
+imports moves, and the tile remounts against the new one. A view that fails —
+will not load, exports no component, or throws while rendering — costs its own
+tile and nothing beyond it, and the failure is recorded as an invocation of the
+app stamped with the version that served it, so `attn app logs` has it.
+
+A **tile** is a place in a workspace layout: one pane the user split, dragged
+and sized. A view is what an app declares; a tile is where one instance of it
+sits. Keeping them separate words is what makes the mount surface extensible — a
+later kind of mount moves what a *tile* is, and leaves `[[views]]`, the registry
+row and the artifact untouched. Two tiles of one view are two independent
+mounts, told apart by their `params` and by a `tileId` stable for the life of
+each docked tile.
+
+A **command** is how a view acts. The app declares it in a `[[commands]]` block,
+the bundle exports a handler under `command:<name>`, and a view invokes it by
+name — never by app, because which app is asked comes from the mount, the same
+rule the document namespace follows. A command runs where every other handler
+runs: the shared sidecar, the same document access, the same invocation log, the
+same sixty-second abandon. What an app answers is what the *serving* version
+declared, so a rollback takes a command away with it.
+
+A command that fails costs that click and nothing else. It is recorded and
+reported to the view in the handler's own words, and it does not advance the
+clock that disables a stalled app — that clock exists for a consumer pinning the
+durable log, and a person pressing a button pins nothing.
+
 **Applying** is how a directory becomes a version: parse the manifest, generate
 the types the handlers are checked against, typecheck, bundle, hash, write the
 artifact, insert the row, move the pointer. Apply never evaluates the app's
@@ -315,17 +352,19 @@ different blast radius.
 
 ## The retention floor, and the pin alarm
 
-The event log is trimmed by age, but never past the lowest cursor any **enabled**
-durable consumer still holds. That position is the **retention floor**, and the
-consumer sitting on it is said to **pin** the log: nothing at or below its cursor
-can be trimmed, because a durable consumer must not lose an unread fact. A
-disabled consumer does not pin — releasing the floor is exactly what `attn bus
-disable` is for.
+The event log is trimmed by age, but never past the lowest cursor held by an
+**enabled** durable consumer or an **installed app** consumer. That position is
+the **retention floor**, and the consumer sitting on it is said to **pin** the
+log: nothing above its cursor can be trimmed or compacted, because a durable
+consumer must not lose an unread fact. A disabled ordinary consumer does not
+pin. A disabled installed app does: its lane waits until the app is enabled or
+uninstalled, so a history app never silently loses facts.
 
 Holding the floor is ordinary. Every log has a floor holder and it is usually
 just the consumer that read least recently. What is not ordinary is holding it
-without moving: a consumer that is enabled and not consuming grows the log for as
-long as the condition lasts, and nothing ends that on its own.
+without moving: a consumer that participates in the floor and is not consuming
+grows the log for as long as the condition lasts, and nothing ends that on its
+own.
 
 The **pin alarm** is the tripwire that separates the two. Past it — an hour by
 default, measured against every stall attn resolves by itself — the pin stops

@@ -1,0 +1,7 @@
+kind: added
+area: apps
+change: >
+  `attn app new` and the app SDK now teach reconcile: what a rebuild is for,
+  the two things that trigger one (a version move and a gap), what a handler
+  owes — converge, delete as well as upsert, yield — and what happens while a
+  rebuild is owed, including the command refusal and the auto-disable.

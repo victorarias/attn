@@ -160,9 +160,8 @@ func TestSaveBusConsumerPreservesCursorAndEnabled(t *testing.T) {
 	}
 }
 
-// Deleting a registration is what ends its hold on the retention floor: while the
-// row exists and is enabled, events it has not read cannot be trimmed, however
-// long ago whoever served it went away.
+// Deleting a registration ends its hold on the retention floor. An enabled row
+// pins regardless of whether a registry entry still serves it.
 func TestDeleteBusConsumerReleasesTheRetentionFloor(t *testing.T) {
 	s := New()
 	t.Cleanup(func() { _ = s.Close() })
@@ -283,20 +282,45 @@ func TestTrimBusEventsKeepsEventsInsideTheWindow(t *testing.T) {
 	}
 }
 
-// A killed consumer must not pin the log forever. This is the deliberate
-// asymmetry with the lagging-consumer case above.
-func TestTrimBusEventsIgnoresDisabledConsumers(t *testing.T) {
+// A disabled installed app keeps the facts above its frozen cursor. Re-enable
+// resumes from there, so trimming that backlog would silently lose history.
+func TestTrimBusEventsKeepsDisabledInstalledAppBacklog(t *testing.T) {
+	s := New()
+	t.Cleanup(func() { _ = s.Close() })
+
+	read := appendBus(t, s, "a.happened", "", busBase)
+	unread := appendBus(t, s, "b.happened", "", busBase.Add(time.Minute))
+
+	if err := s.SaveApp("history", busBase); err != nil {
+		t.Fatalf("SaveApp: %v", err)
+	}
+	if err := s.SaveBusConsumer(BusConsumer{Name: "app:history", Cursor: read, Filter: "*", Enabled: false}, busBase); err != nil {
+		t.Fatalf("SaveBusConsumer: %v", err)
+	}
+
+	n, err := s.TrimBusEvents(busBase.Add(time.Hour))
+	if err != nil {
+		t.Fatalf("TrimBusEvents: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("trimmed %d events, want only the row the disabled app already read", n)
+	}
+	earliest, _, err := s.BusBounds()
+	if err != nil || earliest != unread {
+		t.Fatalf("earliest = %d, %v; want disabled app backlog at %d", earliest, err, unread)
+	}
+}
+
+// A disabled app-shaped row with no registry entry serves no install and does
+// not pin retention. Uninstall normally deletes it; this keeps stale rows safe.
+func TestTrimBusEventsIgnoresDisabledOrphanedAppConsumer(t *testing.T) {
 	s := New()
 	t.Cleanup(func() { _ = s.Close() })
 
 	appendBus(t, s, "a.happened", "", busBase)
 	appendBus(t, s, "b.happened", "", busBase.Add(time.Minute))
-
-	if err := s.SaveBusConsumer(BusConsumer{Name: "killed", Cursor: 0, Filter: "*", Enabled: true}, busBase); err != nil {
+	if err := s.SaveBusConsumer(BusConsumer{Name: "app:removed", Cursor: 0, Filter: "*", Enabled: false}, busBase); err != nil {
 		t.Fatalf("SaveBusConsumer: %v", err)
-	}
-	if _, err := s.SetBusConsumerEnabled("killed", false, busBase); err != nil {
-		t.Fatalf("SetBusConsumerEnabled: %v", err)
 	}
 
 	n, err := s.TrimBusEvents(busBase.Add(time.Hour))
@@ -304,7 +328,7 @@ func TestTrimBusEventsIgnoresDisabledConsumers(t *testing.T) {
 		t.Fatalf("TrimBusEvents: %v", err)
 	}
 	if n != 2 {
-		t.Fatalf("a disabled consumer pinned the log: trimmed %d, want 2", n)
+		t.Fatalf("orphaned disabled row pinned the log: trimmed %d, want 2", n)
 	}
 }
 

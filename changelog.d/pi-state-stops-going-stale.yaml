@@ -1,0 +1,23 @@
+kind: fixed
+area: plugins
+change: >
+  attn no longer keeps showing a pi session's state after nothing is left to
+  refresh it. A session's state comes from the pi plugin, and when the plugin
+  went away -- its runtime crashed, or pi itself died in a way that left no
+  trace -- whatever it had last said stayed on screen for as long as the daemon
+  lived; one session sat there claiming to be idle for six hours. Both ends now
+  notice the silence and say so: attn falls back to "unknown", which opens a
+  turn and gets through a snooze, so the session shows up as needing a look
+  instead of quietly lying. The next report from the plugin takes it straight
+  back over -- and a session that was quietly idle the whole time says so as
+  soon as the plugin reconnects, rather than waiting for someone to prompt it.
+  A pi session also now shows as waiting on you while auto mode's
+  breaker is asking whether to keep going, rather than as working -- so the
+  question gets a nudge instead of waiting for someone to happen to look at the
+  pane. And interrupting pi with ESC settles the session immediately: attn used
+  to hand the half-written answer to a model and ask it what happened, which
+  took time and cost money to learn what you had just done yourself.
+symptom: >
+  A pi session showed a state that never changed again after the plugin runtime
+  died, and a pi session blocked on an auto-mode confirmation looked like it was
+  still working.

@@ -84,6 +84,26 @@ func TestRuntimeIsReserved(t *testing.T) {
 	}
 }
 
+// A view name is scoped to its app, so the reserved set does not apply to it —
+// and an app's own name is a legal view name, which is what proves the two rules
+// are the same charset rather than two regexps that happen to agree today.
+func TestValidateViewName(t *testing.T) {
+	for _, ok := range []string{"approvals", "a", "pending-v2", "9lives", "runtime", "status"} {
+		if err := ValidateViewName(ok); err != nil {
+			t.Errorf("ValidateViewName(%q) = %v, want nil", ok, err)
+		}
+	}
+	for _, bad := range []string{"", "-leading", "Approvals", "with_underscore", "with space", "app/name", "..", strings.Repeat("a", MaxViewNameLength+1)} {
+		if err := ValidateViewName(bad); err == nil {
+			t.Errorf("ValidateViewName(%q) = nil, want an error", bad)
+		}
+	}
+	err := ValidateViewName(strings.Repeat("a", MaxViewNameLength+1))
+	if err == nil || !strings.Contains(err.Error(), "65") || !strings.Contains(err.Error(), "64") {
+		t.Fatalf("error does not name the ask and the limit: %v", err)
+	}
+}
+
 func TestDerivedIdentities(t *testing.T) {
 	if got := ConsumerName("approval-gate"); got != "app:approval-gate" {
 		t.Errorf("ConsumerName = %q", got)

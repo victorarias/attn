@@ -1,0 +1,15 @@
+kind: fixed
+area: daemon
+change: >
+  Auto mode's denials are no longer lost when the session cannot reach attn.
+  Until now a blocked tool call was reported to the daemon and nowhere else, so
+  a report that did not land — a bare pi with nothing to report to, or a
+  session whose relay socket a plugin reload had removed — left no trace at
+  all: the dialog said four calls had been refused in a row while
+  `attn automode denials` listed none of them, which is exactly the moment that
+  feed exists for. Every refused call is now written to a local record on the
+  spot, before anything is told about it, and the daemon folds that record into
+  the feed the CLI and the app's settings section read. Nothing to set up, and
+  a bare `pi -e automode.js` keeps a record too. If the local record ever
+  rotates far enough to drop something, the feed says how many it lost instead
+  of showing a partial episode as a whole one.

@@ -6,6 +6,27 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="dark light" />
     <title>attn</title>
+    <!-- How a docked app view links against attn's own React.
+
+         A view is built with the SDK external, so `import { useState } from
+         "@victorarias/attn-app"` survives into the artifact and is resolved
+         here, in the browser, against a chunk of this build. Two React
+         instances share no hook dispatcher, so a view carrying its own copy
+         would throw on its first useState — a failure that reads as a bug in
+         the app's code and is not.
+
+         Every specifier the SDK exports needs an entry: one missing here is a
+         view that links against nothing at mount. src/appSdk/importMap.test.mjs
+         pins this list against the SDK's exports and vite.config.ts's chunks. -->
+    <script type="importmap">
+      {
+        "imports": {
+          "@victorarias/attn-app": "/attn-app-sdk.js",
+          "@victorarias/attn-app/jsx-runtime": "/attn-app-sdk-jsx.js",
+          "@victorarias/attn-app/jsx-dev-runtime": "/attn-app-sdk-jsx-dev.js"
+        }
+      }
+    </script>
     <style>
       /* Bundled Nerd Font symbols, used only as a fallback for the terminal's
          Private Use Area icon glyphs (eza --icons, powerline, devicons). The

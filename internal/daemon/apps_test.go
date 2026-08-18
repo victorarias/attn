@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -221,6 +222,74 @@ func TestAppEnableDisableFlipsTheConsumerBitAndPublishes(t *testing.T) {
 	}
 }
 
+func TestAppReEnableResumesWithoutReconcileAndDeliversTheRetainedBacklogInOrder(t *testing.T) {
+	d := newAppDaemon(t)
+	installApp(t, d, "approval-gate", subscribing("ticket.*"))
+	runtime := startFakeAppRuntime(t, d, nil)
+	if resp := appSetEnabled(t, d, "approval-gate", false); !resp.Ok {
+		t.Fatalf("disable: %v", protocol.Deref(resp.Error))
+	}
+	d.publishFact("ticket.created", "tk-1", nil)
+	d.publishFact("ticket.updated", "tk-1", nil)
+	if resp := appSetEnabled(t, d, "approval-gate", true); !resp.Ok {
+		t.Fatalf("enable: %v", protocol.Deref(resp.Error))
+	}
+	waitFor(t, "the retained backlog to be delivered", func() bool { return len(runtime.dispatchLog()) == 2 })
+	log := runtime.dispatchLog()
+	if got := []string{log[0].Event.Name, log[1].Event.Name}; !reflect.DeepEqual(got, []string{"ticket.created", "ticket.updated"}) {
+		t.Fatalf("delivery order = %v", got)
+	}
+	claim, err := d.store.AppReconcilePending("approval-gate")
+	if err != nil || len(claim.Requests) != 0 {
+		t.Fatalf("pending = %+v, %v", claim, err)
+	}
+	if got := len(runtime.reconcileLog()); got != 0 {
+		t.Fatalf("re-enable dispatched %d reconcile(s), want none", got)
+	}
+}
+
+func TestAppVersionChangeReconcilesAtTheFrozenCursorThenDeliversTheRetainedFact(t *testing.T) {
+	d := newAppDaemon(t)
+	firstManifest := subscribing("ticket.*")
+	firstManifest.Reconcile = true
+	first := installApp(t, d, "approval-gate", firstManifest)
+	runtime := startFakeAppRuntime(t, d, nil)
+	if resp := appSetEnabled(t, d, "approval-gate", false); !resp.Ok {
+		t.Fatalf("disable: %v", protocol.Deref(resp.Error))
+	}
+	d.publishFact("ticket.created", "tk-1", nil)
+	_, retainedSeq, err := d.store.BusBounds()
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondManifest := firstManifest
+	secondManifest.Description = "version two"
+	second := installApp(t, d, "approval-gate", secondManifest)
+	if second.ID == first.ID {
+		t.Fatalf("version did not move: first=%d second=%d", first.ID, second.ID)
+	}
+	claim, err := d.store.AppReconcilePending("approval-gate")
+	if err != nil || len(claim.Requests) != 1 {
+		t.Fatalf("pending = %+v, %v", claim, err)
+	}
+	if claim.ThroughSeq >= retainedSeq {
+		t.Fatalf("version fence %d covered retained undelivered fact %d", claim.ThroughSeq, retainedSeq)
+	}
+	if resp := appSetEnabled(t, d, "approval-gate", true); !resp.Ok {
+		t.Fatalf("enable: %v", protocol.Deref(resp.Error))
+	}
+	waitFor(t, "reconcile followed by retained fact delivery", func() bool {
+		return len(runtime.reconcileLog()) == 1 && len(runtime.dispatchLog()) == 1
+	})
+	if got := runtime.reconcileLog()[0].Reason.ThroughSeq; got != claim.ThroughSeq {
+		t.Fatalf("dispatched reconcile fence = %d, want %d", got, claim.ThroughSeq)
+	}
+	delivered := runtime.dispatchLog()[0]
+	if delivered.Event.Seq != retainedSeq || delivered.VersionID != second.ID {
+		t.Fatalf("retained delivery = seq %d version %d, want seq %d version %d", delivered.Event.Seq, delivered.VersionID, retainedSeq, second.ID)
+	}
+}
+
 func TestAppRemoveKeepsHistoryAndDocuments(t *testing.T) {
 	d := newDaemonForTest(t)
 	version := seedApp(t, d, "approval-gate", true)
@@ -359,7 +428,7 @@ func TestAppStatusReportsHistoryAndRecentInvocations(t *testing.T) {
 	if len(result.Recent) != 2 || result.Recent[0].Status != "error" {
 		t.Fatalf("recent = %+v, want the newest first", result.Recent)
 	}
-	if result.Recent[0].VersionID != int(version.ID) || result.Recent[0].EventSeq != 11 {
+	if result.Recent[0].VersionID != int(version.ID) || protocol.Deref(result.Recent[0].EventSeq) != 11 {
 		t.Fatalf("recent[0] = %+v", result.Recent[0])
 	}
 	if result.App.Consumer == nil || result.App.Consumer.Enabled {
@@ -380,7 +449,7 @@ func TestAppStatusListsTheVersionIdsRollbackTakes(t *testing.T) {
 		version, _, err := d.store.CommitAppVersion(store.AppVersion{
 			AppName:      "approval-gate",
 			ContentHash:  fmt.Sprintf("sha256:build-%02d", i),
-			Declaration:  `{"name":"approval-gate","subscribe":[{"events":["ticket.*"]}]}`,
+			Declaration:  `{"name":"approval-gate","reconcile":true,"subscribe":[{"events":["ticket.*"]}]}`,
 			ArtifactPath: fmt.Sprintf("apps/approval-gate/%02d.js", i),
 		}, now)
 		if err != nil {
@@ -422,7 +491,7 @@ func TestAppStatusShowsWhereRollbackCanStillGo(t *testing.T) {
 		version, _, err := d.store.CommitAppVersion(store.AppVersion{
 			AppName:      "approval-gate",
 			ContentHash:  fmt.Sprintf("sha256:build-%02d", i),
-			Declaration:  `{"name":"approval-gate","subscribe":[{"events":["ticket.*"]}]}`,
+			Declaration:  `{"name":"approval-gate","reconcile":true,"subscribe":[{"events":["ticket.*"]}]}`,
 			ArtifactPath: fmt.Sprintf("apps/approval-gate/%02d.js", i),
 		}, now)
 		if err != nil {

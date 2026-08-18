@@ -1,4 +1,5 @@
 import { parseNotebookTileParams, type TileContentState, type TileLeaf } from '../types/workspace';
+import { parseAppViewTileKind } from './appBundle';
 
 export function tilePathBasename(path: string): string {
   const trimmed = path.replace(/\/+$/, '');
@@ -38,7 +39,13 @@ function markdownTitle(markdown: string): string | null {
   return null;
 }
 
-export function deriveTileTitle(tile: TileLeaf, content?: TileContentState): string {
+export function deriveTileTitle(
+  tile: TileLeaf,
+  content?: TileContentState,
+  // Resolves an app view's declared title. Passed in rather than read from the
+  // store here: this module is pure and is called from tests that hold no store.
+  appViewTitle?: (app: string, view: string) => string | undefined,
+): string {
   if (tile.tileKind === 'browser' && tile.tileParams) {
     try {
       return new URL(tile.tileParams).host || tile.tileParams;
@@ -57,6 +64,12 @@ export function deriveTileTitle(tile: TileLeaf, content?: TileContentState): str
   if (tile.tileKind === 'notebook') {
     const { path } = parseNotebookTileParams(tile.tileParams);
     return path ? tilePathBasename(path) : 'Editor';
+  }
+  // An app's view titles itself from what the app declared, not from its params:
+  // the params are the app's to interpret and may be anything at all.
+  const appView = parseAppViewTileKind(tile.tileKind);
+  if (appView) {
+    return appViewTitle?.(appView.app, appView.view) ?? `${appView.app}/${appView.view}`;
   }
   const path = content?.path || tile.tileParams || '';
   return path ? tilePathBasename(path) : tile.tileKind;

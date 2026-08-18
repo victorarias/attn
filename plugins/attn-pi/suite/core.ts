@@ -9,6 +9,7 @@ import {
   relayMethods,
   type RelayDeliverMessageParams,
   type RelayDeliverMessageResult,
+  type RelayHelloState,
 } from "../src/relay-protocol";
 
 // ---------------------------------------------------------------------------
@@ -17,6 +18,15 @@ import {
 
 export type SessionStartReason = "startup" | "reload" | "new" | "resume" | "fork";
 
+/**
+ * Why this hello is being said. pi's own session-transition reasons, plus
+ * `reconnect` — the relay connection was re-established under a session that
+ * never transitioned, so nothing about the session changed and only the channel
+ * did. The driver treats them alike; the value is here so a log of one end reads
+ * against the other.
+ */
+export type RelayHelloReason = SessionStartReason | "reconnect";
+
 export type SessionStartEvent = { type: "session_start"; reason: SessionStartReason; previousSessionFile?: string };
 export type AgentStartEvent = { type: "agent_start" };
 export type AgentSettledEvent = { type: "agent_settled" };
@@ -24,7 +34,10 @@ export type AgentSettledEvent = { type: "agent_settled" };
 // Narrowed from pi-ai's (TextContent | ThinkingContent | ToolCall)[]: only
 // the "type" discriminant and (for text blocks) "text" matter here.
 export type AgentMessageContentBlock = { type: string; text?: string };
-export type AgentMessageLike = { role: string; content: AgentMessageContentBlock[] };
+// stopReason is pi-ai's StopReason ("pending" | "stop" | "length" | "toolUse" |
+// "error" | "aborted"); only "aborted" is read here, and only from the last
+// assistant message.
+export type AgentMessageLike = { role: string; content: AgentMessageContentBlock[]; stopReason?: string };
 export type AgentEndEvent = { type: "agent_end"; messages: AgentMessageLike[] };
 
 export type SessionManagerLike = { getSessionId(): string };
@@ -56,9 +69,23 @@ type JSONRPCRequest = { jsonrpc: "2.0"; id: JSONRPCID; method: string; params?: 
 type JSONRPCResponse = { jsonrpc: "2.0"; id: JSONRPCID; result?: unknown; error?: { code: number; message: string } };
 type Pending = { resolve: (result: unknown) => void; reject: (error: Error) => void };
 
+// A state report waiting to be acknowledged. Only the newest one is kept: a
+// report says what the session IS, so an older one that never landed has
+// nothing left to add.
+type RetainedReport = { method: string; params: unknown; inFlight: boolean };
+
 // Generous: suite.report_stop's driver-side handler runs an LLM
 // classification before answering, which can take a while.
 const suiteRequestTimeoutMs = 60_000;
+
+// A dropped relay connection means the driver process went away, and the
+// replacement one is up about a second later (measured on attn's own daemon
+// restarts: the runtime exits and re-registers inside 1s). So the first retry is
+// well under that and the ceiling only bounds a driver that is not coming back —
+// a dial at a missing unix socket is one ENOENT, and this loop runs solely while
+// disconnected, stopping the moment it connects.
+const reconnectMinDelayMs = 500;
+const reconnectMaxDelayMs = 30_000;
 
 export class RelaySuiteClient {
   private socket: Socket | undefined;
@@ -66,11 +93,85 @@ export class RelaySuiteClient {
   private buffer = "";
   private nextID = 1;
   private readonly pending = new Map<string, Pending>();
+  private reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+  private reconnectDelayMs = reconnectMinDelayMs;
+  private closed = false;
+  // Whether the connection currently open has already named its run. Cleared on
+  // every dial, and by announce() when the run's identity changed under a
+  // connection that stayed up.
+  private announced = false;
+  // The newest state report the driver has not acknowledged, re-sent once the
+  // channel is back. See report().
+  private retained: RetainedReport | undefined;
+  // Reports this client could not hand over since the last hello. Nothing here
+  // can log — a stray write corrupts pi's TUI, and the one channel out is the
+  // one that just failed — so the count rides the next hello and the driver
+  // logs it. Without it a broken channel leaves no trace anywhere.
+  private dropped = 0;
 
   constructor(
     private readonly socketPath: string,
     private readonly onDeliverMessage: (params: RelayDeliverMessageParams) => Promise<RelayDeliverMessageResult>,
+    /**
+     * Hello params for this run as it stands right now, or undefined when no pi
+     * context has been seen yet. This is the reconnect path's hello: a caller
+     * announcing a transition passes its own. The driver binds a connection to a
+     * run when the hello arrives, so a re-established connection that skipped it
+     * would leave attn with a live pi it can report for but cannot deliver a
+     * message to.
+     */
+    private readonly helloParams: () => unknown | undefined,
   ) {}
+
+  /**
+   * Names this run on the relay, opening a connection if there is none. Called
+   * when the run's identity changes — a pi session transition mints a new native
+   * session id — and by the reconnect path, which has a live pi to re-announce
+   * and no report of its own to carry.
+   */
+  announce(params: unknown): void {
+    this.ensureConnected()
+      .then((socket) => {
+        this.writeHello(socket, params);
+        const retained = this.retained;
+        if (retained && !retained.inFlight) void this.deliver(retained);
+      })
+      .catch(() => {
+        // ensureConnected already scheduled the next attempt.
+      });
+  }
+
+  /**
+   * Declares this session's state, and keeps declaring it until the driver
+   * takes it. A report can be lost in ways nothing here can see — the driver
+   * process exits between accepting the bytes and forwarding them, which is
+   * what an attn daemon restart does to whatever was in flight — and a lost one
+   * leaves attn showing a state the session left minutes ago. Only the newest
+   * report is retained, because that is the only one that is still true.
+   */
+  report(method: string, params: unknown): void {
+    const entry: RetainedReport = { method, params, inFlight: false };
+    this.retained = entry;
+    void this.deliver(entry);
+  }
+
+  private async deliver(entry: RetainedReport): Promise<void> {
+    entry.inFlight = true;
+    try {
+      const socket = await this.ensureConnected();
+      this.sayHello(socket);
+      await this.request(socket, entry.method, entry.params);
+      // Only this entry is retired: a newer report may have taken the slot
+      // while this one was in flight, and it has not been acknowledged.
+      if (this.retained === entry) this.retained = undefined;
+    } catch {
+      // Stays retained. The socket's close schedules a reconnect, and the
+      // hello that follows flushes it.
+      this.dropped += 1;
+    } finally {
+      entry.inFlight = false;
+    }
+  }
 
   /**
    * Best-effort send: never throws. The driver's PTY-exit liveness is the
@@ -82,14 +183,25 @@ export class RelaySuiteClient {
   async send(method: string, params: unknown): Promise<void> {
     try {
       const socket = await this.ensureConnected();
+      // A report on a connection that has not named its run is answered "unknown
+      // token", so the hello goes first — including on a connection this client
+      // re-established under a session that never transitioned.
+      this.sayHello(socket);
       await this.request(socket, method, params);
     } catch {
-      // Swallowed by design; see the doc comment above.
+      // Swallowed by design; see the doc comment above. Counted, though: the
+      // next hello carries how many went nowhere.
+      this.dropped += 1;
     }
   }
 
   /** Test-only: release the socket so bun test doesn't hang on open handles. */
   close(): void {
+    this.closed = true;
+    if (this.reconnectTimer !== undefined) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = undefined;
+    }
     this.socket?.destroy();
     this.socket = undefined;
     this.failPending(new Error("suite relay connection closed"));
@@ -98,9 +210,18 @@ export class RelaySuiteClient {
   private ensureConnected(): Promise<Socket> {
     if (this.socket && !this.socket.destroyed) return Promise.resolve(this.socket);
     if (!this.connecting) {
-      this.connecting = this.dial().finally(() => {
-        this.connecting = undefined;
-      });
+      this.connecting = this.dial()
+        .catch((error: unknown) => {
+          // A dial that never connects emits no close, so this is the only
+          // place that can keep trying — and something has to: attn delivers
+          // messages over this channel, so a session with nothing to report
+          // still needs it back.
+          this.scheduleReconnect();
+          throw error;
+        })
+        .finally(() => {
+          this.connecting = undefined;
+        });
     }
     return this.connecting;
   }
@@ -117,11 +238,68 @@ export class RelaySuiteClient {
         socket.on("close", () => {
           if (this.socket === socket) this.socket = undefined;
           this.failPending(new Error("suite relay connection closed"));
+          this.scheduleReconnect();
         });
         this.socket = socket;
+        this.announced = false;
+        this.reconnectDelayMs = reconnectMinDelayMs;
         resolve(socket);
       });
     });
+  }
+
+  /**
+   * Re-dials after the driver went away. attn's own PTY-exit liveness stays the
+   * authoritative signal for whether this session is alive; this only restores
+   * the channel a live session declares its state on, and does nothing at all
+   * while connected.
+   */
+  private scheduleReconnect(): void {
+    if (this.closed || this.reconnectTimer !== undefined) return;
+    const delay = this.reconnectDelayMs;
+    this.reconnectDelayMs = Math.min(delay * 2, reconnectMaxDelayMs);
+    const timer = setTimeout(() => {
+      this.reconnectTimer = undefined;
+      // Announce, not a bare dial: the point of reconnecting without a report to
+      // send is to give the driver a connection it can deliver a message on, and
+      // it only binds one when the run is named.
+      const params = this.helloParams();
+      if (params === undefined) return;
+      this.announce(params);
+    }, delay);
+    // Never the reason pi stays alive.
+    timer.unref?.();
+    this.reconnectTimer = timer;
+  }
+
+  /**
+   * The hello a report needs in front of it, said at most once per connection.
+   * A caller with something new to announce goes through announce() instead;
+   * this one exists only so a report never arrives at a driver that cannot
+   * place it.
+   */
+  private sayHello(socket: Socket): void {
+    if (this.announced) return;
+    const params = this.helloParams();
+    if (params !== undefined) this.writeHello(socket, params);
+  }
+
+  /**
+   * Not awaited by its callers: the driver's answer carries nothing this client
+   * needs, and waiting for one would hold every report behind a driver that is
+   * slow to reply. Ordering is what matters, and writing it first gives that.
+   */
+  private writeHello(socket: Socket, params: unknown): void {
+    this.announced = true;
+    const dropped = this.dropped;
+    this.dropped = 0;
+    // Only when there is something to say: a zero on every hello is a field the
+    // driver has to read to learn nothing.
+    const withCount =
+      dropped > 0 && params !== null && typeof params === "object"
+        ? { ...(params as Record<string, unknown>), dropped_reports: dropped }
+        : params;
+    this.request(socket, relayMethods.hello, withCount).catch(() => {});
   }
 
   private request(socket: Socket, method: string, params: unknown): Promise<unknown> {
@@ -238,13 +416,53 @@ export class AttnPiSuite {
   // agent_end caches the last assistant message's text; agent_settled has no
   // payload of its own, so this is the only way to get text to suite.report_stop.
   private cachedAssistantText = "";
+  // ...and whether that message ended because the user took the turn back. pi
+  // knows; without carrying it, attn pays a classifier to guess at a paragraph
+  // the user interrupted mid-sentence.
+  private cachedAborted = false;
+  // Whether this session is currently blocked on a question for the user, so
+  // the pair of reports around one window is never sent twice.
+  private approvalOpen = false;
 
   constructor(env: SuiteEnv) {
     this.piVersion = env.piVersion;
     const socketPath = env.socketPath?.trim();
     const token = env.token?.trim();
     this.relay =
-      socketPath && token ? { client: new RelaySuiteClient(socketPath, this.handleDeliverMessage), token } : undefined;
+      socketPath && token
+        ? {
+            client: new RelaySuiteClient(socketPath, this.handleDeliverMessage, () => this.helloParams("reconnect")),
+            token,
+          }
+        : undefined;
+  }
+
+  /**
+   * The hello for the run this suite currently represents, or undefined before
+   * any pi context has been seen — a connection opened that early cannot name a
+   * session yet, and the next dial (or the next session_start) says it instead.
+   */
+  private helloParams(reason: RelayHelloReason): Record<string, unknown> | undefined {
+    const relay = this.relay;
+    const ctx = this.currentContext;
+    if (!relay || !ctx) return undefined;
+    return {
+      token: relay.token,
+      pi_session_id: ctx.sessionManager.getSessionId(),
+      pi_version: this.piVersion,
+      reason,
+      pi_state: this.currentState(ctx),
+    };
+  }
+
+  /**
+   * What pi is right now, for the hello to carry. attn uses it only when it has
+   * nothing — the recovery path out of `unknown` — so this answers "what is
+   * true here", not "something happened".
+   */
+  private currentState(ctx: ExtensionContextLike): RelayHelloState {
+    if (this.approvalOpen) return "pending_approval";
+    return ctx.isIdle() ? "idle" : "working";
   }
 
   /**
@@ -260,31 +478,59 @@ export class AttnPiSuite {
     if (!relay) return; // constructor already decided we're a no-op
     this.currentPi = pi;
 
+    // A transition mints a new pi session id on a connection that may already be
+    // open, and the driver has to hear the new one: the relay client survives
+    // transitions, the identity it announced does not.
     pi.on("session_start", (event, ctx) => {
       this.currentContext = ctx;
-      void relay.client.send(relayMethods.hello, {
-        token: relay.token,
-        pi_session_id: ctx.sessionManager.getSessionId(),
-        pi_version: this.piVersion,
-        reason: event.reason,
-      });
+      const params = this.helloParams(event.reason);
+      if (params) relay.client.announce(params);
     });
 
     pi.on("agent_start", (_event, ctx) => {
       this.currentContext = ctx;
-      void relay.client.send(relayMethods.reportState, { token: relay.token, state: "working" });
+      relay.client.report(relayMethods.reportState, { token: relay.token, state: "working" });
     });
 
     pi.on("agent_end", (event, ctx) => {
       this.currentContext = ctx;
-      this.cachedAssistantText = lastAssistantText(event.messages);
+      const last = lastAssistantMessage(event.messages);
+      this.cachedAssistantText = last ? assistantText(last) : "";
+      this.cachedAborted = last?.stopReason === "aborted";
     });
 
     pi.on("agent_settled", (_event, ctx) => {
       this.currentContext = ctx;
-      const assistantText = this.cachedAssistantText;
+      const text = this.cachedAssistantText;
+      const aborted = this.cachedAborted;
       this.cachedAssistantText = "";
-      void relay.client.send(relayMethods.reportStop, { token: relay.token, assistant_text: assistantText });
+      this.cachedAborted = false;
+      // The approval window cannot outlive the run that opened it: pi resolves
+      // a pending confirm before it settles, and a session left declaring
+      // `pending_approval` after settling would wait for an answer to a
+      // question nobody can see any more.
+      this.approvalOpen = false;
+      relay.client.report(relayMethods.reportStop, { token: relay.token, assistant_text: text, aborted });
+    });
+  }
+
+  /**
+   * Declares the session blocked on the user, and working again when it is not.
+   * Auto mode's breaker is the one window today: it asks through pi's own
+   * confirm dialog, and until this the session went on reporting `working` — so
+   * no turn opened, no nudge fired, and a question with nobody looking at the
+   * pane simply waited.
+   *
+   * Idempotent by design: the breaker asks once per episode, but nothing here
+   * should depend on that.
+   */
+  reportApprovalWindow(open: boolean): void {
+    const relay = this.relay;
+    if (!relay || this.approvalOpen === open) return;
+    this.approvalOpen = open;
+    relay.client.report(relayMethods.reportState, {
+      token: relay.token,
+      state: open ? "pending_approval" : "working",
     });
   }
 
@@ -330,14 +576,17 @@ export class AttnPiSuite {
   };
 }
 
-function lastAssistantText(messages: AgentMessageLike[]): string {
+function lastAssistantMessage(messages: AgentMessageLike[]): AgentMessageLike | undefined {
   for (let i = messages.length - 1; i >= 0; i--) {
     const message = messages[i];
-    if (message?.role !== "assistant") continue;
-    return message.content
-      .filter((block) => block.type === "text" && typeof block.text === "string")
-      .map((block) => block.text)
-      .join("\n");
+    if (message?.role === "assistant") return message;
   }
-  return "";
+  return undefined;
+}
+
+function assistantText(message: AgentMessageLike): string {
+  return message.content
+    .filter((block) => block.type === "text" && typeof block.text === "string")
+    .map((block) => block.text)
+    .join("\n");
 }

@@ -42,6 +42,13 @@ func TestValidateFragment(t *testing.T) {
 			wantErr: "field description not found",
 		},
 		{
+			// The compiler reads one document per file, so a second one used to
+			// pass this check and then never appear in the changelog.
+			name:    "two documents in one file",
+			yaml:    "kind: added\narea: queue\nchange: first\n---\nkind: fixed\narea: queue\nchange: second\n",
+			wantErr: "more than one YAML document",
+		},
+		{
 			name:    "empty file",
 			yaml:    "",
 			wantErr: "fragment is empty",

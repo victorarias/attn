@@ -59,13 +59,36 @@ function noopRelay(): RelayServer {
   });
 }
 
-function newDriver(options: { rpc: any; runCommand?: RunCommand; executable?: string; suitePath?: string }): PiDriver {
+// The half of RelayConnection the driver touches when a suite says hello: it
+// binds the connection and asks to hear when it closes.
+function fakeConnection(): any {
+  const handlers: Array<() => void> = [];
+  return {
+    onClose(handler: () => void) {
+      handlers.push(handler);
+    },
+    close() {
+      for (const handler of handlers) handler();
+    },
+  };
+}
+
+function newDriver(options: {
+  rpc: any;
+  runCommand?: RunCommand;
+  executable?: string;
+  suitePath?: string;
+  unbackedGraceMs?: number;
+}): PiDriver {
   return new PiDriver({
     rpc: options.rpc,
     runCommand: options.runCommand ?? fakeRunCommand(),
     executable: options.executable ?? "pi",
     relay: noopRelay(),
     suitePath: options.suitePath ?? suitePath,
+    // Far past anything a test waits for, so only the tests that mean to
+    // exercise the alarm ever see it fire.
+    unbackedGraceMs: options.unbackedGraceMs ?? 60_000,
   });
 }
 
@@ -124,6 +147,26 @@ describe("PiDriver", () => {
     expect(JSON.parse(withConfig.env?.ATTN_PI_AUTOMODE_CONFIG ?? "null")).toEqual(config);
   });
 
+  test("a session under auto mode is told where to write its denial record, and which session it is", async () => {
+    const rpc = new FakeRPC();
+    const driver = newDriver({ rpc, runCommand: fakeRunCommand(), executable: "pi" });
+    const previous = process.env.ATTN_AUTOMODE_DENIAL_LOG;
+    process.env.ATTN_AUTOMODE_DENIAL_LOG = "/data/attn-dev/attn-automode-denials.jsonl";
+    try {
+      const withConfig = await driver.spawn(params({ auto_mode: { enabled_default: true } }));
+      expect(withConfig.env?.ATTN_PI_AUTOMODE_DENIAL_LOG).toBe("/data/attn-dev/attn-automode-denials.jsonl");
+      expect(withConfig.env?.ATTN_PI_SESSION_ID).toBe("session-1");
+
+      // No auto mode, nothing to record: the session is told neither.
+      const bare = await driver.spawn(params({ session_id: "session-3", run_id: "run-3" }));
+      expect(bare.env?.ATTN_PI_AUTOMODE_DENIAL_LOG).toBeUndefined();
+      expect(bare.env?.ATTN_PI_SESSION_ID).toBeUndefined();
+    } finally {
+      if (previous === undefined) delete process.env.ATTN_AUTOMODE_DENIAL_LOG;
+      else process.env.ATTN_AUTOMODE_DENIAL_LOG = previous;
+    }
+  });
+
   test("spawn returns a fresh session id, passes cwd through, and reports metadata", async () => {
     const rpc = new FakeRPC();
     const driver = newDriver({ rpc, runCommand: fakeRunCommand(), executable: "pi" });
@@ -136,7 +179,9 @@ describe("PiDriver", () => {
     expect(sessionID).toMatch(uuidPattern);
     expect(result.argv).toEqual(["pi", "--session-id", sessionID, "-e", suitePath]);
     expect(result.cwd).toBe("/tmp/work");
-    expect(result.env?.ATTN_PI_TOKEN).toMatch(uuidPattern);
+    // The token is the run id, so a driver that restarted can rebuild the map
+    // from what attn hands back at driver.register.
+    expect(result.env?.ATTN_PI_TOKEN).toBe("run-1");
     expect(result.env?.ATTN_PI_SUITE_SOCKET).toBeTruthy();
 
     const report = rpc.requests.find((call) => call.method === "session.report_metadata");
@@ -163,7 +208,7 @@ describe("PiDriver", () => {
     expect(first.argv[2]).not.toBe(second.argv[2]);
   });
 
-  test("spawn wires the suite into argv and env, and mints a distinct token per run", async () => {
+  test("spawn wires the suite into argv and env, and tokens each run by its run id", async () => {
     const rpc = new FakeRPC();
     const driver = newDriver({ rpc, runCommand: fakeRunCommand(), executable: "pi" });
 
@@ -176,9 +221,8 @@ describe("PiDriver", () => {
     expect(first.argv.indexOf("go")).toBeGreaterThan(suiteIndex + 1);
 
     expect(first.env?.ATTN_PI_SUITE_SOCKET).toBeTruthy();
-    expect(first.env?.ATTN_PI_TOKEN).toMatch(uuidPattern);
-    expect(second.env?.ATTN_PI_TOKEN).toMatch(uuidPattern);
-    expect(first.env?.ATTN_PI_TOKEN).not.toBe(second.env?.ATTN_PI_TOKEN);
+    expect(first.env?.ATTN_PI_TOKEN).toBe("run-1");
+    expect(second.env?.ATTN_PI_TOKEN).toBe("run-2");
   });
 
   test("spawn throws when the suite entrypoint is missing", async () => {
@@ -333,7 +377,7 @@ describe("PiDriver", () => {
     await driver.sessionClosed({ session_id: "session-1", run_id: "run-1", reason: "exit" });
 
     await expect(
-      driver.suiteHello({} as any, { token, pi_session_id: "native-1", pi_version: "0.80.10", reason: "session_start" }),
+      driver.suiteHello(fakeConnection(), { token, pi_session_id: "native-1", pi_version: "0.80.10", reason: "session_start" }),
     ).rejects.toThrow(/unknown pi suite token/);
   });
 
@@ -376,6 +420,100 @@ describe("PiDriver", () => {
     expect(stopReport?.params.verdict).toBe("idle");
   });
 
+  // A pi session outlives the driver process that launched it: its pi keeps
+  // running in a daemon-owned PTY and keeps reporting over the relay. These
+  // cover the recovery that gives those reports somewhere to land.
+  describe("adopting the runs attn reports still live", () => {
+    function registerWith(activeRuns: unknown[]) {
+      const requests: Array<{ method: string; params: any }> = [];
+      const rpc = {
+        async request(method: string, params: any): Promise<any> {
+          requests.push({ method, params });
+          if (method === "driver.register") return { ok: true, active_runs: activeRuns };
+          if (method === "attn.classify_stop") return { verdict: "idle" };
+          return { ok: true };
+        },
+        handle(_method: string, _handler: unknown): void {},
+      };
+      return { rpc, requests };
+    }
+
+    const piMetadata = { schema: 1, pi_session_id: "native-1", pi_version: "0.80.10", model: "glm-5.3" };
+
+    test("a report from an inherited run lands, addressed to the run and continuing its cursor", async () => {
+      const { rpc, requests } = registerWith([
+        { session_id: "session-1", run_id: "run-1", metadata: piMetadata, seq: 5 },
+      ]);
+      const driver = newDriver({ rpc });
+      await driver.initialize();
+
+      await driver.suiteReportState({ token: "run-1", state: "working" });
+
+      const report = requests.find((call) => call.method === "session.report_state");
+      expect(report?.params).toEqual({ session_id: "session-1", run_id: "run-1", seq: 6, state: "working" });
+    });
+
+    test("the inherited run keeps its metadata, so a hello only replaces pi's own identity", async () => {
+      const { rpc, requests } = registerWith([
+        { session_id: "session-1", run_id: "run-1", metadata: piMetadata, seq: 2 },
+      ]);
+      const driver = newDriver({ rpc });
+      await driver.initialize();
+
+      await driver.suiteHello(fakeConnection(), {
+        token: "run-1",
+        pi_session_id: "native-2",
+        pi_version: "0.84.2",
+        reason: "reconnect",
+      });
+
+      const report = requests.filter((call) => call.method === "session.report_metadata").at(-1);
+      expect(report?.params).toEqual({
+        session_id: "session-1",
+        run_id: "run-1",
+        seq: 3,
+        metadata: { schema: 1, pi_session_id: "native-2", pi_version: "0.84.2", model: "glm-5.3" },
+      });
+    });
+
+    test("a run without a report cursor is declined rather than reported into a void", async () => {
+      const { rpc } = registerWith([{ session_id: "session-1", run_id: "run-1", metadata: piMetadata }]);
+      const driver = newDriver({ rpc });
+      await driver.initialize();
+
+      await expect(driver.suiteReportState({ token: "run-1", state: "working" })).rejects.toThrow(
+        /unknown pi suite token/,
+      );
+    });
+
+    test("runs belonging to the other agent this plugin registers are left alone", async () => {
+      const { rpc } = registerWith([{ session_id: "nisse-1", run_id: "run-9", seq: 4 }]);
+      const driver = newDriver({ rpc });
+      await driver.initialize();
+
+      await expect(driver.suiteReportState({ token: "run-9", state: "working" })).rejects.toThrow(
+        /unknown pi suite token/,
+      );
+    });
+
+    test("a relaunch of an inherited session supersedes it rather than stacking on it", async () => {
+      const { rpc, requests } = registerWith([
+        { session_id: "session-1", run_id: "run-1", metadata: piMetadata, seq: 5 },
+      ]);
+      const driver = newDriver({ rpc });
+      await driver.initialize();
+
+      await driver.spawn(params({ session_id: "session-1", run_id: "run-2" }));
+
+      await expect(driver.suiteReportState({ token: "run-1", state: "working" })).rejects.toThrow(
+        /unknown pi suite token/,
+      );
+      await driver.suiteReportState({ token: "run-2", state: "working" });
+      const report = requests.find((call) => call.method === "session.report_state");
+      expect(report?.params.run_id).toBe("run-2");
+    });
+  });
+
   test("a reported denial reaches the daemon addressed to the run that raised it", async () => {
     const rpc = new FakeRPC();
     const driver = newDriver({ rpc });
@@ -412,5 +550,185 @@ describe("PiDriver", () => {
   test("a denial with no action named is refused: an empty row says nothing", async () => {
     const driver = newDriver({ rpc: new FakeRPC() });
     await expect(driver.suiteReportDenial({ token: "tok", action: "  " })).rejects.toThrow(/missing action/);
+  });
+
+  test("a session blocked on the user is reported as such, not as working", async () => {
+    const rpc = new FakeRPC();
+    const driver = newDriver({ rpc });
+    const spawned = await driver.spawn(params({ session_id: "session-1", run_id: "run-1" }));
+    const token = spawned.env?.ATTN_PI_TOKEN as string;
+
+    await driver.suiteReportState({ token, state: "pending_approval" });
+
+    expect(rpc.requests.find((call) => call.method === "session.report_state")?.params).toEqual({
+      session_id: "session-1",
+      run_id: "run-1",
+      seq: 2,
+      state: "pending_approval",
+    });
+  });
+
+  test("a state nothing in pi can be blocked on is refused rather than forwarded", async () => {
+    const driver = newDriver({ rpc: new FakeRPC() });
+    const spawned = await driver.spawn(params({ session_id: "session-1", run_id: "run-1" }));
+    const token = spawned.env?.ATTN_PI_TOKEN as string;
+
+    await expect(driver.suiteReportState({ token, state: "idle" })).rejects.toThrow(/pending_approval/);
+  });
+
+  test("an interrupted turn settles as idle without paying for a classification", async () => {
+    const rpc = new FakeRPC();
+    const driver = newDriver({ rpc });
+    const spawned = await driver.spawn(params({ session_id: "session-1", run_id: "run-1" }));
+    const token = spawned.env?.ATTN_PI_TOKEN as string;
+
+    await driver.suiteReportStop({ token, assistant_text: "half a paragraph the user cut off", aborted: true });
+
+    expect(rpc.requests.some((call) => call.method === "attn.classify_stop")).toBe(false);
+    expect(rpc.requests.find((call) => call.method === "session.report_stop")?.params.verdict).toBe("idle");
+  });
+
+  test("a turn that ended on its own is still classified", async () => {
+    const rpc = new FakeRPC();
+    rpc.classifyStopResult = "waiting_input";
+    const driver = newDriver({ rpc });
+    const spawned = await driver.spawn(params({ session_id: "session-1", run_id: "run-1" }));
+    const token = spawned.env?.ATTN_PI_TOKEN as string;
+
+    await driver.suiteReportStop({ token, assistant_text: "want me to ship it?", aborted: false });
+
+    expect(rpc.requests.some((call) => call.method === "attn.classify_stop")).toBe(true);
+    expect(rpc.requests.find((call) => call.method === "session.report_stop")?.params.verdict).toBe("waiting_input");
+  });
+
+  // A declaration is only as current as the thing declaring it. These cover the
+  // driver withdrawing one it can no longer stand behind.
+  describe("a run with no suite connected", () => {
+    test("is reported unknown once the grace passes, rather than left as it was", async () => {
+      const rpc = new FakeRPC();
+      const driver = newDriver({ rpc, unbackedGraceMs: 20 });
+      await driver.spawn(params({ session_id: "session-1", run_id: "run-1" }));
+
+      await waitFor(() => rpc.requests.some((call) => call.method === "session.report_state"));
+      expect(rpc.requests.find((call) => call.method === "session.report_state")?.params).toEqual({
+        session_id: "session-1",
+        run_id: "run-1",
+        seq: 2,
+        state: "unknown",
+      });
+    });
+
+    test("a suite that says hello in time keeps its declaration standing", async () => {
+      const rpc = new FakeRPC();
+      const driver = newDriver({ rpc, unbackedGraceMs: 40 });
+      const spawned = await driver.spawn(params({ session_id: "session-1", run_id: "run-1" }));
+      const token = spawned.env?.ATTN_PI_TOKEN as string;
+
+      await driver.suiteHello(fakeConnection(), {
+        token,
+        pi_session_id: "native-1",
+        pi_version: "0.80.10",
+        reason: "startup",
+      });
+      await new Promise((resolve) => setTimeout(resolve, 120));
+
+      expect(rpc.requests.some((call) => call.method === "session.report_state")).toBe(false);
+    });
+
+    test("a suite that disconnects re-arms it, so a pi that outlives its suite does not freeze attn", async () => {
+      const rpc = new FakeRPC();
+      const driver = newDriver({ rpc, unbackedGraceMs: 20 });
+      const spawned = await driver.spawn(params({ session_id: "session-1", run_id: "run-1" }));
+      const token = spawned.env?.ATTN_PI_TOKEN as string;
+      const connection = fakeConnection();
+      await driver.suiteHello(connection, {
+        token,
+        pi_session_id: "native-1",
+        pi_version: "0.80.10",
+        reason: "startup",
+      });
+
+      connection.close();
+
+      await waitFor(() => rpc.requests.some((call) => call.method === "session.report_state"));
+      expect(rpc.requests.find((call) => call.method === "session.report_state")?.params.state).toBe("unknown");
+    });
+
+    test("a closed session takes its alarm with it: nothing is reported for a run that ended", async () => {
+      const rpc = new FakeRPC();
+      const driver = newDriver({ rpc, unbackedGraceMs: 20 });
+      await driver.spawn(params({ session_id: "session-1", run_id: "run-1" }));
+
+      await driver.sessionClosed({ session_id: "session-1", run_id: "run-1", reason: "exit" });
+      await new Promise((resolve) => setTimeout(resolve, 80));
+
+      expect(rpc.requests.some((call) => call.method === "session.report_state")).toBe(false);
+    });
+  });
+});
+
+async function waitFor(predicate: () => boolean, timeoutMs = 2_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!predicate()) {
+    if (Date.now() > deadline) throw new Error("timed out waiting for the driver");
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+}
+
+describe("PiDriver: coming back after attn had nothing", () => {
+  test("hands attn what pi says it is, for attn to use only if it still says unknown", async () => {
+    const rpc = new FakeRPC();
+    const driver = newDriver({ rpc });
+    const spawned = await driver.spawn(params({ session_id: "session-1", run_id: "run-1" }));
+    const token = spawned.env?.ATTN_PI_TOKEN as string;
+
+    await driver.suiteHello(fakeConnection(), {
+      token,
+      pi_session_id: "native-1",
+      pi_version: "0.80.10",
+      reason: "reconnect",
+      pi_state: "idle",
+    });
+
+    expect(rpc.requests.find((call) => call.method === "session.report_state")?.params).toEqual({
+      session_id: "session-1",
+      run_id: "run-1",
+      seq: 3,
+      state: "idle",
+      only_if_unknown: true,
+    });
+  });
+
+  test("says nothing when the hello carries no state, so an older suite changes nothing", async () => {
+    const rpc = new FakeRPC();
+    const driver = newDriver({ rpc });
+    const spawned = await driver.spawn(params({ session_id: "session-1", run_id: "run-1" }));
+    const token = spawned.env?.ATTN_PI_TOKEN as string;
+
+    await driver.suiteHello(fakeConnection(), {
+      token,
+      pi_session_id: "native-1",
+      pi_version: "0.80.10",
+      reason: "reconnect",
+    });
+
+    expect(rpc.requests.some((call) => call.method === "session.report_state")).toBe(false);
+  });
+
+  test("refuses a hello whose state is not one pi can be in", async () => {
+    const rpc = new FakeRPC();
+    const driver = newDriver({ rpc });
+    const spawned = await driver.spawn(params({ session_id: "session-1", run_id: "run-1" }));
+    const token = spawned.env?.ATTN_PI_TOKEN as string;
+
+    await expect(
+      driver.suiteHello(fakeConnection(), {
+        token,
+        pi_session_id: "native-1",
+        pi_version: "0.80.10",
+        reason: "reconnect",
+        pi_state: "recoverable",
+      }),
+    ).rejects.toThrow(/pi_state/);
   });
 });

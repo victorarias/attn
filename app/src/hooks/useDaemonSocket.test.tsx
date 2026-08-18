@@ -3782,3 +3782,89 @@ describe('useDaemonSocket notebook and annotation events', () => {
     unmount();
   });
 });
+
+// The app-command envelope, through the hook's public surface. What it pins is
+// the half a view cannot see: the payload travels as JSON text, a handler that
+// returned nothing is a success rather than a rejection, and a refusal reaches
+// the caller in the daemon's own words.
+describe('useDaemonSocket app commands', () => {
+  let originalWebSocket: typeof WebSocket;
+
+  beforeEach(() => {
+    originalWebSocket = globalThis.WebSocket;
+    FakeWebSocket.instances = [];
+    globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
+  });
+  afterEach(() => {
+    globalThis.WebSocket = originalWebSocket;
+    vi.clearAllMocks();
+  });
+
+  function renderAppHook() {
+    return renderHook(() =>
+      useDaemonSocket({
+        onSessionsUpdate: vi.fn(),
+        onWorkspacesUpdate: vi.fn(),
+        onPRsUpdate: vi.fn(),
+        onReposUpdate: vi.fn(),
+        onAuthorsUpdate: vi.fn(),
+        wsUrl: 'ws://localhost:9999/ws',
+      }),
+    );
+  }
+
+  function lastSent(ws: FakeWebSocket): { cmd: string; request_id: string; [k: string]: unknown } {
+    return JSON.parse(ws.sent[ws.sent.length - 1]);
+  }
+
+  it('sends the payload as JSON text and resolves with the handler’s answer', async () => {
+    const { result, unmount } = renderAppHook();
+    const ws = await waitForOpenSocket();
+
+    const promise = result.current.sendAppCommand('reviewer', 'approve', { id: 'tk-1' });
+    await Promise.resolve();
+    const sent = lastSent(ws);
+    expect(sent).toMatchObject({ cmd: 'app_command', app: 'reviewer', command: 'approve', payload: '{"id":"tk-1"}' });
+
+    ws.emit({
+      event: 'app_command_result',
+      request_id: sent.request_id,
+      success: true,
+      payload: '{"approved":true}',
+    });
+    await expect(promise).resolves.toEqual({ approved: true });
+    unmount();
+  });
+
+  it('carries no payload for a command that takes none, and resolves undefined when it answers nothing', async () => {
+    const { result, unmount } = renderAppHook();
+    const ws = await waitForOpenSocket();
+
+    const promise = result.current.sendAppCommand('reviewer', 'refresh');
+    await Promise.resolve();
+    const sent = lastSent(ws);
+    expect(sent.payload).toBeUndefined();
+
+    ws.emit({ event: 'app_command_result', request_id: sent.request_id, success: true });
+    await expect(promise).resolves.toBeUndefined();
+    unmount();
+  });
+
+  it('rejects with the daemon’s refusal, which is what the tile shows', async () => {
+    const { result, unmount } = renderAppHook();
+    const ws = await waitForOpenSocket();
+
+    const promise = result.current.sendAppCommand('reviewer', 'approve');
+    await Promise.resolve();
+    const sent = lastSent(ws);
+
+    ws.emit({
+      event: 'app_command_result',
+      request_id: sent.request_id,
+      success: false,
+      error: 'reviewer is disabled, so it runs nothing; `attn app enable reviewer` turns it back on',
+    });
+    await expect(promise).rejects.toThrow('attn app enable reviewer');
+    unmount();
+  });
+});

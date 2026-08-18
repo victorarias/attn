@@ -184,12 +184,13 @@ type CurrentStateSnapshot = {
   tickets: TicketRow[]
   seeds: Seed[]
   crew: CrewMember[]
-  apps: AppSummary[]
+  apps: AppRegistryEntry[]
 }
 ```
 
 These are the state-bearing domain fields assembled for `InitialStateMessage`
-in `internal/daemon/websocket.go`; A5 adds `apps` to that projection. Protocol
+in `internal/daemon/websocket.go`; A5 adds `apps` as its registry projection,
+not the operator-oriented `AppSummary`. Protocol
 identity, warnings, client-only metadata, and the untyped `settings` map are
 not app state and are not included. In particular, `settings` is the daemon's
 entire settings table plus derived client capability flags, not a bounded app
@@ -366,8 +367,13 @@ trigger while still enabled.
   of this doc, an installed app's gap means genuinely broken state —
   corruption or a cursor from a removed install — so loud is correct.
 
-An app with no subscriptions has no durable app consumer and no derived handler
-state, so this rule does not apply to an A5 view-only app.
+An A5 view-only app keeps the sentinel consumer row used for uniform lifecycle
+handling, but its filter matches nothing. It cannot miss a subscribed fact, so
+reconcile obligations are inert for it. Inert means the trigger is never
+recorded: completion advances a bus cursor, and an app whose filter matches
+nothing has none to advance, so a request written for it could only sit owed
+forever and refuse the app's commands. As built in slice 1 the version-change
+trigger did fire for such an app; slice 3 guards it on the filter.
 
 Silently keeping the old A1 skip-to-head behavior was rejected. So was running
 an optional no-op reconcile: both certify stale collections as current.
@@ -487,8 +493,10 @@ proof.
    and increment `ProtocolVersion`; generated Go and TypeScript are never
    edited by hand. Verification tier: full non-production app plus packaged-app
    harness. Prove an infinite loop loses its generation and another app resumes.
-4. **Scaffold and exit proof.** Teach the handler in `attn app new` and the SDK
-   docs. First demonstrate today's stale state. Then show disable, publish
+4. **Scaffold and exit proof.** Teach the handler in the SDK docs. Slice 3
+   already gave `attn app new` a declared, converging reconcile handler,
+   because gate 7's version-move refusal otherwise scaffolds an app that can
+   never be updated; what remains here is the prose that teaches it. First demonstrate today's stale state. Then show disable, publish
    facts, enable delivering the retained backlog in order with no reconcile;
    force a gap and show the loud disable; apply a version deriving a new field
    and show the rebuild followed by delivery of facts the old version never
@@ -578,6 +586,28 @@ rather than as first approved:
 Gate 7's gap rules stand. Under this policy a live gap means corruption or a
 cursor from a removed install — genuinely broken states — and a broken thing
 being loud is the point.
+
+### How the exit proof reaches a gap (slice 4, ruled 2026-08-17)
+
+That policy makes a gap unreachable from product surfaces, twice over, which is
+what the exit proof ran into. The floor covers enabled **or installed**
+consumers, so no installed app is ever trimmed past; and the age window is
+thirty days, so a trim over a throwaway profile removes nothing at all whatever
+the floor says. Both were ruled on rather than worked around:
+
+- **`ATTN_BUS_RETENTION` moves the window**, following `ATTN_BUS_PIN_ALARM_AGE`'s
+  precedent — a limit no run can reach is a limit no run can demonstrate. It is
+  read by the daemon and by `attn bus trim` alike.
+- **The precondition is manufactured, and only the precondition.** The proof
+  removes the app (a product surface, which deletes its consumer rows),
+  publishes, trims for real, and then re-inserts one row: the app's consumer at
+  the cursor it actually reached — the "cursor from a removed install" this
+  section already names as a live gap cause. The trim, the deleted events, the
+  pre-drain's gap detection, the refusal, the disable, and the notification are
+  all real.
+
+This also retires the note that gate 7's handler-less disable was unit-tested
+only; `scenario-app-reconcile.mjs` drives it against a packaged app.
 
 ## Open questions
 

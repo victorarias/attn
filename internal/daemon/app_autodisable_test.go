@@ -274,17 +274,16 @@ func TestEnablingClearsTheStreakAndResumesDelivery(t *testing.T) {
 	}
 }
 
-// Disabling releases the retention floor. This is the whole reason auto-disable
-// exists: a stalled consumer holds the durable log open for everybody, and the
-// observable consequence is that nothing can be compacted past it.
-func TestADisabledAppNoLongerHoldsTheRetentionFloor(t *testing.T) {
+// Auto-disable stops broken code, but an installed app's lane remains durable.
+// Its compactable facts wait at the same frozen cursor as ordinary history.
+func TestADisabledInstalledAppStillHoldsTheRetentionFloor(t *testing.T) {
 	d := newAppDaemon(t)
 	clock := newAppTestClock(d)
 	installApp(t, d, "greeter", subscribing(FactDocumentChanged))
 	startFakeAppRuntime(t, d, failEvery("boom"))
 
 	// Several invalidations about one subject. Compaction reduces those to the
-	// newest — but only at or below the floor every enabled consumer has passed.
+	// newest — but only at or below the floor every participating consumer has passed.
 	for i := 0; i < 4; i++ {
 		d.publishFact(FactDocumentChanged, "app/greeter/seen/tk-1", nil)
 	}
@@ -304,13 +303,81 @@ func TestADisabledAppNoLongerHoldsTheRetentionFloor(t *testing.T) {
 	clock.advance(appAutoDisableStall + time.Minute)
 	waitFor(t, "the stalled app to be disabled", func() bool { return !appEnabled(t, d, "greeter") })
 
-	// Nothing else moved. The only difference is that a disabled consumer does
-	// not pin the log.
+	// Nothing else moved. Disabling stops delivery, but the installed app still
+	// owns this lane and its facts remain retained.
 	removed, err = d.eventBus.Trim()
 	if err != nil {
 		t.Fatalf("trim after the auto-disable: %v", err)
 	}
-	if removed == 0 {
-		t.Fatal("the disabled app is still holding the retention floor down")
+	if removed != 0 {
+		t.Fatalf("compaction removed %d retained event(s) after auto-disable", removed)
+	}
+}
+
+// How long attn tried, in units that survive the window being moved.
+//
+// Both auto-disable notifications rounded their stall to the minute. The only
+// way anyone witnesses this path without waiting a quarter of an hour is to move
+// the window with ATTN_APP_AUTO_DISABLE_STALL — and every such run read "for
+// 0s", which is the notification saying attn gave up immediately. At the shipped
+// fifteen minutes it was no better: "for 15m" repeats the constant instead of
+// reporting the measurement. Live verification is what read these strings back;
+// the tests beside them checked the phrases around the number, so the number was
+// free to be wrong.
+func TestAnAutoDisableNotificationReportsHowLongAttnTried(t *testing.T) {
+	// Short enough that rounding to the minute renders it as zero, which is
+	// exactly the operator's case.
+	const window = 25 * time.Second
+
+	t.Run("a handler stuck on one event", func(t *testing.T) {
+		d := newAppDaemon(t)
+		clock := newAppTestClock(d)
+		d.appAutoDisableWait = window
+		installApp(t, d, "greeter", subscribing("ticket.*"))
+		startFakeAppRuntime(t, d, failEvery("TypeError: undefined is not a function"))
+		stuck := appEvent("ticket.created", "tk-1", 12)
+
+		if err := d.deliverAppEvent(context.Background(), "greeter", stuck); err == nil {
+			t.Fatal("a throwing handler reported success")
+		}
+		clock.advance(30 * time.Second)
+		if err := d.deliverAppEvent(context.Background(), "greeter", stuck); err == nil {
+			t.Fatal("a throwing handler reported success")
+		}
+		assertDisableNotificationSaysDuration(t, d, "30s")
+	})
+
+	t.Run("a rebuild that keeps throwing", func(t *testing.T) {
+		d := newAppDaemon(t)
+		clock := newAppTestClock(d)
+		d.appAutoDisableWait = window
+		reconcilingApp(t, d, "greeter")
+		runtime := startFakeAppRuntime(t, d, nil)
+		runtime.reconcile = func(*fakeAppRuntime, appReconcileRequest) error {
+			return errors.New("TypeError: snapshot.sessions is not iterable")
+		}
+
+		if err := appReconcilePreDrain(t, d, "greeter"); err == nil {
+			t.Fatal("a throwing reconcile reported success")
+		}
+		clock.advance(30 * time.Second)
+		if err := appReconcilePreDrain(t, d, "greeter"); err == nil {
+			t.Fatal("a throwing reconcile reported success")
+		}
+		assertDisableNotificationSaysDuration(t, d, "30s")
+	})
+}
+
+func assertDisableNotificationSaysDuration(t *testing.T, d *Daemon, want string) {
+	t.Helper()
+	if appEnabled(t, d, "greeter") {
+		t.Fatal("greeter is still enabled past its stall window")
+	}
+	notes := appNotifications(t, d, notificationKindAppAutoDisabled)
+	if len(notes) != 1 {
+		t.Fatalf("auto-disable notifications = %d, want 1", len(notes))
+	}
+	if !strings.Contains(notes[0].Body, "for "+want) {
+		t.Fatalf("the notification does not report how long attn tried (want %q): %q", want, notes[0].Body)
 	}
 }

@@ -20,6 +20,7 @@ import (
 
 const (
 	// DefaultRetention is the trim age window, floored by enabled-consumer cursors.
+	// RetentionEnv moves it, which is the only way to watch a trim do anything.
 	DefaultRetention = 30 * 24 * time.Hour
 	// DefaultTrimInterval is how often retention runs.
 	DefaultTrimInterval = time.Hour
@@ -58,11 +59,12 @@ func (e Event) Decode(v any) error {
 
 // Consumer is a durable consumer's persisted registration and position.
 type Consumer struct {
-	Name      string
-	Cursor    int64
-	Filter    string
-	Enabled   bool
-	UpdatedAt time.Time
+	Name          string
+	Cursor        int64
+	Filter        string
+	Enabled       bool
+	PinsRetention bool
+	UpdatedAt     time.Time
 }
 
 // Store is the persistence seam; the daemon adapts internal/store to it so
@@ -96,6 +98,19 @@ type Store interface {
 // Handler receives one event. An error stalls the consumer with backoff and
 // redelivers the event; handlers must tolerate redelivery.
 type Handler func(ctx context.Context, ev Event) error
+
+// Gap describes the history missing below a durable consumer's cursor.
+type Gap struct {
+	Cursor   int64
+	Earliest int64
+	Head     int64
+	Missed   int64
+}
+
+// PreDrain runs after the consumer registration and log bounds are read, before
+// each event batch is selected. It may durably move the cursor; the bus re-reads
+// the registration after it returns.
+type PreDrain func(ctx context.Context, consumer Consumer, gap *Gap) error
 
 // Options configures a Bus; zero durations fall back to the package defaults.
 type Options struct {
@@ -166,8 +181,9 @@ type Bus struct {
 }
 
 type durable struct {
-	name    string
-	handler Handler
+	name     string
+	handler  Handler
+	preDrain PreDrain
 
 	wake chan struct{}
 
@@ -390,6 +406,19 @@ func (b *Bus) wakeDurables() {
 // must neither rewind a consumer nor resurrect a killed one. A registration
 // that fails to persist leaves nothing behind, so the caller can retry.
 func (b *Bus) Register(name string, filter Filter, h Handler) error {
+	return b.register(name, filter, nil, h)
+}
+
+// RegisterWithPreDrain adds a durable consumer whose owner must settle work at
+// the cursor boundary before ordinary fact delivery begins.
+func (b *Bus) RegisterWithPreDrain(name string, filter Filter, pre PreDrain, h Handler) error {
+	if pre == nil {
+		return fmt.Errorf("bus: consumer %s needs a pre-drain hook", name)
+	}
+	return b.register(name, filter, pre, h)
+}
+
+func (b *Bus) register(name string, filter Filter, pre PreDrain, h Handler) error {
 	if strings.TrimSpace(name) == "" {
 		return errors.New("bus: consumer name is required")
 	}
@@ -412,7 +441,7 @@ func (b *Bus) Register(name string, filter Filter, h Handler) error {
 	if _, retiring := b.retiring[name]; retiring {
 		return fmt.Errorf("bus: consumer %s is being unregistered; retry once it is gone", name)
 	}
-	d := b.newDurable(name, filter, h)
+	d := b.newDurable(name, filter, pre, h)
 
 	// Before Start, the registration is all there is to do: Start persists every
 	// consumer and launches its loop. The same is true for a bus with no store,
@@ -573,17 +602,18 @@ func (b *Bus) Registered(name string) bool {
 
 // newDurable builds a consumer and its cancel scope. Callers that also touch the
 // consumer set hold b.mu; the bus context it reads is fixed at construction.
-func (b *Bus) newDurable(name string, filter Filter, h Handler) *durable {
+func (b *Bus) newDurable(name string, filter Filter, pre PreDrain, h Handler) *durable {
 	ctx, cancel := context.WithCancel(b.ctx)
 	return &durable{
-		name:    name,
-		filter:  filter,
-		handler: h,
-		wake:    make(chan struct{}, 1),
-		ctx:     ctx,
-		cancel:  cancel,
-		done:    make(chan struct{}),
-		enabled: true,
+		name:     name,
+		filter:   filter,
+		handler:  h,
+		preDrain: pre,
+		wake:     make(chan struct{}, 1),
+		ctx:      ctx,
+		cancel:   cancel,
+		done:     make(chan struct{}),
+		enabled:  true,
 	}
 }
 
@@ -749,22 +779,59 @@ func (b *Bus) deliver(d *durable) {
 
 // drain reads forward from the consumer's cursor until the log is exhausted.
 func (b *Bus) drain(d *durable) error {
-	// The enabled bit is the kill switch and lives only in the database; re-read
-	// it, never cache it for the process lifetime.
-	rec, ok, err := b.store.GetConsumer(d.name)
-	if err != nil {
-		return fmt.Errorf("reading registration: %w", err)
-	}
-	if !ok {
-		return fmt.Errorf("registration for %s disappeared", d.name)
-	}
-	d.setPosition(rec.Cursor, rec.Enabled)
-	if !rec.Enabled {
-		return nil
+	prepare := func() (bool, error) {
+		// The enabled bit is the kill switch and lives only in the database;
+		// re-read it, never cache it for the process lifetime.
+		rec, ok, err := b.store.GetConsumer(d.name)
+		if err != nil {
+			return false, fmt.Errorf("reading registration: %w", err)
+		}
+		if !ok {
+			return false, fmt.Errorf("registration for %s disappeared", d.name)
+		}
+		d.setPosition(rec.Cursor, rec.Enabled)
+		if !rec.Enabled {
+			return false, nil
+		}
+
+		earliest, head, err := b.store.Bounds()
+		if err != nil {
+			return false, fmt.Errorf("reading log bounds: %w", err)
+		}
+		var gap *Gap
+		if earliest != 0 && d.position() < earliest-1 {
+			gap = &Gap{
+				Cursor: d.position(), Earliest: earliest, Head: head,
+				Missed: earliest - 1 - d.position(),
+			}
+		}
+		if d.preDrain == nil {
+			if gap != nil {
+				if err := b.reconcileGap(d, *gap); err != nil {
+					return false, err
+				}
+			}
+			return true, nil
+		}
+		if err := d.preDrain(d.ctx, rec, gap); err != nil {
+			return false, fmt.Errorf("before draining: %w", err)
+		}
+		rec, ok, err = b.store.GetConsumer(d.name)
+		if err != nil {
+			return false, fmt.Errorf("reading registration after pre-drain: %w", err)
+		}
+		if !ok {
+			return false, fmt.Errorf("registration for %s disappeared during pre-drain", d.name)
+		}
+		d.setPosition(rec.Cursor, rec.Enabled)
+		return rec.Enabled, nil
 	}
 
-	if err := b.reconcileGap(d); err != nil {
-		return err
+	if d.preDrain == nil {
+		ready, err := prepare()
+		if err != nil || !ready {
+			return err
+		}
 	}
 
 	// A lagging consumer never leaves the loop below, so the kill switch is
@@ -789,6 +856,12 @@ func (b *Bus) drain(d *durable) error {
 	for {
 		if d.ctx.Err() != nil {
 			return nil
+		}
+		if d.preDrain != nil {
+			ready, err := prepare()
+			if err != nil || !ready {
+				return err
+			}
 		}
 		events, err := b.store.Since(d.position(), b.batchSize)
 		if err != nil {
@@ -846,20 +919,12 @@ func (b *Bus) drain(d *durable) error {
 	}
 }
 
-// reconcileGap handles a cursor below the oldest surviving event (retention
-// trimmed past it while disabled or dead): resume at head, with a logged gap.
-func (b *Bus) reconcileGap(d *durable) error {
-	earliest, head, err := b.store.Bounds()
-	if err != nil {
-		return fmt.Errorf("reading log bounds: %w", err)
-	}
-	if earliest == 0 || d.position() >= earliest-1 {
-		return nil
-	}
-	missed := earliest - 1 - d.position()
+// reconcileGap handles a cursor below the oldest surviving event: resume at
+// head, with a logged gap.
+func (b *Bus) reconcileGap(d *durable, gap Gap) error {
 	b.log("bus: consumer %s resumed at head %d; %d event(s) were trimmed before its cursor %d",
-		d.name, head, missed, d.position())
-	return b.advance(d, head)
+		d.name, gap.Head, gap.Missed, gap.Cursor)
+	return b.advance(d, gap.Head)
 }
 
 func (b *Bus) advance(d *durable, seq int64) error {
@@ -953,9 +1018,9 @@ func (b *Bus) Trim() (int, error) {
 // bounding the log by the data it describes rather than by write frequency.
 // For these names durable delivery is at-least-once PER CHANGED SUBJECT, not
 // per write. Compaction honors the same cursor floor as trimming: an enabled
-// consumer must never lose an unread fact, and compacting above the floor would
-// punch holes that reconcileGap misreads as trimmed history. A stalled enabled
-// consumer pins compaction exactly as it pins trimming.
+// consumer and a disabled installed app must never lose an unread fact, and
+// compacting above the floor would punch holes that reconcileGap misreads as
+// trimmed history.
 func (b *Bus) compact() (int, error) {
 	if len(b.compactable) == 0 {
 		return 0, nil
@@ -976,8 +1041,8 @@ func (b *Bus) compact() (int, error) {
 	return n, nil
 }
 
-// consumerFloor is the lowest position every enabled consumer has passed; with
-// none enabled it is the log head. A killed consumer must not pin the log.
+// consumerFloor is the lowest position every enabled consumer and every
+// installed app consumer has passed; with none it is the log head.
 func (b *Bus) consumerFloor() (int64, error) {
 	rows, err := b.store.ListConsumers()
 	if err != nil {
@@ -985,7 +1050,7 @@ func (b *Bus) consumerFloor() (int64, error) {
 	}
 	floor := int64(-1)
 	for _, c := range rows {
-		if !c.Enabled {
+		if !c.Enabled && !c.PinsRetention {
 			continue
 		}
 		if floor < 0 || c.Cursor < floor {
@@ -1114,6 +1179,43 @@ func pinAlarmAgeOrDefault(v time.Duration) time.Duration {
 		return DefaultPinAlarmAge
 	}
 	return v
+}
+
+// RetentionEnv overrides the trim age window. Thirty days is unreachable in any
+// run anyone can watch, so without this the only observable behavior of
+// retention is that it never removes anything: a trim against a fresh database
+// removes zero rows whatever the cursor floor says, and what a consumer resuming
+// below `earliest` does could not be produced outside a unit test.
+//
+// A duration ("1s", "5m"). There is no off switch — retention is a window, not a
+// finding — so a non-positive value is refused like an unparseable one.
+const RetentionEnv = "ATTN_BUS_RETENTION"
+
+// RetentionFromEnv resolves the trim window for one process. It lives beside
+// PinAlarmAgeFromEnv and for the same reason: the daemon that trims hourly and
+// the CLI that runs a pass by hand read one database, and a window they disagree
+// about makes `attn bus trim` remove rows the daemon would have kept.
+func RetentionFromEnv(log LogFunc) time.Duration {
+	if log == nil {
+		log = func(string, ...interface{}) {}
+	}
+	raw := strings.TrimSpace(os.Getenv(RetentionEnv))
+	if raw == "" {
+		return DefaultRetention
+	}
+	window, err := time.ParseDuration(raw)
+	if err != nil {
+		log("bus: %s=%q is not a duration (%v); using the default %s",
+			RetentionEnv, raw, err, DefaultRetention)
+		return DefaultRetention
+	}
+	if window <= 0 {
+		log("bus: %s=%q is not a positive window; using the default %s",
+			RetentionEnv, raw, DefaultRetention)
+		return DefaultRetention
+	}
+	log("bus: retention window set to %s by %s (default %s)", window, RetentionEnv, DefaultRetention)
+	return window
 }
 
 // PinAlarmAgeEnv overrides the retention-pin tripwire, so the condition can be

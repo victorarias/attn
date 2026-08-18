@@ -1,0 +1,21 @@
+kind: added
+area: apps
+change: >
+  An owed app rebuild is now something an operator can see and act on. Each
+  reconcile attempt is recorded with its claim boundary and reason, so a
+  daemon restart mid-rebuild closes the attempt as interrupted and leaves the
+  request owed rather than losing it. `attn app status` reports whether a
+  rebuild is idle, owed or running, what triggered it, and what the last
+  attempt failed on. A command sent to an app that owes a rebuild is refused
+  by name with a `reconcile_owed` code and the same structured reason, and a
+  handler that never returns loses its runtime generation so the apps behind
+  it keep being served. An app whose rebuild keeps failing past the existing
+  fifteen-minute stall window is disabled and says so in a notification, and
+  an app that subscribes but declares no reconcile handler is refused a
+  version move and disabled when a live gap is discovered, instead of
+  silently serving stale collections.
+symptom: >
+  A rebuild that failed, hung, or was interrupted by a restart left no
+  operator-readable state: status showed nothing owed, commands ran against
+  collections that were mid-rebuild, and one app's frozen handler could
+  starve every other app of the shared runtime.

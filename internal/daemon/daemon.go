@@ -293,6 +293,13 @@ type Daemon struct {
 	// long enough to publish.
 	sessionDwellOnce sync.Once
 	sessionDwell     *dwellGate
+	// pluginDriverSilenceWatch holds the alarm per session whose driver has gone
+	// away, so a declaration nobody is refreshing becomes `unknown` instead of
+	// staying frozen. Empty while every driver is connected.
+	pluginDriverSilenceOnce  sync.Once
+	pluginDriverSilenceWatch *pluginDriverSilenceWatch
+	// Tests set this to a short grace; zero means the shipped tripwire.
+	pluginDriverSilenceGraceOverride time.Duration
 	// sessionStateReason is the resolver clause behind each session's current
 	// state, carried to clients beside the state itself.
 	sessionStateReasonOnce     sync.Once
@@ -408,6 +415,10 @@ type Daemon struct {
 	appDispatchMu  sync.Mutex
 	appDispatches  map[string]*appDispatch
 	appDispatchSeq uint64
+	// appLanes serialize one app's handlers, commands, reconcile fence, and
+	// serving-version moves. Different apps keep running concurrently.
+	appLaneMu sync.Mutex
+	appLanes  map[string]appLane
 	// appStalls is the auto-disable clock, one entry per app that is currently
 	// failing on an event. See appStall.
 	appStallMu sync.Mutex
@@ -438,6 +449,7 @@ type Daemon struct {
 	// appClock is the clock every app-runtime duration is measured against.
 	// Injected by tests so the fifteen-minute stall window costs no wall time.
 	appClock            func() time.Time
+	appAutoDisableWait  time.Duration
 	removePlugin        func(pluginDir, name string) error
 	pluginActionMu      sync.Mutex
 	bundledPluginMu     sync.Mutex
@@ -507,6 +519,7 @@ type Daemon struct {
 	workflowBroadcastHook func(*protocol.WorkflowRunUpdatedMessage) // optional, tests only
 	ticketsBroadcastHook  func([]protocol.TicketRow)                // optional, tests only
 	gardenBroadcastHook   func([]protocol.Seed, int)                // optional, tests only
+	appsBroadcastHook     func([]protocol.AppRegistryEntry)         // optional, tests only
 	gardenMintID          func() (string, error)                    // optional, tests only
 	gardenMintNoteID      func() (string, error)                    // optional, tests only
 	// gardenNotePageSize sizes the whole-log read's pages; zero means the store's
@@ -993,6 +1006,9 @@ func NewWithGitHubClient(socketPath string, ghClient github.GitHubClient) *Daemo
 
 // Start starts the daemon
 func (d *Daemon) Start() error {
+	if err := d.resolveAppRuntimeTripwires(); err != nil {
+		return fmt.Errorf("resolve app runtime tripwires: %w", err)
+	}
 	if d.dataRoot == "" {
 		d.dataRoot = filepath.Dir(d.socketPath)
 	}
@@ -1177,6 +1193,12 @@ func (d *Daemon) Start() error {
 	// back — before the consumers that would otherwise lazy-start the runtime on
 	// their first due fact.
 	d.restoreAppRuntimePark()
+	// A running invocation belonged to the daemon process that just died. Close
+	// it before any app lane resumes; its durable reconcile request is untouched
+	// and therefore remains the next work the consumer owes.
+	if err := d.repairInterruptedAppInvocations(); err != nil {
+		return err
+	}
 	// Apps get their consumers here, not their runtime: the sidecar starts on the
 	// first fact an app is actually due, so a user with installed-but-quiet apps
 	// pays nothing for them.
@@ -1928,6 +1950,7 @@ func (d *Daemon) Stop() {
 	d.stopAppRuntime()
 	d.stopAllTranscriptWatchers()
 	d.stopNudgeCountdowns()
+	d.pluginDriverSilence().stop()
 	d.stopAutoSettleTimers()
 	d.stopSnoozeTimers()
 	if d.ptyBackend != nil {
@@ -2212,6 +2235,7 @@ func (d *Daemon) dropSessionRecord(sessionID string) {
 	d.clearAutoSettleState(sessionID)
 	d.clearSnoozeState(sessionID)
 	d.clearPTYWriteFence(sessionID)
+	d.forgetPluginDriverSilenceWatch(sessionID)
 	d.store.Remove(sessionID)
 	// After the row is gone, not before: recordStateObservation gates on the row,
 	// so forgetting first would leave a window where a concurrent observation
@@ -2243,7 +2267,8 @@ func (d *Daemon) handlePTYState(sessionID string, obs pty.Observation) {
 		d.traceStateVeto(sessionID, origin, state, "session_not_found")
 		return
 	}
-	if run := d.store.GetAgentDriverRun(sessionID); run.RunID != "" && d.pluginDriverReportsState(session.Agent) {
+	driverRun := d.store.GetAgentDriverRun(sessionID)
+	if driverRun.RunID != "" && d.pluginDriverReportsState(session.Agent) {
 		// External drivers own state through sequenced session.report_* calls.
 		d.traceStateVeto(sessionID, origin, state, "plugin_driver_owns_state")
 		return
@@ -2261,7 +2286,15 @@ func (d *Daemon) handlePTYState(sessionID string, obs pty.Observation) {
 		// A shell is the same story from the other end: it spawns `idle` and the
 		// resolver owns it from there on its foreground heartbeat, so no
 		// worker-info claim was ever wanted for one.
-		d.traceStateVeto(sessionID, origin, state, "resolver_owned")
+		reason := "resolver_owned"
+		if driverRun.RunID != "" {
+			// The run record outlives the driver process, so on a daemon restart
+			// this replay routinely beats driver.register by about a second. The
+			// claim is vetoed either way; naming the window keeps the trace from
+			// blaming the resolver for a race it did not lose.
+			reason = "plugin_driver_not_registered"
+		}
+		d.traceStateVeto(sessionID, origin, state, reason)
 		return
 	}
 	agent := session.Agent
@@ -2291,6 +2324,7 @@ func (d *Daemon) initHTTPServer() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ws", d.handleWS)
 	mux.HandleFunc("/health", d.handleHealth)
+	mux.HandleFunc(appBundleRoutePrefix, d.handleAppBundle)
 	mux.HandleFunc("/favicon.ico", func(w http.ResponseWriter, _ *http.Request) {
 		setNoStoreHeaders(w.Header())
 		w.WriteHeader(http.StatusNoContent)

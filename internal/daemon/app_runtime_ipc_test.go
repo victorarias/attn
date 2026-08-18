@@ -183,11 +183,11 @@ func TestAppWatchStreamsInvocationsAsTheyHappen(t *testing.T) {
 
 	select {
 	case info := <-watcher.events:
-		if info.EventSubject != "tk-2" {
+		if protocol.Deref(info.EventSubject) != "tk-2" {
 			// The auditor's invocation must not reach a watcher of greeter.
 			t.Fatalf("the stream carried %+v, want greeter's own invocation", info)
 		}
-		if info.Status != appInvocationStatusOK || info.Handler != "ticket.*" {
+		if info.Status != appInvocationStatusOK || info.Handler != apps.SubscriptionLabel("ticket.*") {
 			t.Fatalf("streamed invocation = %+v", info)
 		}
 	case <-time.After(2 * time.Second):
@@ -209,7 +209,7 @@ func TestASlowWatcherIsDroppedRatherThanBlockingDelivery(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		d.notifyAppWatchers(protocol.AppInvocationInfo{EventSubject: "tk-1"}, "greeter")
+		d.notifyAppWatchers(protocol.AppInvocationInfo{EventSubject: protocol.Ptr("tk-1")}, "greeter")
 	}()
 	select {
 	case <-done:
@@ -328,7 +328,8 @@ func TestAppStatusCarriesTheStallClockAndWhenItFires(t *testing.T) {
 	if stall == nil {
 		t.Fatal("a stalled app's status carried no stall")
 	}
-	if stall.EventSeq != 9 || stall.EventName != "ticket.created" || stall.Attempts != 1 {
+	if stall.Kind != appStallKindSubscription || protocol.Deref(stall.EventSeq) != 9 ||
+		protocol.Deref(stall.EventName) != "ticket.created" || stall.Attempts != 1 {
 		t.Fatalf("stall = %+v", stall)
 	}
 	if !strings.Contains(stall.LastError, "ReferenceError") {

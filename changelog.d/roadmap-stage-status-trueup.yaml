@@ -1,0 +1,8 @@
+kind: internal
+area: docs
+change: >
+  The extension-platform roadmap gains a stage-status table with receipts.
+  It records what was already true but unfindable: A1, A3, A4, A5 and B1
+  are shipped (B1 landed 2026-08-03 as #734 yet was still planned around
+  as "not started" fifteen days later), A2 is believed complete but
+  unverified, and the frontier is B2's and C1's gate discussions.

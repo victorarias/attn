@@ -15,6 +15,7 @@ import {
   type AutoModeDenial,
   type AutoModeExtensionAPILike,
 } from "./index";
+import type { DenialLedgerLike } from "./ledger";
 import { ModelClassifier, type ModelRegistryLike } from "./model-classifier";
 import { autoModeStatusKey, autoModeStatusText } from "./ui";
 import { UsageLedger } from "./usage";
@@ -38,11 +39,18 @@ export type AutoModePiLike = AutoModeExtensionAPILike & {
 
 export type AutoModeSetup = {
   config: AutoModeConfig;
+  /** The durable local record every blocked call is written to. */
+  ledger?: DenialLedgerLike;
   /**
    * Reported for every blocked call. The seam attn's own surfaces hang off;
    * bare pi leaves it unset.
    */
   onDenial?: (denial: AutoModeDenial) => void;
+  /**
+   * True while the breaker's question waits on the user, false once answered.
+   * attn's suite declares `pending_approval` from it; bare pi leaves it unset.
+   */
+  onWaitingForUser?: (waiting: boolean) => void;
   /** Said once, at the first session start that has a UI. A broken config is the caller. */
   notice?: string;
 };
@@ -64,7 +72,9 @@ export class AutoMode {
       config: setup.config,
       classifier: { classify: (request) => this.judge().classify(request) },
       isEnabled: () => this.enabled(),
+      ledger: setup.ledger,
       onDenial: setup.onDenial,
+      onWaitingForUser: setup.onWaitingForUser,
       usageLedger: this.usage,
     });
   }

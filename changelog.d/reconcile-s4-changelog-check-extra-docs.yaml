@@ -1,0 +1,6 @@
+kind: fixed
+area: tooling
+change: >
+  `changelog-check` now rejects a fragment file holding more than one YAML
+  document. It only ever decoded the first, so a second fragment in the same
+  file passed the check and then never reached the changelog.

@@ -48,10 +48,19 @@ type fakeAppRuntime struct {
 	// reaches the daemon.
 	handler func(*fakeAppRuntime, appDispatchRequest) error
 
+	// command runs in place of a command handler. Nil answers every command with
+	// no payload, which is what a handler returning nothing looks like on the
+	// wire. Returning an error is a handler that threw.
+	command func(*fakeAppRuntime, appCommandRequest) (json.RawMessage, error)
+	// reconcile runs in place of the bundle's reconcile sibling export.
+	reconcile func(*fakeAppRuntime, appReconcileRequest) error
+
 	writeMu sync.Mutex
 
 	mu         sync.Mutex
 	dispatches []appDispatchRequest
+	commands   []appCommandRequest
+	reconciles []appReconcileRequest
 	pending    map[string]chan jsonRPCMessage
 	nextID     int
 	// loopFrozen models a blocked event loop. A real host does everything off one
@@ -168,8 +177,16 @@ func (f *fakeAppRuntime) serve(reader *bufio.Reader) {
 			// either: a frozen loop cannot read its own socket.
 			continue
 		}
+		if msg.Method == "app.command" {
+			f.serveCommand(msg)
+			continue
+		}
+		if msg.Method == "app.reconcile" {
+			f.serveReconcile(msg)
+			continue
+		}
 		if msg.Method != "app.dispatch" {
-			f.sendRaw(jsonRPCFailure(msg.ID, jsonRPCInvalidRequest, "the fake sidecar only serves app.dispatch and app.runtime.ping"))
+			f.sendRaw(jsonRPCFailure(msg.ID, jsonRPCInvalidRequest, "the fake sidecar only serves app.dispatch, app.command, app.reconcile and app.runtime.ping"))
 			continue
 		}
 		var req appDispatchRequest
@@ -209,6 +226,88 @@ func (f *fakeAppRuntime) serve(reader *bufio.Reader) {
 	}
 }
 
+func (f *fakeAppRuntime) serveReconcile(msg jsonRPCMessage) {
+	var req appReconcileRequest
+	if err := json.Unmarshal(msg.Params, &req); err != nil {
+		f.sendRaw(jsonRPCFailure(msg.ID, jsonRPCInvalidRequest, err.Error()))
+		return
+	}
+	f.mu.Lock()
+	f.reconciles = append(f.reconciles, req)
+	f.mu.Unlock()
+	f.sendRaw(jsonRPCMessage{
+		JSONRPC: "2.0", Method: appRuntimeEnteredMethod,
+		Params: mustMarshalHandlerParams(f.t, appRuntimeHandlerParams{Dispatch: req.Dispatch, App: req.App}),
+	})
+	go func(id json.RawMessage, req appReconcileRequest) {
+		result := appDispatchResult{OK: true}
+		if f.reconcile != nil {
+			if err := f.reconcile(f, req); err != nil {
+				result = appDispatchResult{OK: false, Error: err.Error()}
+			}
+		}
+		f.sendRaw(jsonRPCMessage{
+			JSONRPC: "2.0", Method: appRuntimeLeftMethod,
+			Params: mustMarshalHandlerParams(f.t, appRuntimeHandlerParams{Dispatch: req.Dispatch, App: req.App}),
+		})
+		f.sendRaw(jsonRPCResult(id, result))
+	}(msg.ID, req)
+}
+
+// serveCommand is the command half of the loop above, with the same
+// entered/left announcements: a command runs on the one event loop every
+// dispatch runs on, so the daemon has to be able to name it when that loop
+// stops turning.
+func (f *fakeAppRuntime) serveCommand(msg jsonRPCMessage) {
+	var req appCommandRequest
+	if err := json.Unmarshal(msg.Params, &req); err != nil {
+		f.sendRaw(jsonRPCFailure(msg.ID, jsonRPCInvalidRequest, err.Error()))
+		return
+	}
+	f.mu.Lock()
+	f.commands = append(f.commands, req)
+	f.mu.Unlock()
+	f.sendRaw(jsonRPCMessage{
+		JSONRPC: "2.0",
+		Method:  appRuntimeEnteredMethod,
+		Params:  mustMarshalHandlerParams(f.t, appRuntimeHandlerParams{Dispatch: req.Dispatch, App: req.App}),
+	})
+	go func(id json.RawMessage, req appCommandRequest) {
+		result := appCommandDispatchResult{OK: true}
+		if f.command != nil {
+			payload, err := f.command(f, req)
+			if err != nil {
+				result = appCommandDispatchResult{OK: false, Error: err.Error()}
+			} else {
+				result = appCommandDispatchResult{OK: true, Payload: payload}
+			}
+		}
+		f.sendRaw(jsonRPCMessage{
+			JSONRPC: "2.0",
+			Method:  appRuntimeLeftMethod,
+			Params:  mustMarshalHandlerParams(f.t, appRuntimeHandlerParams{Dispatch: req.Dispatch, App: req.App}),
+		})
+		f.sendRaw(jsonRPCResult(id, result))
+	}(msg.ID, req)
+}
+
+// commandLog is what this sidecar was asked to run, in arrival order.
+func (f *fakeAppRuntime) commandLog() []appCommandRequest {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]appCommandRequest, len(f.commands))
+	copy(out, f.commands)
+	return out
+}
+
+func (f *fakeAppRuntime) reconcileLog() []appReconcileRequest {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]appReconcileRequest, len(f.reconciles))
+	copy(out, f.reconciles)
+	return out
+}
+
 func mustMarshalHandlerParams(t *testing.T, params appRuntimeHandlerParams) json.RawMessage {
 	t.Helper()
 	data, err := json.Marshal(params)
@@ -228,8 +327,8 @@ func (f *fakeAppRuntime) sendRaw(msg jsonRPCMessage) {
 	_, _ = f.conn.Write(append(data, '\n'))
 }
 
-// call makes a collection callback, the way a handler's ctx.collections does.
-func (f *fakeAppRuntime) call(method string, params appCollectionParams) (json.RawMessage, error) {
+// call makes a context callback, the way a handler's ctx does.
+func (f *fakeAppRuntime) call(method string, params any) (json.RawMessage, error) {
 	f.mu.Lock()
 	f.nextID++
 	id := json.RawMessage(fmt.Sprintf(`"cb-%d"`, f.nextID))
@@ -345,8 +444,30 @@ func installApp(t *testing.T, d *Daemon, name string, manifest appbuild.Manifest
 	return version
 }
 
+// subscribing is a subscribed app as this attn expects one: it derives state
+// from facts, so it declares reconcile and can therefore be moved between
+// versions. subscribingWithoutReconcile is the grandfathered shape, for the
+// tests about what attn refuses.
 func subscribing(events ...string) appbuild.Manifest {
+	m := subscribingWithoutReconcile(events...)
+	m.Reconcile = true
+	return m
+}
+
+func subscribingWithoutReconcile(events ...string) appbuild.Manifest {
 	return appbuild.Manifest{Subscribe: []appbuild.Subscribe{{Events: events}}}
+}
+
+// settleAppReconcile runs the pre-drain hook the bus runs, which is the only
+// path that clears what a version move owes. A test that applies a second
+// version and then delivers a fact has to cross that fence the same way the
+// running daemon does.
+func settleAppReconcile(t *testing.T, d *Daemon, name string) {
+	t.Helper()
+	hook := d.appPreDrain(name)
+	if err := hook(context.Background(), bus.Consumer{Name: apps.ConsumerName(name)}, nil); err != nil {
+		t.Fatalf("reconcile %s: %v", name, err)
+	}
 }
 
 func appEvent(name, subject string, seq int64) bus.Event {
@@ -770,6 +891,8 @@ func TestHotReloadStampsTheNewVersionOnTheNextDispatch(t *testing.T) {
 	if err := <-done; err != nil {
 		t.Fatalf("the in-flight delivery failed: %v", err)
 	}
+	// A version move owes a rebuild, and no fact crosses that fence until it runs.
+	settleAppReconcile(t, d, "greeter")
 	if err := d.deliverAppEvent(context.Background(), "greeter", appEvent("ticket.created", "tk-2", 2)); err != nil {
 		t.Fatalf("the second delivery failed: %v", err)
 	}
@@ -846,7 +969,7 @@ func TestAppWithNoSubscriptionsSubscribesToNothing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("appFilter: %v", err)
 	}
-	if len(filter) != 1 || filter[0] != appNoSubscriptionsPattern {
+	if len(filter) != 1 || filter[0] != apps.NoSubscriptionsPattern {
 		t.Fatalf("filter = %v, want the nothing-matches pattern", filter)
 	}
 	for _, name := range []string{"ticket.created", "session.state.changed", "app.enabled.changed"} {

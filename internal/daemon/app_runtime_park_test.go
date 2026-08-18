@@ -37,6 +37,13 @@ func TestParkedRuntimeSurvivesADaemonRestart(t *testing.T) {
 	if parked.ParkedAt.IsZero() {
 		t.Fatal("a parked runtime carries no park time")
 	}
+	// The phase flips before the park's side effects land, and teardown must not
+	// race them: the park row is written first (a daemon dying here comes back
+	// parked and silent — the designed behavior), the notification second. Wait
+	// for the notification while the daemon that owes it is still alive.
+	waitFor(t, "the parked runtime's notification to land", func() bool {
+		return len(appNotifications(t, first, notificationKindAppRuntimeParked)) == 1
+	})
 	launchesBefore := launchCount(t, launches)
 
 	// The daemon goes away — an upgrade, a crash, a reboot. Its database does not.

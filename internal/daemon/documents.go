@@ -16,7 +16,9 @@ import (
 )
 
 // The document store's daemon half: the fact a write publishes, the live
-// queries that fact wakes, and the IPC surface `attn doc` speaks.
+// queries that fact wakes, and the IPC surface `attn doc` speaks. One
+// subscription loop serves both transports through a sink; the WebSocket half
+// of it is in documents_ws.go.
 //
 // A subscription re-runs the whole query per delivery — never patches — and
 // diffs bodies against what the subscriber holds. A delivery is safe to drop
@@ -579,40 +581,53 @@ func (d *Daemon) handleDocCount(conn net.Conn, msg *protocol.DocCountMessage) {
 	}})
 }
 
-// handleDocSubscribe is the only handler that keeps its connection: the current
-// window immediately, then a fresh one per relevant write, ending on disconnect
-// or when the collection can no longer answer. A delivery is ids in order plus
-// only the bodies the subscriber does not hold, tracked as one {id: rev} map.
-func (d *Daemon) handleDocSubscribe(conn net.Conn, msg *protocol.DocSubscribeMessage) {
+// docSink is where one subscription's deliveries and its ending go, and it is
+// the whole difference between the two transports: the unix socket writes both
+// onto the connection that asked, the WebSocket wraps each in an envelope naming
+// the subscription, because one socket there carries many. The loop above it
+// knows neither.
+//
+// deliver returning an error ends the subscription silently — the transport has
+// already lost the caller, so there is nobody left to tell.
+type docSink struct {
+	deliver func(*protocol.DocSubscribeResult) error
+	end     func(err error, code string)
+}
+
+// docSubscriptionQuery decodes a subscribe request and refuses the one query a
+// live subscription cannot answer.
+func docSubscriptionQuery(msg *protocol.DocSubscribeMessage) (docstore.Query, error) {
 	q, err := documentQueryFromProtocol(msg.Query)
 	if err != nil {
-		d.sendDocError(conn, err)
-		return
+		return docstore.Query{}, err
 	}
 	if q.After != "" {
-		d.sendDocError(conn, docstore.InvalidQuery(fmt.Errorf(
+		return docstore.Query{}, docstore.InvalidQuery(fmt.Errorf(
 			"docstore: %s/%s cannot subscribe with the after cursor %q: a live query is a window and a cursor is a walk, so the document the cursor names moves out from under the subscription. Set a limit instead and render each delivery's window; a delivery already carries only what changed.",
-			q.Namespace, q.Collection, q.After)))
-		return
+			q.Namespace, q.Collection, q.After))
 	}
+	return q, nil
+}
 
+// runDocSubscription is the one live-query loop, shared by both transports: the
+// current window immediately, then a fresh one per relevant write, ending when
+// `done` closes or when the collection can no longer answer. A delivery is ids
+// in order plus only the bodies the subscriber does not hold, tracked as one
+// {id: rev} map.
+//
+// It blocks until the subscription ends, and it must never run inside the bus
+// fan-out: a delivery writes a socket, and the bus holds its publish lock across
+// that fan-out. What the fact handler does is poke this loop's wake channel.
+func (d *Daemon) runDocSubscription(q docstore.Query, have []protocol.DocumentRevision, sink docSink, done <-chan struct{}) {
 	// Registered before the first query: the other order drops a write landing
 	// in between; this one only risks a redundant ids-only delivery.
 	sub := d.addDocSubscription(q)
 	defer d.removeDocSubscription(sub.id)
 
-	// The caller never speaks again, so anything the read returns means gone.
-	gone := make(chan struct{})
-	go func() {
-		defer close(gone)
-		_, _ = io.Copy(io.Discard, conn)
-	}()
-
 	// What the subscriber holds: seeded from `have`, replaced by each delivered
 	// window, never growing past the query's limit.
-	held := heldRevisions(msg.Have)
+	held := heldRevisions(have)
 
-	encoder := json.NewEncoder(conn)
 	for delivery := 1; ; delivery++ {
 		// Re-read the declaration per delivery (inside the query's transaction): an
 		// undefine or a field-dropping redeclare must END the subscription, told
@@ -623,21 +638,52 @@ func (d *Daemon) handleDocSubscribe(conn net.Conn, msg *protocol.DocSubscribeMes
 			if delivery > 1 {
 				code = subscriptionEndCode(err)
 			}
-			d.sendDocErrorAs(conn, err, code)
+			sink.end(err, code)
 			return
 		}
 		d.logSlowDocFanOut(sub, read.Schema, took)
 		window, next := windowDelivery(delivery, read, held)
-		if err := encoder.Encode(protocol.Response{Ok: true, DocSubscribeResult: window}); err != nil {
+		if err := sink.deliver(window); err != nil {
 			return
 		}
 		held = next
 		select {
 		case <-sub.wake:
-		case <-gone:
+		case <-done:
 			return
 		}
 	}
+}
+
+// handleDocSubscribe is the only IPC handler that keeps its connection: here the
+// connection IS the subscription, so it needs no id and refuses one.
+func (d *Daemon) handleDocSubscribe(conn net.Conn, msg *protocol.DocSubscribeMessage) {
+	if msg.SubscriptionID != nil {
+		d.sendDocError(conn, docstore.InvalidQuery(fmt.Errorf(
+			"docstore: doc_subscribe over the unix socket takes no subscription_id (got %q): this connection is the subscription, so an id would name nothing. Drop the field here, or subscribe over the WebSocket, where one connection carries many.",
+			*msg.SubscriptionID)))
+		return
+	}
+	q, err := docSubscriptionQuery(msg)
+	if err != nil {
+		d.sendDocError(conn, err)
+		return
+	}
+
+	// The caller never speaks again, so anything the read returns means gone.
+	gone := make(chan struct{})
+	go func() {
+		defer close(gone)
+		_, _ = io.Copy(io.Discard, conn)
+	}()
+
+	encoder := json.NewEncoder(conn)
+	d.runDocSubscription(q, msg.Have, docSink{
+		deliver: func(window *protocol.DocSubscribeResult) error {
+			return encoder.Encode(protocol.Response{Ok: true, DocSubscribeResult: window})
+		},
+		end: func(err error, code string) { d.sendDocErrorAs(conn, err, code) },
+	}, gone)
 }
 
 // heldRevisions turns the subscriber's declared `have` into the diff map. A

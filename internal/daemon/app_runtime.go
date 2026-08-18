@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -50,7 +51,12 @@ const (
 	// case this guards is an old binary inside a stale app bundle meeting a new
 	// daemon, where every symptom of the skew would otherwise appear later and
 	// somewhere else.
-	appRuntimeAPIVersion = 2
+	//
+	// It moves with the daemon↔host contract, which includes the shape of an
+	// app's bundle: the host loads it. Bump it here and in apphost/src/index.ts
+	// together — TestAppRuntimeAPIVersionMatchesTheHost is what fails when only
+	// one moves.
+	appRuntimeAPIVersion = 5
 )
 
 // appRuntimeHostOverride lets a test — and a developer running a checkout's
@@ -418,7 +424,9 @@ const appDispatchTimeout = 60 * time.Second
 //
 // Handler is resolved here rather than in the host: the daemon holds the frozen
 // declaration and the same pattern matching the bus filter uses, and a second
-// implementation of that rule in TypeScript is one free to drift.
+// implementation of that rule in TypeScript is one free to drift. It is a key of
+// the bundle's `subscriptions` map — which map to index in is what the method
+// name already says, so no key ever carries its kind.
 //
 // Artifact is an absolute path, and that is the whole of the hot-reload story:
 // versions are content-addressed, so each one has its own path, `import()`
@@ -448,6 +456,61 @@ type appDispatchEvent struct {
 type appDispatchResult struct {
 	OK    bool   `json:"ok"`
 	Error string `json:"error,omitempty"`
+}
+
+// appCommandRequest is `app.command`, the daemon's other call into the sidecar.
+//
+// It is appDispatchRequest with the fact replaced by the caller's payload.
+// Deliberately a second method rather than one with an optional event: the two
+// carry different things and answer differently, and a shape whose meaning
+// depends on which half is populated is one every reader has to decode twice.
+// Everything either one needs to find and scope a handler — the artifact, the
+// key, the in-flight id, the declared collections — is identical, and so is
+// what the host does with it. Handler is the command's bare name, looked up in
+// the bundle's `commands` map.
+type appCommandRequest struct {
+	Dispatch    string          `json:"dispatch"`
+	App         string          `json:"app"`
+	VersionID   int64           `json:"version_id"`
+	Artifact    string          `json:"artifact"`
+	Handler     string          `json:"handler"`
+	Collections []string        `json:"collections"`
+	Payload     json.RawMessage `json:"payload,omitempty"`
+}
+
+// appReconcileRequest is `app.reconcile`, the lifecycle call that rebuilds an
+// app's collections through a durable bus fence. Reconcile is a sibling export,
+// so there is no handler key: the method itself selects it.
+type appReconcileRequest struct {
+	Dispatch    string             `json:"dispatch"`
+	App         string             `json:"app"`
+	VersionID   int64              `json:"version_id"`
+	Artifact    string             `json:"artifact"`
+	Collections []string           `json:"collections"`
+	Reason      appReconcileReason `json:"reason"`
+}
+
+type appReconcileReason struct {
+	Causes           []string         `json:"causes"`
+	Version          int64            `json:"version"`
+	ThroughSeq       int64            `json:"throughSeq"`
+	Gap              *appReconcileGap `json:"gap,omitempty"`
+	PreviousVersions []int64          `json:"previousVersions"`
+}
+
+type appReconcileGap struct {
+	Cursor   int64 `json:"cursor"`
+	Earliest int64 `json:"earliest"`
+	Missed   int64 `json:"missed"`
+}
+
+// appCommandDispatchResult is appDispatchResult plus what the handler returned.
+// A handler that returned nothing carries no payload, which is different from
+// one that returned null.
+type appCommandDispatchResult struct {
+	OK      bool            `json:"ok"`
+	Error   string          `json:"error,omitempty"`
+	Payload json.RawMessage `json:"payload,omitempty"`
 }
 
 // appDispatch is one in-flight handler run, as the daemon sees it.
