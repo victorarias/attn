@@ -897,7 +897,21 @@ func runSeedArtifact(verb string, args []string) {
 		writeJSON(result.Note)
 		return
 	}
-	fmt.Printf("%s\n", result.Note.Body)
+	// The answer names the document that moved: with a -m the body is the
+	// caller's own words, which on their own never say which document they were
+	// about. Without one the daemon already rendered that same sentence as the
+	// body, so it is printed once either way.
+	moved := garden.DefaultNoteBody(kind, garden.ArtifactReference{
+		Kind:               artifact.Kind,
+		NotebookDocumentID: protocol.Deref(artifact.NotebookDocumentID),
+		Repository:         protocol.Deref(artifact.Repository),
+		Path:               protocol.Deref(artifact.Path),
+		URL:                protocol.Deref(artifact.URL),
+	})
+	fmt.Printf("%s %s\n", positionals[0], moved)
+	if body := strings.TrimSpace(result.Note.Body); body != "" && body != moved {
+		fmt.Printf("%s\n", body)
+	}
 }
 
 // artifact reads the one reference flag the caller passed. Exactly one, because

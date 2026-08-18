@@ -1402,6 +1402,28 @@ function collectGardenUiState() {
   };
 }
 
+// The panel drill and the docked seed tile mount the same seed document, so one
+// reader answers for both — and the artifact set it reports is the daemon's
+// projection over the whole log, not anything the view recomputed.
+function collectSeedDocumentState(scope: string, seedId: string) {
+  const named = seedId ? `[data-seed-id="${seedId}"]` : '';
+  const root = document.querySelector(`${scope} .seed-document${named}`);
+  if (!(root instanceof HTMLElement)) {
+    return { present: false };
+  }
+  return {
+    present: true,
+    body: root.querySelector('.md-reader-wrap')?.textContent?.trim() ?? '',
+    artifacts: Array.from(root.querySelectorAll('.seed-document__artifacts li')).map(
+      (item) => item.textContent?.trim() ?? '',
+    ),
+    notes: Array.from(root.querySelectorAll('.seed-document__notes li')).map((note) => ({
+      kind: note.getAttribute('data-kind') ?? '',
+      body: note.querySelector('.seed-document__note-body')?.textContent?.trim() ?? '',
+    })),
+  };
+}
+
 function collectTicketDetailUiState() {
   const panel = document.querySelector('[data-testid="ticket-detail-panel"]');
   if (!(panel instanceof HTMLElement)) {
@@ -3285,6 +3307,39 @@ export function useUiAutomationBridge({
         step.click();
         await settleUi(2);
         return collectGardenUiState();
+      }
+      // Expanding a seed row is the panel's drill-down: the row opens into the
+      // seed document, artifacts and all.
+      case 'garden_expand_seed': {
+        const seedId = typeof payload.seedId === 'string' ? payload.seedId : '';
+        if (!seedId) throw new Error('garden_expand_seed requires seedId');
+        const row = Array.from(document.querySelectorAll('.garden-seed')).find(
+          (candidate) => candidate.querySelector('.garden-seed__id')?.textContent?.trim() === seedId,
+        );
+        const head = row?.querySelector('.garden-seed__head');
+        if (!(head instanceof HTMLElement)) {
+          throw new Error(`no row for ${seedId} (the panel is not showing it)`);
+        }
+        // The document is fetched on the way in, so a caller re-reading a row it
+        // already opened asks for the round trip with reopen.
+        if (payload.reopen === true && row?.classList.contains('is-expanded')) {
+          head.click();
+          await settleUi(2);
+        }
+        if (!row?.classList.contains('is-expanded')) {
+          head.click();
+          await settleUi(3);
+        }
+        return collectSeedDocumentState('.garden-seed__detail', seedId);
+      }
+      case 'seed_document_get_state': {
+        const scope = typeof payload.selector === 'string' && payload.selector
+          ? payload.selector
+          : '.workspace-dock-tile';
+        // A workspace can hold more than one seed tile, and an older one is
+        // still mounted: name the seed rather than taking the first tile.
+        const seedId = typeof payload.seedId === 'string' ? payload.seedId : '';
+        return collectSeedDocumentState(scope, seedId);
       }
       case 'ticket_detail_get_state':
         return collectTicketDetailUiState();

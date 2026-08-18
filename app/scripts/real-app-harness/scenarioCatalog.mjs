@@ -83,6 +83,13 @@ export const scenarioCatalog = [
     timeoutMs: 240_000,
   },
   {
+    id: 'garden-delegation-reporting',
+    label: 'Garden delegation reporting: a delegation reports on its seed — log notes, artifacts, steering',
+    command: ['pnpm', 'run', 'real-app:scenario-garden-delegation-reporting'],
+    // Boots the app, a session, and a real delegation into a second session.
+    timeoutMs: 240_000,
+  },
+  {
     id: 'ticket-lifecycle',
     label: 'Ticket lifecycle: chief delegates, worker reports, chief reviews in the panel',
     command: ['pnpm', 'run', 'real-app:scenario-ticket-lifecycle'],

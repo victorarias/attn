@@ -65,9 +65,12 @@ work nobody accepted. Closing stays a deliberate `attn seed harvest`.
 ## Artifacts
 
 The wire shape shipped with the reading surface (#928): `SeedNote.artifact`
-carrying a typed `SeedArtifactReference`, and the frontend's
-`currentSeedArtifacts` projection rendering the attach-minus-detach set in
-both the panel drill and the seed tile. This step adds the writer.
+carrying a typed `SeedArtifactReference`, rendered as a small set in both the
+panel drill and the seed tile. This step adds the writer, and moves the
+attach-minus-detach projection to the daemon: `seed show` hands over a bounded
+window of the log, so a set computed from what the client happens to hold is
+wrong as soon as the log outgrows that window. The daemon projects over the
+whole log and both surfaces render what they are told.
 
 - Two note kinds, `attach` and `detach`, beside `note` and `handoff`.
 - A reference is valid for exactly one kind and carries only that kind's
@@ -77,7 +80,9 @@ both the panel drill and the seed tile. This step adds the writer.
   shape and stores it.
 - The note body is what a person reads on the log. When a caller writes none,
   the daemon renders one from the typed reference. That is rendering the
-  association, not parsing it.
+  association, not parsing it. `attn seed attach`/`detach` answer with the
+  same sentence, so a call carrying `-m "the write-up"` still says which
+  document moved.
 - Storage does not move. The canonical-artifact lifecycle
   ([2026-07-18](2026-07-18-canonical-plan-artifact-lifecycle.md)) keeps
   deciding where documents live; the seed records the association only.
