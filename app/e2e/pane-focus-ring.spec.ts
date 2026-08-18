@@ -1,16 +1,17 @@
 import { test, expect } from '@playwright/test';
 
 // Regression witness for the SessionTerminalWorkspace selection-marker z-index:
-// the edge rail and spotlight corner marks must paint above pane-local overlays.
+// the edge rail and spotlight corner marks must paint above the workspace's own
+// overlays, of which the split divider is the one that shares a pane edge.
 // This needs a real browser because jsdom/happy-dom do not apply the stylesheet.
-test('active-pane selection markers paint above the ticket overlay', async ({ page }) => {
+test('active-pane selection markers paint above the split divider', async ({ page }) => {
   await page.goto('/test-harness/?component=PaneFocusRing');
   await page.waitForFunction(() => window.__HARNESS__?.ready === true);
 
   const workspace = page.locator('[data-testid="workspace"]');
   const pane = page.locator('[data-testid="pane-active"]');
   const inactiveTile = page.locator('[data-testid="tile-inactive"]');
-  const overlay = page.locator('[data-testid="ticket-overlay"]');
+  const overlay = page.locator('[data-testid="split-divider"]');
   await expect(overlay).toBeVisible();
 
   const overlayZ = Number(await overlay.evaluate((el) => getComputedStyle(el).zIndex));
