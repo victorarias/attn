@@ -1996,7 +1996,7 @@ function AppContent({
       icon: <KeyboardActionIcon />,
       run: () => setShortcutEditorOpen(true),
     },
-  ], [openDockPanel, openWorkspaceContextNavigator, handleOpenNotebookTile, openGardenSurface, settings, handleToggleQueueMode]);
+  ], [openDockPanel, openWorkspaceContextNavigator, handleOpenNotebookTile, openGardenSurface, settings, handleToggleQueueMode, sendSetSetting]);
 
   const handleToggleActionMenu = useCallback(() => {
     if (actionMenuOpen) {
