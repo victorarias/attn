@@ -1,4 +1,4 @@
-.PHONY: run build build-linux-amd64 build-linux-arm64 build-app-runtime-host build-app-runtime-host-linux-amd64 build-app-runtime-host-linux-arm64 publish-native-vt publish-ghostty-vt-wasm install install-daemon install-dev install-daemon-dev dev verify-ghostty-vt-wasm test test-hooks test-v test-quick test-watch test-all test-frontend test-e2e test-harness clean generate-types ensure-go-jsonschema check-types build-app ensure-codesign-identity sign-app app-screenshot dist release release-skip-tests
+.PHONY: run build build-linux-amd64 build-linux-arm64 build-app-runtime-host build-app-runtime-host-linux-amd64 build-app-runtime-host-linux-arm64 publish-native-vt publish-ghostty-vt-wasm install install-daemon install-dev install-daemon-dev dev verify-ghostty-vt-wasm test test-hooks test-v test-quick test-watch test-all test-frontend test-e2e test-harness clean generate-types ensure-go-jsonschema check-types generate-sdk check-sdk build-app ensure-codesign-identity sign-app app-screenshot dist release release-skip-tests
 
 # Bare `make` does the full prod inner loop: install + open the app.
 # `make install` is install-only (for scripts/CI that drive the launch
@@ -389,6 +389,25 @@ generate-types: ensure-go-jsonschema
 # reproduce a drift failure locally.
 check-types: generate-types
 	git diff --exit-code internal/protocol/generated.go app/src/types/generated.ts
+
+# The app SDK's declarations. sdk/attn-app is the one TypeScript source; the
+# binary carries its .d.ts so `attn app apply` can materialize a types-only
+# package with no npm. `//go:embed` reads files from the Go tree, which is why
+# the emit lands in internal/appbuild/sdkdist and is committed.
+generate-sdk:
+	pnpm --dir app exec tsc -p ../sdk/attn-app/tsconfig.json
+
+# Same caveat as check-types: it flags *committed* drift, so commit a hand-edit
+# before trying to reproduce a failure locally. `git status` rather than
+# `git diff`, so a declaration the emit newly produces fails here instead of
+# passing as an untracked file nobody embeds.
+check-sdk: generate-sdk
+	@out=$$(git status --porcelain -- internal/appbuild/sdkdist); \
+	if [ -n "$$out" ]; then \
+		echo "internal/appbuild/sdkdist is stale — run make generate-sdk and commit:"; \
+		echo "$$out"; \
+		exit 1; \
+	fi
 
 # Build the packaged app for $(PROFILE) (empty = prod). All bundle metadata is
 # derived from `attn profile resolve` by scripts/build-app-profile.sh: the

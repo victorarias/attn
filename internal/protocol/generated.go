@@ -270,6 +270,54 @@ type AppApplyResult struct {
 	VersionID int `json:"version_id"`
 }
 
+type AppCommandInfo struct {
+	// Description corresponds to the JSON schema field "description".
+	Description *string `json:"description,omitempty,omitzero"`
+
+	// Name corresponds to the JSON schema field "name".
+	Name string `json:"name"`
+}
+
+type AppCommandMessage struct {
+	// App corresponds to the JSON schema field "app".
+	App string `json:"app"`
+
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Command corresponds to the JSON schema field "command".
+	Command string `json:"command"`
+
+	// Payload corresponds to the JSON schema field "payload".
+	Payload *string `json:"payload,omitempty,omitzero"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID string `json:"request_id"`
+}
+
+type AppCommandResultMessage struct {
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty,omitzero"`
+
+	// ErrorCode corresponds to the JSON schema field "error_code".
+	ErrorCode *string `json:"error_code,omitempty,omitzero"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// Payload corresponds to the JSON schema field "payload".
+	Payload *string `json:"payload,omitempty,omitzero"`
+
+	// Reconcile corresponds to the JSON schema field "reconcile".
+	Reconcile *AppReconcileReasonInfo `json:"reconcile,omitempty,omitzero"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID string `json:"request_id"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
+}
+
 type AppConsumerInfo struct {
 	// Cursor corresponds to the JSON schema field "cursor".
 	Cursor int `json:"cursor"`
@@ -289,19 +337,22 @@ type AppConsumerInfo struct {
 
 type AppInvocationInfo struct {
 	// DurationMs corresponds to the JSON schema field "duration_ms".
-	DurationMs int `json:"duration_ms"`
+	DurationMs *int `json:"duration_ms,omitempty,omitzero"`
 
 	// Error corresponds to the JSON schema field "error".
-	Error string `json:"error"`
+	Error *string `json:"error,omitempty,omitzero"`
 
 	// EventName corresponds to the JSON schema field "event_name".
-	EventName string `json:"event_name"`
+	EventName *string `json:"event_name,omitempty,omitzero"`
 
 	// EventSeq corresponds to the JSON schema field "event_seq".
-	EventSeq int `json:"event_seq"`
+	EventSeq *int `json:"event_seq,omitempty,omitzero"`
 
 	// EventSubject corresponds to the JSON schema field "event_subject".
-	EventSubject string `json:"event_subject"`
+	EventSubject *string `json:"event_subject,omitempty,omitzero"`
+
+	// FinishedAt corresponds to the JSON schema field "finished_at".
+	FinishedAt *string `json:"finished_at,omitempty,omitzero"`
 
 	// Handler corresponds to the JSON schema field "handler".
 	Handler string `json:"handler"`
@@ -309,11 +360,20 @@ type AppInvocationInfo struct {
 	// ID corresponds to the JSON schema field "id".
 	ID int `json:"id"`
 
+	// Kind corresponds to the JSON schema field "kind".
+	Kind string `json:"kind"`
+
+	// Reconcile corresponds to the JSON schema field "reconcile".
+	Reconcile *AppReconcileReasonInfo `json:"reconcile,omitempty,omitzero"`
+
 	// StartedAt corresponds to the JSON schema field "started_at".
 	StartedAt string `json:"started_at"`
 
 	// Status corresponds to the JSON schema field "status".
 	Status string `json:"status"`
+
+	// ThroughRequestID corresponds to the JSON schema field "through_request_id".
+	ThroughRequestID *int `json:"through_request_id,omitempty,omitzero"`
 
 	// VersionID corresponds to the JSON schema field "version_id".
 	VersionID int `json:"version_id"`
@@ -352,6 +412,68 @@ type AppLogsResult struct {
 
 	// Truncated corresponds to the JSON schema field "truncated".
 	Truncated bool `json:"truncated"`
+}
+
+type AppReconcileGapInfo struct {
+	// Cursor corresponds to the JSON schema field "cursor".
+	Cursor int `json:"cursor"`
+
+	// Earliest corresponds to the JSON schema field "earliest".
+	Earliest int `json:"earliest"`
+
+	// Missed corresponds to the JSON schema field "missed".
+	Missed int `json:"missed"`
+}
+
+type AppReconcileReasonInfo struct {
+	// Causes corresponds to the JSON schema field "causes".
+	Causes []string `json:"causes"`
+
+	// Gap corresponds to the JSON schema field "gap".
+	Gap *AppReconcileGapInfo `json:"gap,omitempty,omitzero"`
+
+	// PreviousVersions corresponds to the JSON schema field "previous_versions".
+	PreviousVersions []int `json:"previous_versions"`
+
+	// ThroughSeq corresponds to the JSON schema field "through_seq".
+	ThroughSeq int `json:"through_seq"`
+
+	// Version corresponds to the JSON schema field "version".
+	Version int `json:"version"`
+}
+
+type AppReconcileStatus struct {
+	// CurrentAttempt corresponds to the JSON schema field "current_attempt".
+	CurrentAttempt *AppInvocationInfo `json:"current_attempt,omitempty,omitzero"`
+
+	// LastError corresponds to the JSON schema field "last_error".
+	LastError *string `json:"last_error,omitempty,omitzero"`
+
+	// Reason corresponds to the JSON schema field "reason".
+	Reason *AppReconcileReasonInfo `json:"reason,omitempty,omitzero"`
+
+	// State corresponds to the JSON schema field "state".
+	State string `json:"state"`
+}
+
+type AppRegistryEntry struct {
+	// ContentHash corresponds to the JSON schema field "content_hash".
+	ContentHash *string `json:"content_hash,omitempty,omitzero"`
+
+	// Description corresponds to the JSON schema field "description".
+	Description *string `json:"description,omitempty,omitzero"`
+
+	// Enabled corresponds to the JSON schema field "enabled".
+	Enabled bool `json:"enabled"`
+
+	// Name corresponds to the JSON schema field "name".
+	Name string `json:"name"`
+
+	// VersionID corresponds to the JSON schema field "version_id".
+	VersionID *int `json:"version_id,omitempty,omitzero"`
+
+	// Views corresponds to the JSON schema field "views".
+	Views []AppViewInfo `json:"views"`
 }
 
 type AppRemoveMessage struct {
@@ -513,16 +635,22 @@ type AppStallInfo struct {
 	DisablesAt string `json:"disables_at"`
 
 	// EventName corresponds to the JSON schema field "event_name".
-	EventName string `json:"event_name"`
+	EventName *string `json:"event_name,omitempty,omitzero"`
 
 	// EventSeq corresponds to the JSON schema field "event_seq".
-	EventSeq int `json:"event_seq"`
+	EventSeq *int `json:"event_seq,omitempty,omitzero"`
+
+	// Kind corresponds to the JSON schema field "kind".
+	Kind string `json:"kind"`
 
 	// LastError corresponds to the JSON schema field "last_error".
 	LastError string `json:"last_error"`
 
 	// Since corresponds to the JSON schema field "since".
 	Since string `json:"since"`
+
+	// ThroughRequestID corresponds to the JSON schema field "through_request_id".
+	ThroughRequestID *int `json:"through_request_id,omitempty,omitzero"`
 }
 
 type AppStatusMessage struct {
@@ -546,6 +674,9 @@ type AppStatusResult struct {
 	// RecentVersions corresponds to the JSON schema field "recent_versions".
 	RecentVersions []AppVersionInfo `json:"recent_versions,omitempty,omitzero"`
 
+	// Reconcile corresponds to the JSON schema field "reconcile".
+	Reconcile AppReconcileStatus `json:"reconcile"`
+
 	// Runtime corresponds to the JSON schema field "runtime".
 	Runtime *AppRuntimeInfo `json:"runtime,omitempty,omitzero"`
 
@@ -564,6 +695,9 @@ type AppStatusResult struct {
 }
 
 type AppSummary struct {
+	// Commands corresponds to the JSON schema field "commands".
+	Commands []AppCommandInfo `json:"commands,omitempty,omitzero"`
+
 	// Consumer corresponds to the JSON schema field "consumer".
 	Consumer *AppConsumerInfo `json:"consumer,omitempty,omitzero"`
 
@@ -578,6 +712,9 @@ type AppSummary struct {
 
 	// UpdatedAt corresponds to the JSON schema field "updated_at".
 	UpdatedAt string `json:"updated_at"`
+
+	// Views corresponds to the JSON schema field "views".
+	Views []AppViewInfo `json:"views,omitempty,omitzero"`
 }
 
 type AppVersionInfo struct {
@@ -592,6 +729,43 @@ type AppVersionInfo struct {
 
 	// ID corresponds to the JSON schema field "id".
 	ID int `json:"id"`
+}
+
+type AppViewCrashMessage struct {
+	// App corresponds to the JSON schema field "app".
+	App string `json:"app"`
+
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Error corresponds to the JSON schema field "error".
+	Error string `json:"error"`
+
+	// TileID corresponds to the JSON schema field "tile_id".
+	TileID string `json:"tile_id"`
+
+	// VersionID corresponds to the JSON schema field "version_id".
+	VersionID int `json:"version_id"`
+
+	// View corresponds to the JSON schema field "view".
+	View string `json:"view"`
+}
+
+type AppViewInfo struct {
+	// Kind corresponds to the JSON schema field "kind".
+	Kind string `json:"kind"`
+
+	// Name corresponds to the JSON schema field "name".
+	Name string `json:"name"`
+
+	// ParamsLabel corresponds to the JSON schema field "params_label".
+	ParamsLabel *string `json:"params_label,omitempty,omitzero"`
+
+	// ParamsPlaceholder corresponds to the JSON schema field "params_placeholder".
+	ParamsPlaceholder *string `json:"params_placeholder,omitempty,omitzero"`
+
+	// Title corresponds to the JSON schema field "title".
+	Title string `json:"title"`
 }
 
 type AppWatchMessage struct {
@@ -613,6 +787,14 @@ type ApprovePRMessage struct {
 
 	// ID corresponds to the JSON schema field "id".
 	ID string `json:"id"`
+}
+
+type AppsUpdatedMessage struct {
+	// Apps corresponds to the JSON schema field "apps".
+	Apps []AppRegistryEntry `json:"apps"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
 }
 
 type AttachBlock struct {
@@ -2493,6 +2675,9 @@ type DocSubscribeMessage struct {
 
 	// Query corresponds to the JSON schema field "query".
 	Query DocumentQuery `json:"query"`
+
+	// SubscriptionID corresponds to the JSON schema field "subscription_id".
+	SubscriptionID *string `json:"subscription_id,omitempty,omitzero"`
 }
 
 type DocSubscribeResult struct {
@@ -2507,6 +2692,40 @@ type DocSubscribeResult struct {
 
 	// Upsert corresponds to the JSON schema field "upsert".
 	Upsert []StoredDocument `json:"upsert"`
+}
+
+type DocSubscriptionDeliveryMessage struct {
+	// AsOfSeq corresponds to the JSON schema field "as_of_seq".
+	AsOfSeq int `json:"as_of_seq"`
+
+	// Delivery corresponds to the JSON schema field "delivery".
+	Delivery int `json:"delivery"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// Order corresponds to the JSON schema field "order".
+	Order []string `json:"order"`
+
+	// SubscriptionID corresponds to the JSON schema field "subscription_id".
+	SubscriptionID string `json:"subscription_id"`
+
+	// Upsert corresponds to the JSON schema field "upsert".
+	Upsert []StoredDocument `json:"upsert"`
+}
+
+type DocSubscriptionEndedMessage struct {
+	// Code corresponds to the JSON schema field "code".
+	Code string `json:"code"`
+
+	// Error corresponds to the JSON schema field "error".
+	Error string `json:"error"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// SubscriptionID corresponds to the JSON schema field "subscription_id".
+	SubscriptionID string `json:"subscription_id"`
 }
 
 type DocUndefineMessage struct {
@@ -2529,6 +2748,14 @@ type DocUndefineResult struct {
 
 	// Namespace corresponds to the JSON schema field "namespace".
 	Namespace string `json:"namespace"`
+}
+
+type DocUnsubscribeMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// SubscriptionID corresponds to the JSON schema field "subscription_id".
+	SubscriptionID string `json:"subscription_id"`
 }
 
 type DocumentCollectionSchema struct {
@@ -3648,6 +3875,9 @@ type HookStopFailureMessage struct {
 }
 
 type InitialStateMessage struct {
+	// Apps corresponds to the JSON schema field "apps".
+	Apps []AppRegistryEntry `json:"apps,omitempty,omitzero"`
+
 	// Authors corresponds to the JSON schema field "authors".
 	Authors []AuthorState `json:"authors,omitempty,omitzero"`
 

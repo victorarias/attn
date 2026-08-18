@@ -368,6 +368,15 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
       return options;
     }, [agentPanes, sessionById]);
 
+    // The session this workspace has selected — what an app's view is given as
+    // `sessionId`. Derived from the active pane rather than the tile's own
+    // binding: a view is a function of where the user is, and a tile-only
+    // workspace legitimately has none.
+    const activePaneSessionId = useMemo(
+      () => agentPaneById.get(activePaneId)?.sessionId ?? null,
+      [agentPaneById, activePaneId],
+    );
+
     // Docked tiles keyed by tile id, walked from the authoritative layout tree.
     const tileLeafById = useMemo(() => {
       const map = new Map<string, TileLeaf>();
@@ -1162,6 +1171,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
                 && effectiveDraggingLeafId === null
               }
               workspaceSessions={tileSessionOptions}
+              workspaceSessionId={activePaneSessionId}
               workspaceDirectory={workspaceDirectory}
               onClose={() => onUndockTile?.(tileLeaf.tileId)}
               onUpdateParams={(tileParams) => onUpdateTile?.(tileLeaf.tileId, tileParams)}

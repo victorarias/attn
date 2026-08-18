@@ -1,0 +1,27 @@
+kind: added
+area: apps
+change: >
+  An app's view can now act, not only read. An app declares `[[commands]]` in
+  its manifest, exports a handler for each under `commands`, and a view
+  invokes one by name — attn addresses it to the app that mounted the tile.
+  The handler runs where every other handler runs: the shared runtime, the same
+  document access, the same invocation log, the same sixty-second abandon.
+  What an app answers is what the version now serving declared, so a rollback
+  takes a command away with it, and a command that fails costs that click and
+  nothing else — it is reported in the handler's own words and never disables
+  the app. `attn app status` lists the commands the serving version declares.
+
+  The SDK now ships the controls a view needs to look like the rest of attn:
+  Button, TextInput, TextArea, List and ListRow, EmptyState, and Markdown. They
+  draw with attn's own tokens, and nothing in them animates. And `attn app new`
+  scaffolds a working tile rather than a stub — a live query, a command, and
+  those components — with an AGENTS.md that teaches views, params, reading,
+  acting and drawing.
+notes: >
+  A5 slice 5. Protocol 244: `app_command` and `app_command_result`. An app's
+  bundle now default-exports one handler map per kind — `subscriptions`, keyed
+  by event pattern, and `commands`, keyed by name — so an app installed before
+  this needs one `attn app apply` to keep dispatching, and the app runtime's API
+  version goes to 4 so a stale sidecar binary is refused at hello rather than
+  served against the new shape. One command carries at
+  most 256KB in either direction.

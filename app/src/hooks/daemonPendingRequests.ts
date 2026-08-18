@@ -78,6 +78,9 @@ interface ResultEvent {
  * Settle the request a `*_result` event answers; returns whether a waiter was
  * found (a timed-out or other client's request is not an error). `extract`
  * returning `undefined` counts as failure, never `resolve(undefined)`.
+ *
+ * `failure` rejects with that error rather than a plain one built from the
+ * event's text, for a domain whose refusals carry a code the caller branches on.
  */
 export function settlePendingRequest<E extends ResultEvent, T>(
   pending: PendingRequests,
@@ -85,6 +88,7 @@ export function settlePendingRequest<E extends ResultEvent, T>(
   event: E,
   extract: (event: E) => T | undefined,
   failureMessage: string,
+  failure?: Error,
 ): boolean {
   const requestId = event.request_id;
   if (typeof requestId !== 'string') {
@@ -98,7 +102,7 @@ export function settlePendingRequest<E extends ResultEvent, T>(
   pending.delete(key);
   const value = event.success ? extract(event) : undefined;
   if (value === undefined) {
-    waiter.reject(new Error(event.error || failureMessage));
+    waiter.reject(failure ?? new Error(event.error || failureMessage));
   } else {
     waiter.resolve(value);
   }

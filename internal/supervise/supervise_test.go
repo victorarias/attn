@@ -182,6 +182,65 @@ func TestIntentionalStopAndShutdownNeverRestart(t *testing.T) {
 	}
 }
 
+func TestTerminateGenerationRestartsOnlyTheExactProcess(t *testing.T) {
+	clock := newFakeClock()
+	launcher := &fakeLauncher{}
+	supervisor := New(Options{Clock: clock})
+	if err := supervisor.Ensure("fixture", launcher.start); err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+
+	first, _ := supervisor.Snapshot("fixture")
+	if !supervisor.NoteConnected("fixture", first.Generation) {
+		t.Fatal("connect first generation")
+	}
+	terminated, err := supervisor.TerminateGeneration("fixture", first.Generation)
+	if err != nil || !terminated {
+		t.Fatalf("terminate generation %d = %t, %v; want true, nil", first.Generation, terminated, err)
+	}
+	if got := launcher.handle(0).killCount(); got != 1 {
+		t.Fatalf("first-generation kills = %d, want 1", got)
+	}
+	waitFor(t, func() bool {
+		snapshot, _ := supervisor.Snapshot("fixture")
+		return snapshot.Phase == PhaseBackoff && snapshot.RestartAttempt == 1
+	})
+	backoff, _ := supervisor.Snapshot("fixture")
+	if backoff.Desired != DesiredRunning {
+		t.Fatalf("desired after termination = %q, want %q", backoff.Desired, DesiredRunning)
+	}
+
+	clock.Advance(RestartBackoff[0])
+	waitFor(t, func() bool { return launcher.count() == 2 })
+	second, _ := supervisor.Snapshot("fixture")
+	if second.Generation <= first.Generation {
+		t.Fatalf("replacement generation = %d, want greater than %d", second.Generation, first.Generation)
+	}
+	if !supervisor.NoteConnected("fixture", second.Generation) {
+		t.Fatal("connect replacement generation")
+	}
+
+	terminated, err = supervisor.TerminateGeneration("fixture", first.Generation)
+	if err != nil || terminated {
+		t.Fatalf("terminate stale generation %d = %t, %v; want false, nil", first.Generation, terminated, err)
+	}
+	if got := launcher.handle(1).killCount(); got != 0 {
+		t.Fatalf("replacement kills after stale termination = %d, want 0", got)
+	}
+
+	terminated, err = supervisor.TerminateGeneration("fixture", second.Generation)
+	if err != nil || !terminated {
+		t.Fatalf("terminate generation %d = %t, %v; want true, nil", second.Generation, terminated, err)
+	}
+	waitFor(t, func() bool {
+		snapshot, _ := supervisor.Snapshot("fixture")
+		return snapshot.Phase == PhaseBackoff && snapshot.RestartAttempt == 2
+	})
+	if got := launcher.handle(1).killCount(); got != 1 {
+		t.Fatalf("replacement kills = %d, want 1", got)
+	}
+}
+
 func TestSnapshotsStartingConnectedBackoffAndStopped(t *testing.T) {
 	clock := newFakeClock()
 	launcher := &fakeLauncher{}

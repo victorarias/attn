@@ -2513,6 +2513,28 @@ export function useUiAutomationBridge({
         await settleUi();
         return { workspaceId };
       }
+      case 'app_view_get_state': {
+        // Every docked app-view tile the DOM is holding. `placeholder` names the
+        // host's own state when nothing mounted; a host with no placeholder is
+        // rendering the app's component, and `text` is then that component's
+        // output — the only proof from outside that the view's module linked
+        // against attn's React and ran.
+        const scope = typeof payload.workspaceId === 'string' && payload.workspaceId
+          ? document.querySelector(`[data-session-terminal-workspace="${payload.workspaceId}"]`)
+          : document;
+        const hosts = Array.from(scope?.querySelectorAll('[data-app-view-host]') ?? []);
+        return {
+          hosts: hosts.map((host) => ({
+            view: host.getAttribute('data-app-view-host') || '',
+            tileId: host.getAttribute('data-app-view-tile') || '',
+            stale: host.getAttribute('data-app-view-stale') === '1',
+            badge: host.querySelector('.app-tile-host-badge')?.textContent?.trim() || '',
+            placeholder: host.querySelector('[data-app-view-placeholder]')
+              ?.getAttribute('data-app-view-placeholder') || '',
+            text: host.textContent?.trim() || '',
+          })),
+        };
+      }
       case 'get_workspace_ui_state': {
         // Workspace-centric DOM query (the session UI-state verbs key off a
         // session id, which a tile-only workspace lacks). Reports whether the

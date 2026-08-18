@@ -54,7 +54,13 @@ func runAppNew(args []string) {
 		fmt.Fprintln(os.Stderr, "usage: attn app new <path> [--name <name>] [--description <text>]")
 		os.Exit(2)
 	}
-	manifest, err := appbuild.Scaffold(appbuild.ScaffoldOptions{Dir: dir, Name: name, Description: description})
+	manifest, err := appbuild.Scaffold(appbuild.ScaffoldOptions{
+		Dir:         dir,
+		Name:        name,
+		Description: description,
+		StoreDir:    config.AppsDir(),
+		Log:         func(line string) { fmt.Fprintf(os.Stderr, "  %s\n", line) },
+	})
 	if err != nil {
 		appFail("new", err)
 	}
@@ -116,7 +122,7 @@ func printApplied(result *protocol.AppApplyResult, res appbuild.Result) {
 	var state string
 	switch {
 	case result.VersionCreated:
-		state = fmt.Sprintf("new, %d bytes", res.BundleBytes)
+		state = fmt.Sprintf("new, %d bytes", totalArtifactBytes(res))
 	case moved:
 		state = "this content already had a version; nothing new was recorded"
 	default:
@@ -128,6 +134,25 @@ func printApplied(result *protocol.AppApplyResult, res appbuild.Result) {
 		fmt.Printf("  was on version %d\n", *result.PreviousVersionID)
 	}
 	fmt.Printf("  artifact %s\n", result.ArtifactPath)
+	// A version made of several artifacts gets each one's size named. There is no
+	// bundle size cap — nothing measured yet would justify a number — so making
+	// the numbers visible is what apply owes an author instead.
+	if len(res.ViewBytes) > 0 {
+		fmt.Printf("    %s  %d bytes\n", appbuild.ArtifactName, res.BundleBytes)
+		for _, v := range res.ViewBytes {
+			fmt.Printf("    views/%s.js  %d bytes\n", v.Name, v.Bytes)
+		}
+	}
+}
+
+// totalArtifactBytes is everything a version holds: the handler bundle and one
+// module per view.
+func totalArtifactBytes(res appbuild.Result) int64 {
+	total := res.BundleBytes
+	for _, v := range res.ViewBytes {
+		total += v.Bytes
+	}
+	return total
 }
 
 func runAppRollback(args []string) {
@@ -310,25 +335,24 @@ func devWatchInvocations(app string, stop <-chan struct{}) {
 }
 
 func devInvocationLine(inv protocol.AppInvocationInfo) string {
-	line := fmt.Sprintf("%s  %s(%s) in %dms", inv.Status, inv.Handler, inv.EventName, inv.DurationMs)
-	if inv.EventSubject != "" {
-		line = fmt.Sprintf("%s  %s(%s %s) in %dms",
-			inv.Status, inv.Handler, inv.EventName, inv.EventSubject, inv.DurationMs)
+	line := fmt.Sprintf("%s  %s [%s]", inv.Status, inv.Handler, appInvocationWork(inv))
+	if inv.DurationMs != nil {
+		line += fmt.Sprintf(" in %dms", *inv.DurationMs)
 	}
-	if inv.Error != "" {
-		line += "\n            " + inv.Error
+	if inv.Error != nil && *inv.Error != "" {
+		line += "\n            " + *inv.Error
 	}
 	return line
 }
 
 // devRelevant filters the noise. node_modules and .git are large and never part
-// of what is built from here; the generated files are rewritten by the build
+// of what is built from here; the generated file is rewritten by the build
 // itself, and while WriteGenerated skips an unchanged write, a manifest edit does
-// change them — without this the rebuild they trigger would trigger another.
+// change it — without this the rebuild it triggers would trigger another.
 func devRelevant(path string) bool {
 	base := filepath.Base(path)
 	switch base {
-	case filepath.Base(appbuild.GeneratedFile), filepath.Base(appbuild.SDKFile):
+	case filepath.Base(appbuild.GeneratedFile):
 		return false
 	}
 	for _, part := range strings.Split(filepath.ToSlash(path), "/") {

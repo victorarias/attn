@@ -143,8 +143,8 @@ func TestPinAlarmsMatchesTheSnapshot(t *testing.T) {
 	}
 }
 
-// A disabled consumer does not hold retention open — the kill switch is the way
-// out of exactly this condition, so it must not keep reporting it.
+// A disabled ordinary consumer does not hold retention open — the kill switch
+// is the way out of exactly this condition, so it must not keep reporting it.
 func TestDisabledConsumerNeverAlarms(t *testing.T) {
 	s := pinStore(t, "notifier", false, 30*24*time.Hour)
 	b := pinBus(t, s, time.Hour)
@@ -321,4 +321,89 @@ func TestTheMessageNamesTheTripwireExactly(t *testing.T) {
 			t.Errorf("a %s tripwire reads %q, want it to carry %q", tc.threshold, got, tc.want)
 		}
 	}
+}
+
+// The other window an operator can move, and the one with no other way to be
+// seen: thirty days is longer than any run anyone watches, so a trim against a
+// database younger than that removes nothing whatever the cursor floor says.
+// Without this knob, "resumes below the oldest surviving fact" is a state the
+// product can only reach in a unit test.
+func TestRetentionFromEnv(t *testing.T) {
+	for _, tc := range []struct {
+		raw  string
+		want time.Duration
+		says string
+	}{
+		{raw: "", want: DefaultRetention},
+		{raw: "1s", want: time.Second, says: "retention window set to 1s"},
+		{raw: "5m", want: 5 * time.Minute, says: "retention window set to 5m"},
+		// Retention is a window, not a finding, so there is nothing for zero or a
+		// negative to mean. Both fall back loudly rather than turning trim into a
+		// pass that deletes everything below the floor.
+		{raw: "0", want: DefaultRetention, says: "is not a positive window"},
+		{raw: "-5m", want: DefaultRetention, says: "is not a positive window"},
+		{raw: "soon", want: DefaultRetention, says: "is not a duration"},
+	} {
+		t.Run(fmt.Sprintf("%q", tc.raw), func(t *testing.T) {
+			t.Setenv(RetentionEnv, tc.raw)
+			var said []string
+			got := RetentionFromEnv(func(format string, args ...interface{}) {
+				said = append(said, fmt.Sprintf(format, args...))
+			})
+			if got != tc.want {
+				t.Errorf("%q = %s, want %s", tc.raw, got, tc.want)
+			}
+			whole := strings.Join(said, "\n")
+			if tc.says == "" {
+				if whole != "" {
+					t.Errorf("an unset knob said %q; a default nobody asked to change is not news", whole)
+				}
+				return
+			}
+			if !strings.Contains(whole, tc.says) {
+				t.Errorf("said %q, want it to carry %q", whole, tc.says)
+			}
+		})
+	}
+}
+
+// What the knob is for. The window is what decides whether a trim can remove
+// anything at all, and at the shipped default a fresh log is untouchable — which
+// is the whole reason a consumer resuming below `earliest` had no way to be
+// produced outside a unit test.
+func TestAMovedRetentionWindowIsWhatLetsATrimRemoveAnything(t *testing.T) {
+	seed := func(t *testing.T, b *Bus, s Store) {
+		t.Helper()
+		for _, name := range []string{"a.happened", "b.happened"} {
+			if _, err := b.Publish(name, "subject-"+name, nil); err != nil {
+				t.Fatalf("Publish(%s): %v", name, err)
+			}
+		}
+		// A consumer at head, so the cursor floor is not what decides this.
+		_, head, err := s.Bounds()
+		if err != nil {
+			t.Fatalf("Bounds: %v", err)
+		}
+		if err := s.SaveConsumer(Consumer{Name: "reader", Cursor: head, Enabled: true}, time.Now()); err != nil {
+			t.Fatalf("SaveConsumer: %v", err)
+		}
+	}
+
+	t.Run("at the shipped default nothing is old enough", func(t *testing.T) {
+		s := newMemStore()
+		b := New(Options{Store: s, Retention: DefaultRetention})
+		seed(t, b, s)
+		if n, err := b.Trim(); err != nil || n != 0 {
+			t.Fatalf("trimmed %d event(s) from a fresh log at the 30-day window, want 0 (err=%v)", n, err)
+		}
+	})
+
+	t.Run("moved to a window a run can cross", func(t *testing.T) {
+		s := newMemStore()
+		b := New(Options{Store: s, Retention: time.Nanosecond})
+		seed(t, b, s)
+		if n, err := b.Trim(); err != nil || n != 2 {
+			t.Fatalf("trimmed %d event(s) with the window moved, want 2 (err=%v)", n, err)
+		}
+	})
 }

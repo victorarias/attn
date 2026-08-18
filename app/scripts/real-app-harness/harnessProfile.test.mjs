@@ -17,6 +17,7 @@ import {
   deepLinkSchemeForProfile,
   hasRunAgainstProdFlag,
   isProductionHarnessTarget,
+  profileCliEnv,
   profileForAppPath,
   resolveHarnessResources,
   socketPathForProfile,
@@ -243,5 +244,45 @@ describeWithBinary('single authority (attn profile resolve)', () => {
     // A named profile's real daemon port never collides with prod/dev.
     expect(defaultDaemonPortForProfile('agent7')).not.toBe(9849);
     expect(defaultDaemonPortForProfile('agent7')).not.toBe(29849);
+  });
+});
+
+describe('profileCliEnv', () => {
+  const routing = {
+    ATTN_DATA_DIR: '/Users/nobody/.attn',
+    ATTN_WS_PORT: '9849',
+    ATTN_SOCKET_PATH: '/Users/nobody/.attn/attn.sock',
+    ATTN_DB_PATH: '/Users/nobody/.attn/attn.db',
+    ATTN_CONFIG_PATH: '/Users/nobody/.attn/config.json',
+    ATTN_PLUGIN_DIR: '/Users/nobody/.attn/plugins',
+  };
+
+  beforeEach(() => {
+    for (const [key, value] of Object.entries(routing)) process.env[key] = value;
+  });
+
+  afterEach(() => {
+    for (const key of Object.keys(routing)) delete process.env[key];
+  });
+
+  it('clears every inherited routing override, not just the socket four', () => {
+    const env = profileCliEnv('agent7');
+    expect(env.ATTN_PROFILE).toBe('agent7');
+    for (const key of Object.keys(routing)) expect(env[key]).toBeUndefined();
+  });
+
+  it('keeps ATTN_DATA_DIR and ATTN_WS_PORT out, which a profile name cannot override', () => {
+    // An attn-managed session exports both into every shell it hosts, and each
+    // outranks ATTN_PROFILE: leaving them makes a profile-selected command talk
+    // to production while still printing profile=<name>.
+    const env = profileCliEnv('agent7');
+    expect('ATTN_DATA_DIR' in env).toBe(false);
+    expect('ATTN_WS_PORT' in env).toBe(false);
+  });
+
+  it('lets an explicit extra set a routing value on purpose', () => {
+    const env = profileCliEnv('agent7', { ATTN_SOCKET_PATH: '/tmp/chosen.sock' });
+    expect(env.ATTN_SOCKET_PATH).toBe('/tmp/chosen.sock');
+    expect(env.ATTN_DATA_DIR).toBeUndefined();
   });
 });

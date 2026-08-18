@@ -236,6 +236,33 @@ export function deepLinkSchemeForProfile(profile = currentHarnessProfile()) {
   return resolveHarnessResources(profile).deepLinkScheme;
 }
 
+// Every routing override a CLI call could inherit. ATTN_PROFILE names a world;
+// each of these overrides it outright, and an attn-managed session exports
+// ATTN_DATA_DIR and ATTN_WS_PORT into every shell it hosts. A harness driven
+// from inside attn that clears only the socket/db/config/plugin four keeps the
+// PRODUCTION data dir and port: the banner reads profile=<name> while the
+// command talks to ~/.attn, which is how a scenario's `daemon ensure` takes over
+// the production daemon. `attn profile-env` does not clear ATTN_DATA_DIR either.
+const ROUTING_OVERRIDE_ENV = [
+  'ATTN_DATA_DIR',
+  'ATTN_WS_PORT',
+  'ATTN_SOCKET_PATH',
+  'ATTN_DB_PATH',
+  'ATTN_CONFIG_PATH',
+  'ATTN_PLUGIN_DIR',
+];
+
+// The environment for driving the `attn` CLI at one profile: the caller's
+// environment with ATTN_PROFILE set and every inherited routing override
+// removed, so the profile is the only thing deciding where the command lands.
+export function profileCliEnv(profile = currentHarnessProfile(), extra = {}) {
+  const env = { ...process.env, ATTN_PROFILE: profile, ...extra };
+  for (const key of ROUTING_OVERRIDE_ENV) {
+    if (!(key in extra)) delete env[key];
+  }
+  return env;
+}
+
 export function hasRunAgainstProdFlag(argv = process.argv.slice(2)) {
   return argv.includes('--run-against-prod');
 }

@@ -190,6 +190,55 @@ func TestEvictedClientLearnsWhyOnItsNextConnection(t *testing.T) {
 	}
 }
 
+// An eviction can be filed while a hello is still mid-processing — the hub
+// evicts on its own goroutine, and the hello's takeEviction runs at its tail.
+// When that hello belongs to the connection being evicted, the notice cannot
+// be written to a channel that is already closed, and consuming the record
+// anyway would lose the only copy: the client's next connection is never told
+// why it went away. A notice that cannot be handed over goes back on file.
+//
+// Found as a 1-in-10 race in TestEvictedClientLearnsWhyOnItsNextConnection
+// (the original CI failure); staged here without the timing — a synthetic
+// client, so no real hello is in flight to share the take.
+func TestAnEvictionFiledMidHelloIsNotLostWithTheConnection(t *testing.T) {
+	d := NewForTesting(filepath.Join(shortTempDir(t), "test.sock"))
+	defer d.Stop()
+
+	const clientID = "app-instance-1"
+	client := &wsClient{
+		send: make(chan outboundMessage, 8),
+		// Cleared ATTN_WS_AUTH_TOKEN at the HTTP layer, which stands in for the
+		// client token — the property under test is the notice, not the gate.
+		bearerAuthorized: true,
+	}
+
+	// The eviction's order: the channel closes before the record is filed.
+	client.closeSendChannelWithStatus(websocket.StatusPolicyViolation, slowClientCloseReason)
+	d.wsHub.rememberEviction(clientID, evictionRecord{
+		at: time.Now(), reason: slowClientCloseReason, undelivered: maxSlowCount,
+	})
+
+	// The in-flight hello reaches its tail on a connection that is already gone.
+	d.handleClientHello(client, &protocol.ClientHelloMessage{
+		Cmd: protocol.CmdClientHello, ClientKind: "daemon-test", ClientID: protocol.Ptr(clientID),
+		Version:      "protocol-" + protocol.ProtocolVersion,
+		Capabilities: []string{protocol.CapabilityWorkspaceSessions},
+	})
+
+	// The notice could not be delivered to a closed channel, so the record went
+	// back on file rather than dying with the connection that raced it.
+	record, ok := d.wsHub.takeEviction(clientID)
+	if !ok {
+		t.Fatal("an eviction filed mid-hello was lost: the next connection will never be told why")
+	}
+	if record.reason != slowClientCloseReason {
+		t.Errorf("re-filed reason = %q, want %q", record.reason, slowClientCloseReason)
+	}
+	if record.undelivered < maxSlowCount {
+		t.Errorf("re-filed undelivered = %d, want at least %d", record.undelivered, maxSlowCount)
+	}
+}
+
 // The hub's slow-count rule is not how a real client dies. A client that has
 // stopped draining takes one large snapshot straight past the write deadline
 // long before 256 more messages pile up behind it, so the write pump gives up

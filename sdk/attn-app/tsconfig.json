@@ -1,0 +1,21 @@
+{
+  // Declarations only. The emitted .d.ts files are committed under
+  // internal/appbuild/sdkdist so the attn binary can //go:embed them and
+  // `attn app apply` can materialize the package on a machine with no npm.
+  // `make generate-sdk` writes them; `make check-sdk` fails on a stale copy.
+  "compilerOptions": {
+    "target": "ES2020",
+    "lib": ["ES2020", "DOM"],
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "skipLibCheck": true,
+    "isolatedModules": true,
+    "declaration": true,
+    "emitDeclarationOnly": true,
+    "removeComments": false,
+    "outDir": "../../internal/appbuild/sdkdist"
+  },
+  "include": ["src"]
+}

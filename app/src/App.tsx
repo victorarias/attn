@@ -16,6 +16,8 @@ import { WorktreeCleanupPrompt } from './components/WorktreeCleanupPrompt';
 import { CloseSessionPrompt } from './components/CloseSessionPrompt';
 import { ChiefOfStaffTransferPrompt } from './components/ChiefOfStaffTransferPrompt';
 import { SessionContextCapPrompt } from './components/SessionContextCapPrompt';
+import { AppViewParamsPrompt } from './components/appViews/AppViewParamsPrompt';
+import { appViewTileKind } from './utils/appBundle';
 import { TicketDetailPanel } from './components/TicketDetailPanel';
 import { TicketBoardSurface } from './components/TicketBoardSurface';
 import { WorkflowRunView } from './components/WorkflowRunView';
@@ -441,6 +443,7 @@ function App() {
     setDaemonSessions,
     setTickets,
     setSeeds,
+    setApps,
     setCrew,
     prs,
     setPRs,
@@ -623,6 +626,7 @@ function App() {
     },
     onTicketsUpdate: setTickets,
     onSeedsUpdate: setSeeds,
+    onAppsUpdate: setApps,
     onCrewUpdate: setCrew,
     onWorkspacesUpdate: setDaemonWorkspaces,
     onPRsUpdate: setPRs,
@@ -1096,7 +1100,7 @@ function AppContent({
   const [workspaceContextsError, setWorkspaceContextsError] = useState<string | null>(null);
   const [workspaceContexts, setWorkspaceContexts] = useState<Awaited<ReturnType<typeof sendListWorkspaceContexts>>>([]);
   const whatsNew = useWhatsNew();
-  const { repoStates, authorStates, tickets, seeds, seedsTotal, crew } = useDaemonStore();
+  const { repoStates, authorStates, tickets, seeds, seedsTotal, apps, crew } = useDaemonStore();
   const mutedRepos = useMemo(() =>
     repoStates.filter(r => r.muted).map(r => r.repo),
     [repoStates],
@@ -1594,6 +1598,16 @@ function AppContent({
     currentCap?: number;
   } | null>(null);
 
+  // A view that declared `params` asks for them before it docks, so the tile
+  // arrives with its answer rather than mounting empty and waiting.
+  const [appViewParamsPrompt, setAppViewParamsPrompt] = useState<{
+    app: string;
+    view: string;
+    viewTitle: string;
+    label: string;
+    placeholder?: string;
+  } | null>(null);
+
   const handleTerminalModelRecovered = useCallback(() => {
     showError(
       `Terminal issue recovered. We reloaded it for you. Diagnostics were saved to ${UI_DIAGNOSTICS_FILE_DISPLAY}; please send this file to Victor so he can troubleshoot it.`,
@@ -1700,6 +1714,7 @@ function AppContent({
     || boardSurfaceOpen
     || chiefTransferTarget !== null
     || contextCapPromptSession !== null
+    || appViewParamsPrompt !== null
     || closedWorktree !== null
     || pendingSessionClose !== null
     || sessionCreationJob !== null
@@ -1874,6 +1889,56 @@ function AppContent({
       });
   }, [sendWorkspaceDockTile, settings]);
 
+  // Dock one of an app's views. A fresh tile id every time, like the notebook
+  // tile: the daemon reads a duplicate id as a move, so a shared one would
+  // relocate the first tile instead of opening a second.
+  const dockAppViewTile = useCallback((app: string, view: string, params: string) => {
+    const workspaceId = activeWorkspaceIdRef.current;
+    if (!workspaceId) return;
+    void sendWorkspaceDockTile(
+      workspaceId,
+      `app-view-tile-${crypto.randomUUID()}`,
+      appViewTileKind(app, view),
+      { edge: 'right', ratio: 0.4, ...(params ? { tileParams: params } : {}) },
+    ).catch((error) => {
+      console.warn('[App] Failed to dock app view tile:', error);
+    });
+  }, [sendWorkspaceDockTile]);
+
+  // One entry per view of every enabled app. A disabled app is absent rather
+  // than shown greyed out: the picker is a list of what you can dock now, and
+  // `attn app enable` is the way back — the same way a removed app's already
+  // docked tile says so in place rather than vanishing.
+  const appViewMenuItems = useMemo<ActionMenuItem[]>(() => {
+    const items: ActionMenuItem[] = [];
+    for (const app of apps ?? []) {
+      if (!app.enabled) continue;
+      for (const view of app.views ?? []) {
+        items.push({
+          id: `app-view-${app.name}-${view.name}`,
+          title: `${view.title} — ${app.name}`,
+          description: app.description || `Dock ${app.name}'s ${view.name} view`,
+          keywords: ['app', 'view', 'dock', 'tile', app.name, view.name],
+          icon: <ContextActionIcon />,
+          run: () => {
+            if (view.params_label) {
+              setAppViewParamsPrompt({
+                app: app.name,
+                view: view.name,
+                viewTitle: `${app.name}/${view.name}`,
+                label: view.params_label,
+                ...(view.params_placeholder ? { placeholder: view.params_placeholder } : {}),
+              });
+              return;
+            }
+            dockAppViewTile(app.name, view.name, '');
+          },
+        });
+      }
+    }
+    return items;
+  }, [apps, dockAppViewTile]);
+
   const actionMenuItems = useMemo<ActionMenuItem[]>(() => [
     {
       id: 'open-markdown-file',
@@ -1958,7 +2023,7 @@ function AppContent({
     if (settingsOpen || shortcutsOpen || locationPickerOpen || whatsNew.isOpen
       || workspaceContextsOpen || notebookOpen || boardSurfaceOpen
       || chiefTransferTarget !== null || contextCapPromptSession !== null
-      || closedWorktree !== null || pendingSessionClose !== null
+      || appViewParamsPrompt !== null || closedWorktree !== null || pendingSessionClose !== null
       || sessionCreationJob !== null || openPRLauncherJob !== null) {
       return;
     }
@@ -1967,6 +2032,7 @@ function AppContent({
     actionMenuOpen,
     chiefTransferTarget,
     contextCapPromptSession,
+    appViewParamsPrompt,
     closedWorktree,
     locationPickerOpen,
     openPRLauncherJob,
@@ -2665,7 +2731,7 @@ function AppContent({
   // views, which are built further down.
   const actionMenuItemsWithWorkspaceActions = useMemo<ActionMenuItem[]>(() => {
     const workspace = activeWorkspaceForCommands;
-    if (!workspace) return actionMenuItems;
+    if (!workspace) return [...actionMenuItems, ...appViewMenuItems];
     const activeSession = workspace.sessions.find((session) => session.id === activeSessionId);
     // Pinning the agent is offered above pinning its workspace: it is the finer
     // of the two and the one a user who reached for "pin" from inside a session
@@ -2705,6 +2771,7 @@ function AppContent({
       : [];
     return [
       ...actionMenuItems,
+      ...appViewMenuItems,
       ...sessionPinItems,
       ...sessionCapItems,
       {
@@ -2729,7 +2796,7 @@ function AppContent({
         run: () => sendMuteWorkspace(workspace.id, workspace.endpointId),
       },
     ];
-  }, [actionMenuItems, activeWorkspaceForCommands, activeSessionId, sendPinWorkspace, sendPinSession, sendMuteWorkspace]);
+  }, [actionMenuItems, appViewMenuItems, activeWorkspaceForCommands, activeSessionId, sendPinWorkspace, sendPinSession, sendMuteWorkspace]);
 
 
   // Each arrangement has one notion of what wants the user, and the mode selects
@@ -4286,6 +4353,15 @@ function AppContent({
           }
         }}
       />
+      {appViewParamsPrompt && (
+        <AppViewParamsPrompt
+          viewTitle={appViewParamsPrompt.viewTitle}
+          label={appViewParamsPrompt.label}
+          placeholder={appViewParamsPrompt.placeholder}
+          onSubmit={(params) => dockAppViewTile(appViewParamsPrompt.app, appViewParamsPrompt.view, params)}
+          onClose={() => setAppViewParamsPrompt(null)}
+        />
+      )}
       {contextCapPromptSession && (
         <SessionContextCapPrompt
           sessionLabel={contextCapPromptSession.label}

@@ -11,6 +11,7 @@ import { open } from '@tauri-apps/plugin-dialog';
 import { browserHostLabel, claimBrowserHostFocus, controlBrowserHost } from '../../browser/host';
 import { parseNotebookTileParams, serializeNotebookTileParams, type TileContentState, type TileLeaf } from '../../types/workspace';
 import { deriveTileTitle, tilePathBasename } from '../../utils/tilePresentation';
+import { useAppViewTitleResolver } from '../../hooks/useAppViewTitle';
 import { BrowserTileBody } from './BrowserTileBody';
 import { MarkdownReader } from '../MarkdownReader';
 import type { MarkdownAnnotationsSendHandle } from '../MarkdownReader';
@@ -18,6 +19,8 @@ import { getMarkdownAnnotationsTransport } from '../MarkdownReader/annotations/t
 import { useAnnotationSend } from '../../annotations/useAnnotationSend';
 import { useNotebookSurfaceContext } from '../../contexts/NotebookSurfaceContext';
 import { NotebookTile } from '../notebook/NotebookTile';
+import { AppTileHost } from '../appViews/AppTileHost';
+import { parseAppViewTileKind } from '../../utils/appBundle';
 import type { NotebookSurfaceHandle } from '../NotebookSurface';
 import './WorkspaceDockTile.css';
 
@@ -29,6 +32,9 @@ export { resolveMarkdownTarget } from '../MarkdownReader/markdownLinks';
 // drops the padding/overflow and fills the frame. The markdown reader draws
 // its own centered card, so its body only keeps the scroll (no padding).
 function bodyKindModifier(tileKind: string): string {
+  // An app's view fills the frame and draws its own everything; the body gives
+  // it the space and none of attn's padding.
+  if (parseAppViewTileKind(tileKind)) return 'workspace-dock-tile-body--app';
   if (tileKind === 'browser') return 'workspace-dock-tile-body--browser';
   if (tileKind === 'notebook') return 'workspace-dock-tile-body--notebook';
   if (tileKind === 'markdown') return 'workspace-dock-tile-body--markdown';
@@ -58,6 +64,9 @@ interface WorkspaceDockTileProps {
   visible?: boolean;
   // The workspace's agent sessions — the markdown tile's retarget options.
   workspaceSessions?: WorkspaceTileSessionOption[];
+  // The session the workspace has selected, if any. An app's view is given this
+  // as `sessionId`; nothing else reads it.
+  workspaceSessionId?: string | null;
   // The owning workspace's directory (Workspace.directory), for the notebook
   // tile's root switcher's "Workspace — <dir>" option. Absent for tile-only
   // workspaces with no directory.
@@ -98,6 +107,7 @@ export function WorkspaceDockTile({
   dragging,
   visible = true,
   workspaceSessions = [],
+  workspaceSessionId = null,
   workspaceDirectory,
   onClose,
   onUpdateParams,
@@ -120,7 +130,9 @@ export function WorkspaceDockTile({
   const path = content?.path
     || (tile.tileKind === 'notebook' ? parseNotebookTileParams(tile.tileParams).path : tile.tileParams)
     || '';
-  const title = deriveTileTitle(tile, content);
+  const appView = parseAppViewTileKind(tile.tileKind);
+  const appViewTitle = useAppViewTitleResolver();
+  const title = deriveTileTitle(tile, content, appViewTitle);
   const browserLabel = browserHostLabel(workspaceId, tile.tileId);
   const [browserAddress, setBrowserAddress] = useState(tile.tileParams || '');
   const pendingBrowserParamsRef = useRef<string | null>(null);
@@ -554,6 +566,15 @@ export function WorkspaceDockTile({
               />
             );
           })()
+        ) : appView ? (
+          <AppTileHost
+            app={appView.app}
+            view={appView.view}
+            workspaceId={workspaceId}
+            sessionId={workspaceSessionId}
+            tileId={tile.tileId}
+            params={tile.tileParams || ''}
+          />
         ) : (
           <div className="workspace-dock-tile-message">Unsupported tile: {tile.tileKind}</div>
         )}

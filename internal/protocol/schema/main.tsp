@@ -2245,7 +2245,8 @@ model BusStatusResultMessage {
   baseline_window_seconds: float64;
   surge_rate_per_hour: float64;
   // How long an enabled consumer may pin the retention floor before the pin is
-  // reported. Carried so a client shows the limit beside the observed value.
+  // reported. Disabled installed-app lanes are retained but do not use this
+  // alarm; their future size tripwire needs a measured receipt first.
   pin_alarm_seconds: float64;
   producers: BusProducerStatus[];
   consumers: BusConsumerStatus[];
@@ -2253,8 +2254,9 @@ model BusStatusResultMessage {
 }
 
 // Flips a durable consumer's kill switch, the same bit `attn bus enable|disable`
-// writes. Disabling stops delivery and stops the consumer pinning retention; its
-// cursor is preserved, and re-enabling resumes from wherever trimming left it.
+// writes. Disabling stops delivery. An ordinary consumer stops pinning
+// retention; an installed app keeps its cursor and unread backlog until it is
+// enabled or uninstalled.
 model BusSetConsumerEnabledMessage {
   cmd: "bus_set_consumer_enabled";
   consumer: string;
@@ -2997,6 +2999,12 @@ model InitialStateMessage {
   // as well as on garden_seeds_updated so a client that connects to an
   // over-large garden knows it is short before anything moves.
   seeds_total?: int32;
+  // Every app registered on THIS daemon, with the views it offers. It is what
+  // the dock picker lists and what a mounted app tile resolves its bundle URL
+  // from. Local only: an app's bundle is an HTTP artifact on the daemon holding
+  // it and the hub relays WebSocket messages rather than proxying HTTP, so a
+  // remote endpoint's apps are deliberately never offered here.
+  apps?: AppRegistryEntry[];
   // The crew roster, so the sidebar draws every member — awake or asleep — from
   // the first push rather than asking for one.
   crew?: CrewMember[];
@@ -4232,10 +4240,28 @@ model DocumentRevision {
 // page it named a write ago. Use `limit` and let each delivery carry the current
 // window. One-shot doc_query keeps `after` exactly as it is, because a single
 // read has one instant and nothing to move under it.
+// On the WebSocket the connection is multiplexed, so the subscription needs an
+// identity of its own: `subscription_id` is client-minted, required there, and
+// refused on the unix socket where a second subscription means a second
+// connection and an id would name nothing. Deliveries then arrive as
+// DocSubscriptionDeliveryMessage rather than as responses on this connection,
+// and doc_unsubscribe is the way out.
 model DocSubscribeMessage {
   "cmd": "doc_subscribe";
   "query": DocumentQuery;
   "have"?: DocumentRevision[];
+  "subscription_id"?: string;
+}
+
+// End one live query. The way out for doc_subscribe's way in, and the only one
+// a WebSocket client has short of dropping the socket: a tile that unmounts must
+// stop the daemon re-running its query on every write to that collection.
+//
+// Unknown ids are ignored rather than refused — an unsubscribe racing the
+// daemon's own doc_subscription_ended is the ordinary case, not an error.
+model DocUnsubscribeMessage {
+  "cmd": "doc_unsubscribe";
+  "subscription_id": string;
 }
 
 // One delivery of a live query's window, and the whole client contract is one
@@ -4269,6 +4295,40 @@ model DocSubscribeResult {
   "as_of_seq": safeint;
   "order": string[];
   "upsert": StoredDocument[];
+}
+
+// One delivery of a WebSocket subscription: DocSubscribeResult's four fields
+// verbatim, plus the id that says which subscription they belong to. The client
+// rule is unchanged — render `order`, take bodies from `upsert` or cache, forget
+// the rest — because this is the same delivery travelling over a multiplexed
+// connection rather than a dedicated one.
+model DocSubscriptionDeliveryMessage {
+  event: "doc_subscription_delivery";
+  "subscription_id": string;
+  "delivery": int32;
+  "as_of_seq": safeint;
+  "order": string[];
+  "upsert": StoredDocument[];
+}
+
+// A WebSocket subscription is over, and no further delivery carries its id.
+//
+// It is the only failure channel a subscription has: a refusal at subscribe time
+// (an invalid query, an `after` cursor, a collection never declared, or one
+// client holding too many subscriptions) and an ending after acceptance (the
+// collection was undefined, or redeclared without a field the query reads) both
+// arrive here. `code` is what a host acts on and `error` is what a person reads;
+// nothing may match on the English.
+//
+// The codes: `invalid_query`, `undeclared_collection`, `subscription_limit`
+// refuse a subscription that never started; `collection_undefined` and
+// `collection_redeclared` end one that did — which is what lets a UI host tell
+// "kill the tile" from "resubscribe".
+model DocSubscriptionEndedMessage {
+  event: "doc_subscription_ended";
+  "subscription_id": string;
+  "code": string;
+  "error": string;
 }
 
 // ============================================================================
@@ -4614,6 +4674,144 @@ model AppSummary {
   // state, not a gap in the answer: it means nothing is delivering facts to
   // this app.
   "consumer"?: AppConsumerInfo;
+  // The views the serving version declares, read back out of its frozen
+  // declaration. Empty for an app with no views, and for an app with no version
+  // applied yet — a view exists only inside a built version.
+  "views"?: AppViewInfo[];
+  // The commands the serving version declares, same rule as views: what an app
+  // answers is what the version now serving declared, not what its manifest
+  // says today. It is the only way to see a command exists without invoking it.
+  "commands"?: AppCommandInfo[];
+}
+
+// One declared command: something a view of this app can ask it to do.
+model AppCommandInfo {
+  "name": string;
+  // The manifest's description, when it has one. attn renders no UI from it —
+  // an app draws its own button — so this is for a reader of `attn app status`.
+  "description"?: string;
+}
+
+// One declared view: a named component the app offers attn to render, as the
+// dock picker and the tile header show it.
+//
+// `entrypoint` is deliberately absent. It is a path in the author's source tree
+// and says nothing to a UI that mounts a built artifact; what the frontend needs
+// is the name (which addresses the artifact and the tile kind), the kind (where
+// attn may put it) and the title (what a person reads).
+model AppViewInfo {
+  "name": string;
+  // "tile" is the only kind this attn mounts. It is carried rather than assumed
+  // so a client meeting a kind it cannot render says so instead of mounting the
+  // wrong surface.
+  "kind": string;
+  "title": string;
+  // Set when the view declares `params`: the dock picker asks for one line of
+  // text with this label before placing the tile, and hands the string to the
+  // view untouched. Absent means the view takes no params and the picker asks
+  // for nothing.
+  "params_label"?: string;
+  "params_placeholder"?: string;
+}
+
+// One app as the UI needs it: what is mountable, from where, and whether it is
+// running. Deliberately not AppSummary — that answer carries the consumer's
+// cursor and lag, which cost a bus-head read per push and mean nothing to a
+// tile.
+//
+// `content_hash` is what makes the bundle URL: an artifact is addressed by the
+// version's hash, so a new version is a different URL rather than a cache to
+// bust, and a tile remounts by noticing this value moved.
+model AppRegistryEntry {
+  "name": string;
+  // The manifest's description, when it has one — what the dock picker shows
+  // under the view's title.
+  "description"?: string;
+  // The app's enabled state, which IS its bus consumer's bit. False when the app
+  // has no consumer at all: nothing would run it either way, and a tile has no
+  // use for the distinction.
+  "enabled": boolean;
+  // Absent until a version has been applied. A registry row can exist ahead of
+  // its first successful build, and such an app has nothing to mount.
+  "version_id"?: safeint;
+  "content_hash"?: string;
+  "views": AppViewInfo[];
+}
+
+// The app registry changed: a version flipped, an app was enabled or disabled,
+// or an app was removed. A whole-list push, like tickets and seeds — the list is
+// short (a machine has a handful of apps) and every mounted tile has to
+// re-decide what it is serving from it.
+model AppsUpdatedMessage {
+  event: "apps_updated";
+  apps: AppRegistryEntry[];
+}
+
+// A docked view threw while rendering, caught by the host's per-app error
+// boundary.
+//
+// It is a report, not a request: the tile has already shown the error and the
+// way back, and the daemon's job is to make the crash visible to the agent that
+// wrote the view — it is recorded as an app invocation stamped with the version
+// that served it, so `attn app logs` and `attn app status` show it beside handler
+// failures.
+model AppViewCrashMessage {
+  "cmd": "app_view_crash";
+  "app": string;
+  "view": string;
+  // The version that served the bundle, which a rollback must not rewrite. The
+  // report is dropped when it does not match a version of this app.
+  "version_id": safeint;
+  // The tile the crash happened in — the subject a reader uses to tell "one tile
+  // is broken" from "every mount of this view crashes".
+  "tile_id": string;
+  // The error as the boundary caught it: message first, then the component stack
+  // when React gave one.
+  "error": string;
+}
+
+// A view asks its app to do something.
+//
+// The envelope is generic on purpose: attn knows the app, the command name and
+// a payload it never looks inside, and the app's handler is what gives any of
+// it meaning. That is the whole surface — there is no per-command shape in the
+// protocol, and adding a command is a manifest line plus a handler.
+//
+// `app` is composed by the host from the mount's identity and never by the
+// view, the same rule that makes a view unable to read another app's documents.
+model AppCommandMessage {
+  "cmd": "app_command";
+  "request_id": string;
+  "app": string;
+  "command": string;
+  // The argument, as JSON text. Text rather than a typed field because the
+  // daemon never interprets it: it is handed to the app's handler and its
+  // answer comes back the same way, exactly as a document body travels.
+  // Absent when the command takes none.
+  "payload"?: string;
+}
+
+// What the app's command handler answered.
+//
+// `success` false covers every way the command did not run — the app is not
+// installed, disabled, has no serving version, does not declare this command,
+// the runtime is not there, or the handler threw — and `error` is the sentence
+// a person reads in the tile. A handler that threw is a failed command, never a
+// dead socket: the distinction the runtime draws between an app's fault and its
+// own is unchanged here.
+model AppCommandResultMessage {
+  event: "app_command_result";
+  "request_id": string;
+  "success": boolean;
+  "error"?: string;
+  // Stable refusal code for callers that need to distinguish a command held
+  // behind the reconcile fence from an app or handler failure.
+  "error_code"?: string;
+  // Present with error_code=reconcile_owed. The message remains the surface a
+  // person reads; this is the structured fence a caller can inspect.
+  "reconcile"?: AppReconcileReasonInfo;
+  // The handler's return value as JSON text, when it returned one.
+  "payload"?: string;
 }
 
 model AppVersionInfo {
@@ -4648,6 +4846,37 @@ model AppStatusMessage {
   "name": string;
 }
 
+// The lost range carried by a gap reconcile request.
+model AppReconcileGapInfo {
+  "cursor": safeint;
+  "earliest": safeint;
+  "missed": safeint;
+}
+
+// The durable requests folded into one reconcile attempt. Causes are ordered
+// gap, version_changed; previous_versions stays in request order with repeats
+// removed.
+model AppReconcileReasonInfo {
+  "causes": string[];
+  "version": safeint;
+  "through_seq": safeint;
+  "gap"?: AppReconcileGapInfo;
+  "previous_versions": safeint[];
+}
+
+// Reconcile state as one `attn app status` call observes it.
+model AppReconcileStatus {
+  // "not_needed" | "unsupported" | "idle" | "owed" | "running".
+  "state": string;
+  "reason"?: AppReconcileReasonInfo;
+  // The durable running row. Startup repairs an attempt interrupted before it
+  // settled, so a current attempt is never inferred from process memory.
+  "current_attempt"?: AppInvocationInfo;
+  // The latest settled reconcile failure, kept visible while the request stays
+  // owed and after an interrupted daemon has restarted.
+  "last_error"?: string;
+}
+
 // What is known about one app, and only what is known: the registry row, the
 // consumer if there is one, the invocations recorded so far, and the shared
 // runtime's state. An app's status must not claim a health it cannot observe, so
@@ -4656,6 +4885,8 @@ model AppStatusResult {
   "app": AppSummary;
   "versions": safeint;
   "invocations": safeint;
+  // Required because unsupported is a real operator state, not missing data.
+  "reconcile": AppReconcileStatus;
   // The most recent versions, newest first, capped — "versions" above says how
   // many exist. Rollback names ids in its refusals and there is nowhere else to
   // read them, so a status that carried only a count sent the reader looking for
@@ -4714,15 +4945,20 @@ model AppRuntimeInfo {
   "last_exit"?: string;
 }
 
-// An app that has failed on the same event long enough to be on the clock.
+// An app that has failed on the same delivery or reconcile claim long enough to
+// be on the clock.
 //
 // `disables_at` is the whole point of reporting this: an app stalled on one
 // event holds the durable log's retention floor open for every other consumer,
 // so attn disables it, and the reader is entitled to know when.
 model AppStallInfo {
-  "event_seq": safeint;
-  "event_name": string;
-  // When the app first failed on this event.
+  // "subscription" | "reconcile".
+  "kind": string;
+  "event_seq"?: safeint;
+  "event_name"?: string;
+  // The immutable claim boundary while a reconcile request is retrying.
+  "through_request_id"?: safeint;
+  // When the app first failed on this work item.
   "since": string;
   "attempts": int32;
   "last_error": string;
@@ -4807,14 +5043,23 @@ model AppInvocationInfo {
   // The version that actually ran, which is not necessarily the one the app
   // points at now — a rollback does not rewrite what happened.
   "version_id": safeint;
-  "event_seq": safeint;
-  "event_name": string;
-  "event_subject": string;
+  // "subscription" | "command" | "view" | "reconcile".
+  "kind": string;
+  // Fact identity exists only for subscription invocations.
+  "event_seq"?: safeint;
+  "event_name"?: string;
+  "event_subject"?: string;
   "handler": string;
   "status": string;
-  "error": string;
-  "duration_ms": safeint;
+  "error"?: string;
+  // Absent while status=running.
+  "duration_ms"?: safeint;
   "started_at": string;
+  "finished_at"?: string;
+  // Reconcile attempts retain the exact claimed input and request boundary, so
+  // retries and interruptions remain inspectable after restart.
+  "reconcile"?: AppReconcileReasonInfo;
+  "through_request_id"?: safeint;
 }
 
 // Flip an app's enabled state, which is its bus consumer's enabled bit and
@@ -6150,6 +6395,10 @@ alias DaemonEvent =
   | PastConversationsResultMessage
   | BusStatusResultMessage
   | BusSetConsumerEnabledResultMessage
+  | AppsUpdatedMessage
+  | AppCommandResultMessage
+  | DocSubscriptionDeliveryMessage
+  | DocSubscriptionEndedMessage
   | AutoModeStateResultMessage
   | AutoModePromoteResultMessage
   | AutoModeDiscardResultMessage;

@@ -110,6 +110,91 @@ func ValidateName(name string) error {
 	return nil
 }
 
+// MaxViewNameLength bounds a view name, for the same reason MaxNameLength
+// bounds an app's: the name is addressed, not just displayed. It is a file name
+// under the version directory and a segment of the tile kind an app view docks
+// as, and 64 is far past any real name.
+const MaxViewNameLength = 64
+
+// ValidateViewName reports whether a string can name one of an app's views.
+//
+// It is the app-name rule again, minus the reserved set: a view name is scoped
+// to its app, so nothing it could collide with is global. It lives here rather
+// than in the manifest parser because the same string is a file name in the
+// version directory and a segment of the `app:<app>/<view>` tile kind, and a
+// parser with its own opinion is how those drift apart.
+func ValidateViewName(name string) error {
+	if name == "" {
+		return fmt.Errorf("a view name is required, as lowercase letters, digits and dashes (for example approvals)")
+	}
+	if len(name) > MaxViewNameLength {
+		return fmt.Errorf("view name %q is %d characters, over the %d-character limit", name, len(name), MaxViewNameLength)
+	}
+	if !nameRe.MatchString(name) {
+		return fmt.Errorf("view name %q must be lowercase letters, digits and dashes, starting with a letter or digit (for example pending-approvals)", name)
+	}
+	return nil
+}
+
+// MaxCommandNameLength bounds a command name. The name is addressed — it
+// travels on the wire and is a key of the generated Handlers type — so it is
+// bounded for the same reason a view name is.
+const MaxCommandNameLength = 64
+
+// ValidateCommandName reports whether a string can name one of an app's
+// commands.
+//
+// The view-name rule again, and deliberately the same one: a command name is
+// scoped to its app, and the shape that reads well as a tile kind reads well as
+// an action a button invokes. Living here rather than in the manifest parser is
+// what stops the parser, the daemon's dispatch key and the SDK's hook from
+// disagreeing about what a command may be called.
+func ValidateCommandName(name string) error {
+	if name == "" {
+		return fmt.Errorf("a command name is required, as lowercase letters, digits and dashes (for example approve)")
+	}
+	if len(name) > MaxCommandNameLength {
+		return fmt.Errorf("command name %q is %d characters, over the %d-character limit", name, len(name), MaxCommandNameLength)
+	}
+	if !nameRe.MatchString(name) {
+		return fmt.Errorf("command name %q must be lowercase letters, digits and dashes, starting with a letter or digit (for example approve-request)", name)
+	}
+	return nil
+}
+
+// The labels an invocation is recorded under. They are a rendering choice for
+// `attn app logs` and nothing else: what runs is looked up in the map for its
+// kind — the bundle exports one per kind — so a label never has to be unique
+// against anything, and every kind gets one because a reader of the log wants
+// to know which of them ran.
+func CommandLabel(command string) string      { return "command:" + command }
+func SubscriptionLabel(pattern string) string { return "subscribe:" + pattern }
+func ViewLabel(view string) string            { return "view:" + view }
+
+// ViewTileKindPrefix is what makes a workspace layout's `tile_kind` an app's
+// rather than a built-in one. The prefix is reserved from A5 on: a built-in tile
+// kind may never start with it, so a future kind cannot collide with an app's
+// name.
+//
+// `tile_kind` stays daemon-opaque — internal/workspacelayout accepts any
+// non-empty string and never looks inside one. This is a naming rule the CLI and
+// the frontend both derive from, not a validation the layout performs.
+const ViewTileKindPrefix = ConsumerPrefix
+
+// ViewTileKind is how one of an app's views docks: `app:<app>/<view>`. Both
+// segments are validated names, so the string has exactly one `/` and parses by
+// splitting on the first one.
+func ViewTileKind(app, view string) string { return ViewTileKindPrefix + app + "/" + view }
+
+// NoSubscriptionsPattern is the bus filter of an app that declared no
+// subscriptions — a fact name nothing publishes. A filter has to be *something*,
+// and every other candidate ("", "*") means "everything" somewhere in the bus.
+//
+// It lives here because two surfaces that cannot see each other need the same
+// string: the daemon derives it, and the CLI recognises it to say "nothing"
+// where it would otherwise print a fact name no reader could look up.
+const NoSubscriptionsPattern = "app.subscribes.to.nothing"
+
 // ConsumerName is the app's durable bus consumer. The prefix is what keeps an
 // app from colliding with a platform consumer, and what makes `attn bus status`
 // readable at a glance.

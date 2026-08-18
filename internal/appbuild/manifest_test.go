@@ -34,7 +34,7 @@ func TestParseManifest_Valid(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseManifest: %v", err)
 	}
-	if m.Name != "approval-gate" || m.Entrypoint != "src/index.ts" || m.AttnAppAPI != APIVersion {
+	if m.Name != "approval-gate" || m.Entrypoint != "src/index.ts" || m.AttnAppAPI != APIVersion || m.Reconcile {
 		t.Fatalf("manifest = %+v", m)
 	}
 	if got := m.EventPatterns(); len(got) != 2 || got[0] != "delegation.*" || got[1] != "session.state.changed" {
@@ -112,6 +112,29 @@ func TestParseManifest_UnknownTopLevelKeyIsRefused(t *testing.T) {
 	}
 }
 
+func TestParseManifest_ReconcileDefaultsFalseAndFreezesTrue(t *testing.T) {
+	m, err := ParseManifest(validManifest(t, ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Reconcile {
+		t.Fatal("reconcile defaults true")
+	}
+
+	with := strings.Replace(validManifest(t, ""), `entrypoint = "src/index.ts"`, "entrypoint = \"src/index.ts\"\nreconcile = true", 1)
+	m, err = ParseManifest(with)
+	if err != nil {
+		t.Fatal(err)
+	}
+	declaration, err := m.Declaration()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(declaration, `"reconcile":true`) {
+		t.Fatalf("declaration does not freeze reconcile support: %s", declaration)
+	}
+}
+
 // A key attn does not understand inside a table it does is named in full, not
 // reported as its enclosing table: "collections" is supported, and saying so
 // would send the reader looking for the wrong mistake.
@@ -173,6 +196,273 @@ entrypoint = "src/index.ts"
 			t.Fatalf("err = %v, want a refusal explaining the app could never run", err)
 		}
 	})
+}
+
+// viewBlock is the declaration everything below mutates one field of.
+const viewBlock = `
+[[views]]
+name = "approvals"
+kind = "tile"
+title = "Pending approvals"
+entrypoint = "src/views/Approvals.tsx"
+`
+
+func TestParseManifest_Views(t *testing.T) {
+	m, err := ParseManifest(validManifest(t, viewBlock))
+	if err != nil {
+		t.Fatalf("ParseManifest: %v", err)
+	}
+	if len(m.Views) != 1 {
+		t.Fatalf("views = %+v", m.Views)
+	}
+	v := m.Views[0]
+	if v.Name != "approvals" || v.Kind != ViewKindTile || v.Title != "Pending approvals" || v.Entrypoint != "src/views/Approvals.tsx" {
+		t.Fatalf("view = %+v", v)
+	}
+	if v.Params != nil {
+		t.Errorf("params = %+v, want none when the manifest declares none", v.Params)
+	}
+	if got := m.ViewNames(); len(got) != 1 || got[0] != "approvals" {
+		t.Errorf("ViewNames() = %v", got)
+	}
+}
+
+// kind is optional and the declaration records the resolved value, so a default
+// that changes in a later api version cannot rewrite what an old version meant.
+func TestParseManifest_ViewKindDefaultsToTileAndIsFrozenResolved(t *testing.T) {
+	m, err := ParseManifest(validManifest(t, strings.Replace(viewBlock, "kind = \"tile\"\n", "", 1)))
+	if err != nil {
+		t.Fatalf("ParseManifest: %v", err)
+	}
+	if m.Views[0].Kind != ViewKindTile {
+		t.Fatalf("kind = %q, want %q", m.Views[0].Kind, ViewKindTile)
+	}
+	declaration, err := m.Declaration()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(declaration, `"kind":"tile"`) {
+		t.Errorf("the frozen declaration does not record the resolved kind: %s", declaration)
+	}
+}
+
+// A kind attn cannot mount is refused at apply, naming the kinds it does mount.
+// Installing it would give the app a view nothing renders — half-loaded, with
+// nothing saying so.
+func TestParseManifest_UnmountableViewKindIsRefused(t *testing.T) {
+	_, err := ParseManifest(validManifest(t, strings.Replace(viewBlock, `kind = "tile"`, `kind = "panel"`, 1)))
+	if err == nil {
+		t.Fatal("ParseManifest accepted a kind this attn cannot mount")
+	}
+	for _, want := range []string{"panel", ViewKindTile, "approvals"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not carry %q", err, want)
+		}
+	}
+}
+
+func TestParseManifest_ViewRefusals(t *testing.T) {
+	cases := map[string]struct{ old, new, want string }{
+		"no name":        {`name = "approvals"`, `name = ""`, "view name is required"},
+		"illegal name":   {`name = "approvals"`, `name = "Approvals!"`, "Approvals!"},
+		"no title":       {"title = \"Pending approvals\"\n", "", "no title"},
+		"no entrypoint":  {"entrypoint = \"src/views/Approvals.tsx\"\n", "", "no entrypoint"},
+		"abs entrypoint": {`entrypoint = "src/views/Approvals.tsx"`, `entrypoint = "/etc/passwd"`, "relative"},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			text := validManifest(t, strings.Replace(viewBlock, c.old, c.new, 1))
+			_, err := ParseManifest(text)
+			if err == nil {
+				t.Fatalf("ParseManifest accepted %s", name)
+			}
+			if !strings.Contains(err.Error(), c.want) {
+				t.Errorf("error %q does not carry %q", err, c.want)
+			}
+		})
+	}
+
+	t.Run("duplicate", func(t *testing.T) {
+		_, err := ParseManifest(validManifest(t, viewBlock+viewBlock))
+		if err == nil || !strings.Contains(err.Error(), "twice") {
+			t.Fatalf("err = %v, want a refusal naming the repeated view", err)
+		}
+	})
+}
+
+// The view name rule is internal/apps', because the same string is a file name
+// in the version directory and a segment of the `app:<app>/<view>` tile kind.
+func TestParseManifest_ViewNameRuleIsTheRegistrys(t *testing.T) {
+	names := []string{
+		"approvals", "a", "9lives", "pending-v2",
+		"", "-leading", "Approvals", "with_underscore", "with space",
+		"app/name", "trailing-", strings.Repeat("a", apps.MaxViewNameLength+1),
+	}
+	for _, name := range names {
+		text := validManifest(t, strings.Replace(viewBlock, `name = "approvals"`, fmt.Sprintf("name = %q", name), 1))
+		_, parseErr := ParseManifest(text)
+		registryErr := apps.ValidateViewName(name)
+		if (parseErr == nil) != (registryErr == nil) {
+			t.Errorf("view name %q: parser err=%v, registry err=%v — the two disagree", name, parseErr, registryErr)
+		}
+	}
+}
+
+func TestParseManifest_ViewParams(t *testing.T) {
+	declared := viewBlock + `params = { label = "Repository", placeholder = "victorarias/attn" }` + "\n"
+	m, err := ParseManifest(validManifest(t, declared))
+	if err != nil {
+		t.Fatalf("ParseManifest: %v", err)
+	}
+	if m.Views[0].Params == nil || m.Views[0].Params.Label != "Repository" || m.Views[0].Params.Placeholder != "victorarias/attn" {
+		t.Fatalf("params = %+v", m.Views[0].Params)
+	}
+
+	// A params block with nothing to put on the field is a picker asking for an
+	// unlabelled string, which is a question the user cannot answer.
+	unlabelled := viewBlock + `params = { placeholder = "victorarias/attn" }` + "\n"
+	_, err = ParseManifest(validManifest(t, unlabelled))
+	if err == nil || !strings.Contains(err.Error(), "label") {
+		t.Fatalf("err = %v, want a refusal naming the missing label", err)
+	}
+}
+
+// The relaxation A5 makes to A4's rule: a view is something that runs, so an app
+// that is all view and no handler is a whole app. What stays refused is a
+// manifest declaring neither.
+func TestParseManifest_AViewCountsAsSomethingThatRuns(t *testing.T) {
+	text := `
+name = "board"
+attn_app_api = 1
+entrypoint = "src/index.ts"
+` + viewBlock
+	m, err := ParseManifest(text)
+	if err != nil {
+		t.Fatalf("ParseManifest refused an app that is all view: %v", err)
+	}
+	if len(m.EventPatterns()) != 0 || len(m.Views) != 1 {
+		t.Fatalf("manifest = %+v", m)
+	}
+
+	neither := `
+name = "inert"
+attn_app_api = 1
+entrypoint = "src/index.ts"
+`
+	_, err = ParseManifest(neither)
+	if err == nil || !strings.Contains(err.Error(), "nothing would ever run it") {
+		t.Fatalf("err = %v, want a refusal explaining the app could never run", err)
+	}
+	// The refusal has to name both ways in, or it teaches half the rule.
+	if !strings.Contains(err.Error(), "[[views]]") || !strings.Contains(err.Error(), "[[subscribe]]") {
+		t.Errorf("error %q does not name both ways an app can run", err)
+	}
+}
+
+// commandBlock is what a view's button is bound to.
+const commandBlock = `
+[[commands]]
+name = "approve"
+description = "Approve the request."
+
+[[commands]]
+name = "reject"
+`
+
+func TestParseManifest_Commands(t *testing.T) {
+	m, err := ParseManifest(validManifest(t, viewBlock+commandBlock))
+	if err != nil {
+		t.Fatalf("ParseManifest: %v", err)
+	}
+	if names := m.CommandNames(); len(names) != 2 || names[0] != "approve" || names[1] != "reject" {
+		t.Fatalf("CommandNames() = %v", names)
+	}
+	if m.Commands[0].Description != "Approve the request." || m.Commands[1].Description != "" {
+		t.Fatalf("commands = %+v", m.Commands)
+	}
+}
+
+func TestParseManifest_CommandRefusals(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		block string
+		want  string
+	}{
+		{"no name", "\n[[commands]]\ndescription = \"x\"\n", "name"},
+		{"not a name", "\n[[commands]]\nname = \"Approve!\"\n", "Approve!"},
+		{"declared twice", commandBlock + "\n[[commands]]\nname = \"approve\"\n", "approve"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := ParseManifest(validManifest(t, viewBlock+tc.block))
+			if err == nil {
+				t.Fatalf("ParseManifest accepted %s", tc.block)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %v, want it to name %q", err, tc.want)
+			}
+		})
+	}
+}
+
+// A command is invoked from a view. An app that declares one and has neither a
+// view nor a subscription could never run it, and the refusal says which of the
+// two is missing rather than repeating the generic "nothing would run it".
+func TestParseManifest_ACommandAloneIsNotSomethingThatRuns(t *testing.T) {
+	text := `
+name = "board"
+attn_app_api = 1
+entrypoint = "src/index.ts"
+` + commandBlock
+	_, err := ParseManifest(text)
+	if err == nil {
+		t.Fatal("ParseManifest accepted an app whose only declaration is a command")
+	}
+	if !strings.Contains(err.Error(), "[[views]]") || !strings.Contains(err.Error(), "invoked from") {
+		t.Fatalf("err = %v, want it to say a command needs a view", err)
+	}
+}
+
+// The daemon holds the frozen declaration and nothing else, so what an app
+// answers is read back out of it — same rule as the views beside it.
+func TestDeclaredCommands(t *testing.T) {
+	m, err := ParseManifest(validManifest(t, viewBlock+commandBlock))
+	if err != nil {
+		t.Fatal(err)
+	}
+	declaration, err := m.Declaration()
+	if err != nil {
+		t.Fatal(err)
+	}
+	names, err := DeclaredCommands(declaration)
+	if err != nil || len(names) != 2 || names[0] != "approve" {
+		t.Fatalf("DeclaredCommands() = %v, %v", names, err)
+	}
+	if _, err := DeclaredCommands(`{"name":"x","commands":[{"name":"Approve!"}]}`); err == nil {
+		t.Fatal("DeclaredCommands accepted a name that is not a command name")
+	}
+}
+
+// The daemon holds a version's declaration and nothing else, so reading the
+// views back out of it is what tells it which artifacts the version is made of.
+func TestDeclaredViewNames(t *testing.T) {
+	m, err := ParseManifest(validManifest(t, viewBlock))
+	if err != nil {
+		t.Fatal(err)
+	}
+	declaration, err := m.Declaration()
+	if err != nil {
+		t.Fatal(err)
+	}
+	names, err := DeclaredViewNames(declaration)
+	if err != nil || len(names) != 1 || names[0] != "approvals" {
+		t.Fatalf("DeclaredViewNames() = %v, %v", names, err)
+	}
+
+	// A view name is a path segment by the time it is a file, so a declaration
+	// carrying one that is not a name is refused rather than joined into a path.
+	if _, err := DeclaredViewNames(`{"name":"x","views":[{"name":"../../etc/passwd"}]}`); err == nil {
+		t.Fatal("DeclaredViewNames accepted a name that is not a view name")
+	}
 }
 
 // A collection name the document store would refuse at write time is refused
@@ -246,7 +536,8 @@ func TestLoadManifest_NoManifestSaysWhatToDo(t *testing.T) {
 // The frozen snapshot is what a version row carries, so it has to survive the
 // round trip with the fields the runtime will read back.
 func TestManifest_DeclarationRoundTrips(t *testing.T) {
-	m, err := ParseManifest(validManifest(t, ""))
+	text := strings.Replace(validManifest(t, ""), `entrypoint = "src/index.ts"`, "entrypoint = \"src/index.ts\"\nreconcile = true", 1)
+	m, err := ParseManifest(text)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -258,7 +549,7 @@ func TestManifest_DeclarationRoundTrips(t *testing.T) {
 	if err := json.Unmarshal([]byte(snapshot), &back); err != nil {
 		t.Fatalf("declaration is not JSON: %v", err)
 	}
-	if back.Name != m.Name || back.Entrypoint != m.Entrypoint || len(back.Subscribe) != len(m.Subscribe) {
+	if back.Name != m.Name || back.Entrypoint != m.Entrypoint || !back.Reconcile || len(back.Subscribe) != len(m.Subscribe) {
 		t.Fatalf("declaration lost fields: %+v", back)
 	}
 	if len(back.Collections) != 1 || back.Collections[0].Name != "decisions" {

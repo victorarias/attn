@@ -182,6 +182,16 @@ the VM with `pnpm run real-app:provision-remote`. The hub daemon
 installs/updates the attn binary on the remote automatically (internal/hub
 bootstrapper), so the VM never needs a manual attn install.
 
+`scenario-app-reconcile.mjs` (the app-reconcile exit proof) takes a Linux
+witness on the same VM, but it drives the `attn` CLI there rather than a
+session, so it has two extra knobs: `ATTN_HARNESS_REMOTE_ATTN` names the remote
+binary (default `attn`; the hub bootstrapper installs `attn-<profile>` beside
+`attn-app-runtime-<profile>` in `~/.local/bin`, and a hand-staged cross-build
+lands the same way) and `ATTN_HARNESS_REMOTE_PROFILE` selects the profile it
+runs under. The leg skips itself, loudly in the trace, when no attn is found —
+reachability is not what that scenario is testing. `attn app apply` bundles
+with bun, so the VM needs it; `real-app:provision-remote` installs it.
+
 TR-205's matrix legs (`tr205-probe-codex`, `tr205-probe-claude`) run
 `attn _probe-tui` on the remote instead of a live agent: a deterministic
 agent-mimicking TUI whose styles are pinned to codex/claude VT vocabulary

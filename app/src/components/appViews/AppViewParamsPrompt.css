@@ -1,0 +1,86 @@
+.app-view-params-prompt {
+  align-items: center;
+  background: var(--color-bg-overlay);
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  position: fixed;
+  z-index: 320;
+}
+
+.app-view-params-content {
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.42);
+  max-width: min(92vw, 460px);
+  min-width: 380px;
+  padding: 20px 22px;
+}
+
+.app-view-params-title {
+  color: var(--color-text-muted);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  margin-bottom: 11px;
+  text-transform: uppercase;
+}
+
+/* The app's own wording, shown as written: attn does not know what the field
+   means and must not paraphrase it. */
+.app-view-params-label {
+  color: var(--color-text-primary);
+  display: block;
+  font-size: var(--font-size-md);
+  margin-bottom: 10px;
+}
+
+.app-view-params-input {
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border-hover);
+  border-radius: 6px;
+  color: var(--color-text-primary);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: var(--font-size-sm);
+  margin-bottom: 14px;
+  padding: 8px 10px;
+  width: 100%;
+}
+
+.app-view-params-input:focus-visible {
+  outline: 2px solid rgba(88, 166, 255, 0.6);
+  outline-offset: 1px;
+}
+
+.app-view-params-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.app-view-params-actions button {
+  border: 1px solid var(--color-border-hover);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  padding: 8px 16px;
+}
+
+.app-view-params-actions .cancel {
+  background: var(--color-border);
+  color: var(--color-text-primary);
+}
+
+.app-view-params-actions .confirm {
+  background: rgba(88, 166, 255, 0.14);
+  border-color: rgba(88, 166, 255, 0.35);
+  color: #79b8ff;
+}
+
+.app-view-params-actions button:focus-visible {
+  outline: 2px solid rgba(88, 166, 255, 0.6);
+  outline-offset: 2px;
+}

@@ -12,10 +12,10 @@ import (
 	"github.com/victorarias/attn/internal/store"
 )
 
-// The event log never trims past an enabled consumer's cursor, which is the
-// right rule and also means a consumer that is enabled and not consuming makes
-// the log grow for as long as the condition lasts. Until now the only way to
-// notice was to go and look — `attn bus status`, or the event bus settings page.
+// An enabled consumer that is not consuming makes the log grow for as long as
+// the condition lasts. Until now the only way to notice was to go and look —
+// `attn bus status`, or the event bus settings page. Disabled installed-app
+// lanes are retained deliberately and wait for a measured per-lane tripwire.
 //
 // This is the half that does not wait to be looked at. `internal/bus` decides
 // what counts as a pin worth reporting (DefaultPinAlarmAge carries the receipt);

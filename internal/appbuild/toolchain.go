@@ -30,14 +30,28 @@ const (
 	// frontend uses so one repo has one TypeScript.
 	TypeScriptVersion = "5.8.3"
 
+	// ReactTypesVersion is React's own declarations, which the SDK re-exports:
+	// a view's props, its hooks and the JSX namespace are React's types, so an
+	// app cannot typecheck a .tsx without them. Pinned to the version the
+	// frontend resolves, so the types an author checks against are the types the
+	// running frontend provides — TestReactTypesPinMatchesTheFrontend fails when
+	// the two drift.
+	ReactTypesVersion = "19.2.7"
+
 	// toolchainDirName is where the shared compiler lives, under the apps store.
 	toolchainDirName = "toolchain"
 
-	// toolchainStamp records which compiler is installed. A pin bump in a new
-	// attn release is what invalidates it; without the stamp an upgraded attn
-	// would keep using whatever the last one installed.
+	// toolchainStamp records what is installed. A pin bump in a new attn release
+	// is what invalidates it; without the stamp an upgraded attn would keep using
+	// whatever the last one installed.
 	toolchainStamp = ".attn-typescript-version"
 )
+
+// toolchainPins is the stamp's content: every pinned package, so a bump to
+// either one reinstalls.
+func toolchainPins() string {
+	return fmt.Sprintf("typescript@%s @types/react@%s", TypeScriptVersion, ReactTypesVersion)
+}
 
 // DefaultNPMRegistry is where attn fetches its own pinned packages from.
 //
@@ -88,8 +102,9 @@ func ResolveToolchain(toolchainRoot string, log func(string)) (Toolchain, error)
 	return Toolchain{Bun: bun, TSC: tsc}, nil
 }
 
-// ensureTypeScript returns the path to the pinned compiler, installing it when
-// the stamp says the directory holds something else or nothing.
+// ensureTypeScript returns the path to the pinned compiler, installing it — and
+// React's pinned declarations, which the SDK re-exports — when the stamp says the
+// directory holds something else or nothing.
 //
 // The whole check-and-install runs under a lock on the toolchain directory: an
 // `attn app dev` loop and a manual `attn app apply` racing on a cold machine
@@ -105,16 +120,20 @@ func ensureTypeScript(bun, dir string, log func(string)) (string, error) {
 	defer unlock()
 
 	tsc := filepath.Join(dir, "node_modules", ".bin", "tsc")
-	if installedTypeScript(dir) == TypeScriptVersion {
-		if _, err := os.Stat(tsc); err == nil {
+	reactTypes := filepath.Join(dir, "node_modules", "@types", "react")
+	if installedPins(dir) == toolchainPins() {
+		_, tscErr := os.Stat(tsc)
+		_, typesErr := os.Stat(reactTypes)
+		if tscErr == nil && typesErr == nil {
 			return tsc, nil
 		}
 	}
 
 	if log != nil {
-		log(fmt.Sprintf("installing TypeScript %s into %s (once per machine)", TypeScriptVersion, dir))
+		log(fmt.Sprintf("installing TypeScript %s and React's types %s into %s (once per machine)", TypeScriptVersion, ReactTypesVersion, dir))
 	}
-	pkg := fmt.Sprintf("{\n  \"name\": \"attn-app-toolchain\",\n  \"private\": true,\n  \"dependencies\": { \"typescript\": \"%s\" }\n}\n", TypeScriptVersion)
+	pkg := fmt.Sprintf("{\n  \"name\": \"attn-app-toolchain\",\n  \"private\": true,\n  \"dependencies\": { \"typescript\": \"%s\", \"@types/react\": \"%s\" }\n}\n",
+		TypeScriptVersion, ReactTypesVersion)
 	if err := os.WriteFile(filepath.Join(dir, "package.json"), []byte(pkg), 0o644); err != nil {
 		return "", fmt.Errorf("writing the app toolchain package.json: %w", err)
 	}
@@ -122,19 +141,23 @@ func ensureTypeScript(bun, dir string, log func(string)) (string, error) {
 	cmd.Dir = dir
 	cmd.Env = npmRegistryEnv(os.Environ())
 	if out, err := cmd.CombinedOutput(); err != nil {
-		return "", fmt.Errorf("installing TypeScript %s into %s failed (%v); apply needs a typechecker and this is the one it uses. Output:\n%s",
-			TypeScriptVersion, dir, err, strings.TrimSpace(string(out)))
+		return "", fmt.Errorf("installing %s into %s failed (%v); apply needs a typechecker and React's declarations, and these are the ones it uses. Output:\n%s",
+			toolchainPins(), dir, err, strings.TrimSpace(string(out)))
 	}
 	if _, err := os.Stat(tsc); err != nil {
 		return "", fmt.Errorf("installing TypeScript %s into %s reported success but left no compiler at %s", TypeScriptVersion, dir, tsc)
 	}
-	if err := os.WriteFile(filepath.Join(dir, toolchainStamp), []byte(TypeScriptVersion+"\n"), 0o644); err != nil {
-		return "", fmt.Errorf("recording the installed TypeScript version: %w", err)
+	if _, err := os.Stat(reactTypes); err != nil {
+		return "", fmt.Errorf("installing @types/react %s into %s reported success but left no declarations at %s; the app SDK re-exports React's types and cannot resolve them without it",
+			ReactTypesVersion, dir, reactTypes)
+	}
+	if err := os.WriteFile(filepath.Join(dir, toolchainStamp), []byte(toolchainPins()+"\n"), 0o644); err != nil {
+		return "", fmt.Errorf("recording the installed toolchain versions: %w", err)
 	}
 	return tsc, nil
 }
 
-func installedTypeScript(dir string) string {
+func installedPins(dir string) string {
 	data, err := os.ReadFile(filepath.Join(dir, toolchainStamp))
 	if err != nil {
 		return ""

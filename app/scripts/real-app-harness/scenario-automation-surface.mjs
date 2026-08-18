@@ -28,7 +28,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { parseCommonArgs, printCommonHelp, launchFreshAppAndConnect } from './common.mjs';
 import { createScenarioRunner } from './scenarioRunner.mjs';
-import { currentHarnessProfile, resolveHarnessResources } from './harnessProfile.mjs';
+import { currentHarnessProfile, resolveHarnessResources, profileCliEnv as profileEnv } from './harnessProfile.mjs';
 import { UiAutomationClient } from './uiAutomationClient.mjs';
 import { DaemonObserver } from './daemonObserver.mjs';
 import { captureFrontWindowScreenshot } from './nativeWindowCapture.mjs';
@@ -51,13 +51,6 @@ function parseArgs(argv) {
   return { options, help: args.includes('--help') || args.includes('-h') };
 }
 
-function profileEnv(profile, extra = {}) {
-  const env = { ...process.env, ATTN_PROFILE: profile, ...extra };
-  for (const key of ['ATTN_SOCKET_PATH', 'ATTN_DB_PATH', 'ATTN_CONFIG_PATH', 'ATTN_PLUGIN_DIR']) {
-    delete env[key];
-  }
-  return env;
-}
 
 function run(binary, args, env, options = {}) {
   return execFileSync(binary, args, {

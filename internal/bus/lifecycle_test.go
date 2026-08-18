@@ -312,7 +312,7 @@ func TestRetiredConsumerDropsLateResults(t *testing.T) {
 	s := newMemStore()
 	b := testBus(t, s)
 
-	d := b.newDurable("app:gone", All, func(context.Context, Event) error { return nil })
+	d := b.newDurable("app:gone", All, nil, func(context.Context, Event) error { return nil })
 	t.Cleanup(d.cancel)
 	d.retire()
 

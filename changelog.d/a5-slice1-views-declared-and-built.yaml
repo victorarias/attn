@@ -1,0 +1,13 @@
+kind: internal
+area: apps
+change: >
+  An app can declare [[views]] in attn-app.toml — a named component with a kind
+  (only "tile" is accepted), a title, an entrypoint and an optional one-line
+  param declaration. `attn app apply` and `attn app dev` bundle each view for
+  the browser into the version's content-addressed directory beside the handler
+  bundle, and the version hash now covers every artifact, so editing only a view
+  mints a new version. An app that declares a view and no subscriptions is
+  accepted: a view is something that runs.
+notes: >
+  A5 slice 1. Nothing renders a view yet — the tile host, the bundle route and
+  the SDK are later slices — so there is no user-visible behavior to report.

@@ -17,14 +17,24 @@
 
 import { AsyncLocalStorage } from "node:async_hooks"
 import { RpcConnection, RPC_METHOD_NOT_FOUND, describe, type RpcRequest } from "./rpc.ts"
-import { appForStack, runDispatch, type DispatchParams } from "./dispatch.ts"
+import {
+  appForStack,
+  runCommand,
+  runDispatch,
+  runReconcile,
+  type CommandParams,
+  type DispatchParams,
+  type ReconcileParams,
+} from "./dispatch.ts"
 
 /**
  * The runtime contract this host speaks. The daemon refuses a host that does not
  * match, because a version skew between the daemon and a binary inside an old app
  * bundle is exactly the case a silent mismatch would turn into wrong behavior.
+ *
+ * Bump it together with appRuntimeAPIVersion in internal/daemon/app_runtime.go.
  */
-const APP_RUNTIME_API_VERSION = 2
+const APP_RUNTIME_API_VERSION = 5
 
 /**
  * Which app a line of output came from.
@@ -161,6 +171,14 @@ async function main(): Promise<void> {
         const params = request.params as DispatchParams
         // The tag follows the handler through every await it makes.
         return currentApp.run(params.app, () => runDispatch(connection, params))
+      }
+      case "app.command": {
+        const params = request.params as CommandParams
+        return currentApp.run(params.app, () => runCommand(connection, params))
+      }
+      case "app.reconcile": {
+        const params = request.params as ReconcileParams
+        return currentApp.run(params.app, () => runReconcile(connection, params))
       }
       case "app.runtime.ping":
         // A liveness answer the daemon can ask for without running app code.

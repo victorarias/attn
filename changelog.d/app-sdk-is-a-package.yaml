@@ -1,0 +1,12 @@
+kind: changed
+area: apps
+change: >
+  The app SDK is a real package instead of a generated file. `attn app apply`
+  materializes it under the data directory and links it into the app's
+  node_modules, so an app resolves `@victorarias/attn-app` the way it resolves
+  any package — with nothing installed from a registry. Apps can now be written
+  in TSX: JSX compiles against the SDK's own runtime, hooks and React's types
+  come from the SDK, and `react` itself is not a specifier an app can import,
+  which is what will put a view's components on attn's own React. Apply removes
+  the old `src/attn-app.d.ts` it used to generate and says so; a file under that
+  name attn did not write is kept and reported instead.

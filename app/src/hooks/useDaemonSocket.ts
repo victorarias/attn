@@ -7,6 +7,8 @@ import type {
   PR as GeneratedPR,
   Worktree as GeneratedWorktree,
   PluginInfo as GeneratedPluginInfo,
+  AppRegistryEntry as GeneratedAppRegistryEntry,
+  ViewElement as GeneratedAppViewInfo,
   PluginIssue as GeneratedPluginIssue,
   GitOperation as GeneratedGitOperation,
   Endpoint as GeneratedEndpoint,
@@ -69,6 +71,7 @@ import { completeTerminalInputProbe, maybeStartTerminalInputProbe } from '../uti
 import { decodeBinaryFrame } from '../pty/binaryPtyFrame';
 import { kittyImageBlobFromResult, kittyImageCache } from '../utils/kittyImageCache';
 import { resolveDaemonWebSocketURL, type DaemonEndpointProfile } from '../utils/daemonEndpoint';
+import { handleAppDaemonEvent, type AppCommandResult } from './daemonAppEvents';
 import { handleBusDaemonEvent, type BusStatus } from './daemonBusEvents';
 import {
   handleAutoModeDaemonEvent,
@@ -77,6 +80,11 @@ import {
 } from './daemonAutoModeEvents';
 import { handleFsDaemonEvent } from './daemonFsEvents';
 import { handleNotebookDaemonEvent } from './daemonNotebookEvents';
+import {
+  DocumentSubscriptions,
+  documentSubscribePayload,
+  type DocumentSubscriber,
+} from './daemonDocumentEvents';
 import {
   annotationToWire,
   handleSessionAnnotationDaemonEvent,
@@ -149,6 +157,10 @@ export type DaemonWorkspace = GeneratedWorkspaceSnapshot;
 export type DaemonPR = GeneratedPR;
 export type DaemonWorktree = GeneratedWorktree;
 export type DaemonPlugin = GeneratedPluginInfo;
+export type AppRegistryEntry = GeneratedAppRegistryEntry;
+// quicktype names the inlined member type ViewElement; AppViewInfo and it are
+// the same shape, and this is the one AppRegistryEntry.views actually carries.
+export type AppViewInfo = GeneratedAppViewInfo;
 export type DaemonPluginIssue = GeneratedPluginIssue;
 export type DaemonGitOperation = GeneratedGitOperation;
 export type DaemonEndpoint = GeneratedEndpoint;
@@ -263,7 +275,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-export const PROTOCOL_VERSION = '258';
+export const PROTOCOL_VERSION = '259';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 // Identifies this app process to the daemon across its own reconnects, so a
@@ -642,6 +654,10 @@ interface UseDaemonSocketOptions {
   // when the garden outgrew one push, and the panel says so rather than ending
   // silently at the cap.
   onSeedsUpdate?: (seeds: Seed[], total: number) => void;
+  // Fired with this daemon's whole app registry on initial_state and on every
+  // apps_updated broadcast. A version flip moves an app's content hash, which is
+  // how a docked tile learns its bundle URL moved — there is no other signal.
+  onAppsUpdate?: (apps: AppRegistryEntry[]) => void;
   // Fired with the whole crew roster on initial_state and on every crew_updated
   // broadcast. Members are permanent, so the sidebar renders from this alone.
   onCrewUpdate?: (members: CrewMember[]) => void;
@@ -837,6 +853,11 @@ const DEFAULT_REQUEST_TIMEOUT_MS = 10_000;
 // of production, 209ms at 945k rows — so 30s is roughly a hundred times the
 // worst real log, a tripwire for a scan that has hung rather than a budget.
 const BUS_STATUS_TIMEOUT_MS = 30_000;
+// An app command is bounded by the daemon, which abandons a handler at 60s and
+// answers with a refusal naming the app, the command and that limit. This sits
+// past it so that refusal is what a view shows: a shorter one here would win the
+// race and replace it with "timed out".
+const APP_COMMAND_TIMEOUT_MS = 75_000;
 const GIT_METADATA_TIMEOUT_MS = 30 * 60_000;
 const GIT_DIFF_TIMEOUT_MS = 10 * 60_000;
 const GIT_WORKTREE_TIMEOUT_MS = 30 * 60_000;
@@ -946,6 +967,7 @@ export function useDaemonSocket({
   onFsChanged,
   onTicketsUpdate,
   onSeedsUpdate,
+  onAppsUpdate,
   onCrewUpdate,
   onPresentationAdded,
   onPresentationUpdated,
@@ -981,6 +1003,7 @@ export function useDaemonSocket({
     onFsChanged,
     onTicketsUpdate,
     onSeedsUpdate,
+    onAppsUpdate,
     onCrewUpdate,
     onPresentationAdded,
     onPresentationUpdated,
@@ -1005,6 +1028,7 @@ export function useDaemonSocket({
     onFsChanged,
     onTicketsUpdate,
     onSeedsUpdate,
+    onAppsUpdate,
     onCrewUpdate,
     onPresentationAdded,
     onPresentationUpdated,
@@ -1043,6 +1067,10 @@ export function useDaemonSocket({
   const pendingOutboundCommandsRef = useRef<string[]>([]);
   const recoveryNoticeTimeoutRef = useRef<number | null>(null);
   const gitStatusSubscriptionRef = useRef<string | null>(null);
+  // Live document queries. They live on the daemon's connection, so a reconnect
+  // has to re-send them; the registry is what remembers they are still wanted.
+  const docSubscriptionsRef = useRef<DocumentSubscriptions | null>(null);
+  const docSubscriptions = (docSubscriptionsRef.current ??= new DocumentSubscriptions());
   const ptyTransportRef = useRef(createPtyTransportState<AttachRequestContext>());
   const canceledAttachIdsRef = useRef(new Set<string>());
   // Per-session attach serialization chain — see sendAttachSession.
@@ -1456,6 +1484,11 @@ export function useDaemonSocket({
         ws.send(JSON.stringify({ cmd: 'subscribe_git_status', directory: gitStatusSubscriptionRef.current }));
       }
 
+      // Every live query the daemon lost when this socket's predecessor closed.
+      // Each subscriber is asked for its `have()` right now, so the resume
+      // carries only what changed while we were away.
+      docSubscriptions.resubscribeAll((payload) => ws.send(JSON.stringify(payload)));
+
       if (selectedSessionRef.current) {
         ws.send(JSON.stringify({ cmd: 'session_selected', id: selectedSessionRef.current }));
       }
@@ -1576,6 +1609,7 @@ export function useDaemonSocket({
               data.seeds || [],
               data.seeds_total ?? (data.seeds || []).length,
             );
+            callbacksRef.current.onAppsUpdate?.(data.apps || []);
             callbacksRef.current.onCrewUpdate?.(data.crew || []);
             const nextWorkspaces = data.workspaces || [];
             workspacesRef.current = nextWorkspaces;
@@ -1751,6 +1785,10 @@ export function useDaemonSocket({
               data.seeds || [],
               data.total ?? (data.seeds || []).length,
             );
+            break;
+
+          case 'apps_updated':
+            callbacksRef.current.onAppsUpdate?.(data.apps || []);
             break;
 
           case 'presentation_added':
@@ -3061,6 +3099,8 @@ export function useDaemonSocket({
               }
             })) break;
             if (handleBusDaemonEvent(data, pending)) break;
+            if (handleAppDaemonEvent(data, pending)) break;
+            if (docSubscriptions.handleEvent(data)) break;
             if (handleAutoModeDaemonEvent(data, pending)) break;
             break;
           }
@@ -3074,6 +3114,7 @@ export function useDaemonSocket({
       wsRef.current = null;
       hasReceivedInitialStateRef.current = false;
       canceledAttachIdsRef.current.clear();
+      docSubscriptions.markDisconnected();
 
       // Circuit breaker: if open, don't retry
       if (circuitOpenRef.current) {
@@ -3495,6 +3536,81 @@ export function useDaemonSocket({
   // left off the command entirely when absent: an explicit 0 and an omitted
   // field mean the same thing to the daemon ("no pixel geometry"), and omitting
   // keeps the wire honest about which resizes actually measured the pane.
+  // A docked app view crashed while rendering. Fire-and-forget on purpose: the
+  // host already has the error and shows it in the tile — this is the copy the
+  // authoring agent reads in `attn app logs`, stamped with the version that
+  // served the bundle, and a report the daemon never answers must not become a
+  // second failure inside an error boundary.
+  /**
+   * Open a live document query. Returns the way to close it, which the caller
+   * must call: a subscription left open makes the daemon re-run its query on
+   * every write to that collection, for nobody.
+   *
+   * The subscribe never goes through the outbound queue. A queued one would be
+   * flushed on the next open *and* re-sent by `resubscribeAll`, and the daemon
+   * refuses the second id as already open — so when the socket is down the
+   * registry alone carries it, and the connect handler sends it once.
+   */
+  const subscribeDocuments = useCallback((subscriber: DocumentSubscriber) => {
+    const registry = docSubscriptions;
+    const id = registry.add(subscriber);
+    const ws = wsRef.current;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify(documentSubscribePayload(id, subscriber)));
+      subscriber.onLive(true);
+    } else {
+      subscriber.onLive(false);
+    }
+    return () => {
+      if (!registry.remove(id)) return;
+      const open = wsRef.current;
+      if (open && open.readyState === WebSocket.OPEN) {
+        open.send(JSON.stringify({ cmd: 'doc_unsubscribe', subscription_id: id }));
+      }
+    };
+  }, []);
+
+  const sendAppViewCrash = useCallback((report: {
+    app: string;
+    view: string;
+    versionId: number;
+    tileId: string;
+    error: string;
+  }) => {
+    sendOrQueueCommand({
+      cmd: 'app_view_crash',
+      app: report.app,
+      view: report.view,
+      version_id: report.versionId,
+      tile_id: report.tileId,
+      error: report.error,
+    });
+  }, [sendOrQueueCommand]);
+
+  /**
+   * Run one of an app's declared commands and resolve with what its handler
+   * returned. Which app is asked comes from the host that mounted the view, not
+   * from the view — the same rule the document namespace follows.
+   *
+   * The timeout is past the daemon's own dispatch budget (60s) on purpose. The
+   * daemon's refusal names the app, the command and the limit; a shorter one
+   * here would replace that with "timed out" and lose everything worth reading.
+   */
+  const sendAppCommand = useCallback((app: string, command: string, payload?: unknown): Promise<unknown> => {
+    return sendRequest<AppCommandResult>(
+      'app_command',
+      {
+        app,
+        command,
+        // JSON text, exactly as a document body travels. Absent when the command
+        // takes no argument.
+        ...(payload === undefined ? {} : { payload: JSON.stringify(payload) }),
+      },
+      `${app} did not answer the command “${command}”`,
+      APP_COMMAND_TIMEOUT_MS,
+    ).then((result) => result.value);
+  }, [sendRequest]);
+
   const sendPtyResize = useCallback((
     id: string,
     cols: number,
@@ -5704,6 +5820,9 @@ export function useDaemonSocket({
     sendTerminalPointerActivity,
     sendSetClientPresence,
     sendSetTerminalTheme,
+    sendAppViewCrash,
+    sendAppCommand,
+    subscribeDocuments,
     isRuntimeAttached,
     sendGetFileDiff,
     getRepoInfo,

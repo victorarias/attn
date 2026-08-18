@@ -7,5 +7,5 @@ change: >
   capped tripwire replaces silent trimming. Review then reshaped the gates
   to carry the promise: re-enable is no longer a reconcile trigger (a
   retained lane just resumes), and fences moved off bus head so a retained
-  undelivered fact is never superseded. Doc only — the TrimBusEvents floor
-  and trigger changes ship separately.
+  undelivered fact is never superseded. The retention floor and reconcile
+  trigger implementation now carry that contract end to end.

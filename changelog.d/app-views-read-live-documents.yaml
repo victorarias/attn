@@ -1,0 +1,11 @@
+kind: added
+area: apps
+change: >
+  A docked app view can now read its app's documents and stay current. The view
+  calls `useQuery` from the app SDK and gets back the matching documents, in the
+  server's order, re-rendered whenever one of them changes — no polling, no
+  refresh button, and no subscription bookkeeping in the view. A tile that is
+  closed and reopened picks up where it left off: it tells the daemon what it
+  already holds, so only what changed while it was gone comes back. When the
+  collection a view reads is removed, or redeclared without a field the query
+  uses, the tile says so instead of sitting empty.

@@ -152,7 +152,13 @@ func (d *Daemon) handleAppStatus(conn net.Conn, msg *protocol.AppStatusMessage) 
 		recentVersions = recentVersions[:recentVersionLimit]
 	}
 
-	result := protocol.AppStatusResult{App: summary, Versions: versions, Invocations: invocations}
+	reconcile, err := d.appReconcileStatusForWire(name)
+	if err != nil {
+		d.sendError(conn, fmt.Sprintf("reading the reconcile state of app %q: %v", name, err))
+		return
+	}
+
+	result := protocol.AppStatusResult{App: summary, Versions: versions, Invocations: invocations, Reconcile: reconcile}
 	for _, version := range recentVersions {
 		result.RecentVersions = append(result.RecentVersions, protocol.AppVersionInfo{
 			ID:           int(version.ID),
@@ -193,7 +199,7 @@ func (d *Daemon) handleAppStatus(conn net.Conn, msg *protocol.AppStatusMessage) 
 		result.Runtime = &info
 	}
 	if stall, ok := d.appStallSnapshot(name); ok {
-		info := appStallForWire(stall)
+		info := d.appStallForWire(stall)
 		result.Stall = &info
 	}
 	d.sendDocResponse(conn, protocol.Response{Ok: true, AppStatusResult: &result})
@@ -220,6 +226,9 @@ func (d *Daemon) handleAppSetEnabled(conn net.Conn, msg *protocol.AppSetEnabledM
 		d.sendError(conn, "no database")
 		return
 	}
+	lane := d.appLane(name)
+	lane.Lock()
+	defer lane.Unlock()
 	if _, ok, err := d.store.GetApp(name); err != nil {
 		d.sendError(conn, fmt.Sprintf("reading app %q: %v", name, err))
 		return
@@ -241,7 +250,7 @@ func (d *Daemon) handleAppSetEnabled(conn net.Conn, msg *protocol.AppSetEnabledM
 	// Between the read above and this write the consumer may have been
 	// unregistered — `attn app remove` running beside this one. Reporting success
 	// then would answer for a consumer that is gone and publish a fact about it.
-	flipped, err := d.store.SetBusConsumerEnabled(consumer, msg.Enabled, time.Now())
+	flipped, changed, err := d.store.SetAppBusConsumerEnabled(name, msg.Enabled, time.Now())
 	if err != nil {
 		d.sendError(conn, fmt.Sprintf("%s app %q: %v", verb, name, err))
 		return
@@ -252,16 +261,18 @@ func (d *Daemon) handleAppSetEnabled(conn net.Conn, msg *protocol.AppSetEnabledM
 				"`attn app status %s` shows what is left.", name, consumer, verb, name))
 		return
 	}
-	if msg.Enabled {
+	if msg.Enabled && changed {
 		// Enabling is the way back from an auto-disable, so it clears both streaks
 		// that cause one. Without this the app would be disabled again on its very
 		// next failure, against a clock it never got to restart.
 		d.clearAppStall(name)
 		d.clearAppCrashes(name)
 	}
-	d.publishFact(FactAppEnabledChanged, name, appEnabledChanged{
-		Name: name, Consumer: consumer, Enabled: msg.Enabled,
-	})
+	if changed {
+		d.publishFact(FactAppEnabledChanged, name, appEnabledChanged{
+			Name: name, Consumer: consumer, Enabled: msg.Enabled,
+		})
+	}
 	d.sendDocResponse(conn, protocol.Response{
 		Ok: true,
 		AppSetEnabledResult: &protocol.AppSetEnabledResult{
@@ -374,6 +385,10 @@ func (d *Daemon) appSummary(row store.App, head int64) (protocol.AppSummary, err
 				ArtifactPath: version.ArtifactPath,
 				CreatedAt:    stampForWire(version.CreatedAt),
 			}
+			// From the serving version's frozen declaration, not the manifest on
+			// disk: after a rollback those differ, and what docks is what serves.
+			summary.Views = appViewsForWire(version.Declaration, d.logf)
+			summary.Commands = appDeclaredCommands(version.Declaration, d.logf)
 		}
 	}
 	consumer, ok, err := d.store.GetBusConsumer(apps.ConsumerName(row.Name))
