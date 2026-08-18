@@ -134,6 +134,13 @@ func autoModeDenialKey(sessionID, signature string, at time.Time) string {
 	return fmt.Sprintf("%s|%s|%s", sessionID, at.UTC().Format(time.RFC3339Nano), signature)
 }
 
+func plural(count int, one, many string) string {
+	if count == 1 {
+		return one
+	}
+	return many
+}
+
 func parseAutoModeDenialCursor(value string) time.Time {
 	trimmed := strings.TrimSpace(value)
 	if trimmed == "" {
@@ -150,10 +157,12 @@ func parseAutoModeDenialCursor(value string) time.Time {
 func autoModeLedgerNote(reconcile autoModeLedgerReconcile) string {
 	parts := []string{}
 	if reconcile.Dropped > 0 {
-		parts = append(parts, fmt.Sprintf("%d older denials were dropped when the local ledger rotated", reconcile.Dropped))
+		parts = append(parts, fmt.Sprintf("%d older %s dropped when the local ledger rotated",
+			reconcile.Dropped, plural(reconcile.Dropped, "denial was", "denials were")))
 	}
 	if reconcile.Malformed > 0 {
-		parts = append(parts, fmt.Sprintf("%d ledger lines could not be read", reconcile.Malformed))
+		parts = append(parts, fmt.Sprintf("%d ledger %s not be read",
+			reconcile.Malformed, plural(reconcile.Malformed, "line could", "lines could")))
 	}
 	if len(parts) == 0 {
 		return ""

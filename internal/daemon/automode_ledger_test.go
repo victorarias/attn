@@ -141,7 +141,7 @@ func TestDenialsFeedNamesWhatTheLedgerLost(t *testing.T) {
 	if !strings.Contains(note, "3 older denials") {
 		t.Errorf("note does not name the dropped records: %q", note)
 	}
-	if !strings.Contains(note, "1 ledger lines") {
+	if !strings.Contains(note, "1 ledger line could not be read") {
 		t.Errorf("note does not name the unreadable line: %q", note)
 	}
 	if len(result.Denials) != 1 {
