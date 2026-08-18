@@ -205,6 +205,7 @@ export class GhosttyTerminal {
   private writeBufLen = 0;
 
   private cellPool: GhosttyCell[] = [];
+  private rowPool: GhosttyCell[] = [];
   private rowDirty = new Uint8Array(0);
   private dirty = DIRTY_FALSE;
   // Whether a write or resize has landed since the render state was synced.
@@ -547,6 +548,28 @@ export class GhosttyTerminal {
   }
 
   /**
+   * One active-area row, read without decoding the rows around it. Advancing
+   * the row iterator is far cheaper than reading a row, so a caller after a
+   * single line pays for one — hover detection joins up to six lines per
+   * pointer position, against a viewport tens of rows deep.
+   *
+   * The array is a reused pool of its own: consume it before the next
+   * getActiveLine() call. getViewport()'s pool is untouched.
+   */
+  getActiveLine(y: number): GhosttyCell[] | null {
+    if (y < 0 || y >= this._rows) return null;
+    this.sync();
+    while (this.rowPool.length < this._cols) this.rowPool.push(newCell());
+    if (this.rowPool.length > this._cols) this.rowPool.length = this._cols;
+    const it = this.rowIterator();
+    for (let row = 0; row <= y; row += 1) {
+      if (!this.e.ghostty_render_state_row_iterator_next(it)) return null;
+    }
+    this.readRow(it, this.rowPool, 0, this.defaultColors());
+    return this.rowPool;
+  }
+
+  /**
    * A copy of one active-area row. Unlike getViewport() this syncs the render
    * state first and hands back cells the caller owns, for readers outside a
    * render loop that just want a row's content.
@@ -687,9 +710,12 @@ export class GhosttyTerminal {
     return this.dv().getUint32(this.pScratch, true) === SCREEN_TYPE_ALTERNATE;
   }
 
+  // The ABI writes one byte here (`bool *`) into a scratch buffer every other
+  // read shares, so a wider read returns the leftovers of the previous call —
+  // rowWrapsIntoNext()'s row handle, which made an untracked pane claim the wheel.
   hasMouseTracking(): boolean {
     this.e.ghostty_terminal_get(this.handle, TERMINAL_DATA_MOUSE_TRACKING, this.pScratch);
-    return this.dv().getUint32(this.pScratch, true) !== MOUSE_TRACKING_NONE;
+    return this.dv().getUint8(this.pScratch) !== MOUSE_TRACKING_NONE;
   }
 
   hasBracketedPaste(): boolean {
