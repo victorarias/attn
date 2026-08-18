@@ -9,6 +9,6 @@ change: >
   and the window stopped answering until the momentum tail ended. The
   paint now happens once per frame no matter how many events arrive,
   and reading one visible row reads that row instead of the whole
-  viewport: 18.5 ms of model reads per wheel step at 200x50 with the
+  viewport: 17.9 ms of model reads per wheel step at 200x50 with the
   viewport 100 rows up, down to 2.8 ms; 7.8 ms down to 1.2 ms three
   rows up.
