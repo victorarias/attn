@@ -1,15 +1,11 @@
 import { create } from 'zustand';
-import { DaemonSession, DaemonPR, RepoState, AuthorState, TicketRow, Seed, CrewMember, AppRegistryEntry } from '../hooks/useDaemonSocket';
+import { DaemonSession, DaemonPR, RepoState, AuthorState, Seed, CrewMember, AppRegistryEntry } from '../hooks/useDaemonSocket';
 
 interface DaemonStore {
   // Sessions from daemon (attn-tracked sessions)
   daemonSessions: DaemonSession[];
   setDaemonSessions: (sessions: DaemonSession[]) => void;
 
-  // Work-tracker board: non-archived tickets (bare rows). The detail view fetches
-  // the full record on demand via get_ticket.
-  tickets: TicketRow[];
-  setTickets: (tickets: TicketRow[]) => void;
 
   // The garden: every seed the home daemon holds, newest first. The panel scopes
   // to the workspace it shows, so switching workspaces needs no round trip.
@@ -58,8 +54,6 @@ export const useDaemonStore = create<DaemonStore>((set, get) => ({
   daemonSessions: [],
   setDaemonSessions: (sessions) => set({ daemonSessions: sessions }),
 
-  tickets: [],
-  setTickets: (tickets) => set({ tickets }),
 
   seeds: [],
   seedsTotal: 0,

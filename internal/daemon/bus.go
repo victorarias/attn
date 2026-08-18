@@ -438,11 +438,6 @@ func buildWireProjections() []projection {
 			apply:  func(d *Daemon, ev bus.Event) { d.projectWorkspaceContextChanged(ev) },
 		},
 		{
-			// Every ticket fact re-pushes the board — the wire shape clients expect.
-			filter: bus.Filter{"ticket.*"},
-			apply:  func(d *Daemon, _ bus.Event) { d.projectTicketsUpdated() },
-		},
-		{
 			// Every garden fact re-pushes the garden; the panel renders a list.
 			filter: bus.Filter{"garden.*"},
 			apply:  func(d *Daemon, _ bus.Event) { d.projectGardenSeeds() },
@@ -700,7 +695,6 @@ func (d *Daemon) projectSnapshot(key string, push func()) {
 // Snapshot keys. One per whole-list wire message.
 const (
 	snapshotSessions    = "sessions_updated"
-	snapshotTickets     = "tickets_updated"
 	snapshotGarden      = "garden_seeds_updated"
 	snapshotCrew        = "crew_updated"
 	snapshotPRs         = "prs_updated"

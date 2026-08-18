@@ -89,12 +89,12 @@ interface SettingsModalProps {
   onIncreaseUIScale?: () => void;
   onDecreaseUIScale?: () => void;
   onResetUIScale?: () => void;
-  /** Ticket board font scale override; null = match app. */
-  ticketBoardScale?: number | null;
-  effectiveTicketBoardScale?: number;
-  onIncreaseTicketBoardScale?: () => void;
-  onDecreaseTicketBoardScale?: () => void;
-  onMatchAppTicketBoardScale?: () => void;
+  /** Garden font scale override; null = match app. */
+  gardenScale?: number | null;
+  effectiveGardenScale?: number;
+  onIncreaseGardenScale?: () => void;
+  onDecreaseGardenScale?: () => void;
+  onMatchAppGardenScale?: () => void;
   /** Durable task-runner list for the Background Tasks section. Optional so tests
       that don't exercise that section can omit them; App.tsx always provides them. */
   listTasks?: () => Promise<Task[]>;
@@ -196,11 +196,11 @@ export function SettingsModal({
   onIncreaseUIScale,
   onDecreaseUIScale,
   onResetUIScale,
-  ticketBoardScale = null,
-  effectiveTicketBoardScale,
-  onIncreaseTicketBoardScale,
-  onDecreaseTicketBoardScale,
-  onMatchAppTicketBoardScale,
+  gardenScale = null,
+  effectiveGardenScale,
+  onIncreaseGardenScale,
+  onDecreaseGardenScale,
+  onMatchAppGardenScale,
   listTasks,
   retryTask,
   taskChangeSignal,
@@ -1314,7 +1314,7 @@ export function SettingsModal({
           <div className="settings-kicker">Appearance</div>
           <h3>Font Size</h3>
           <p className="settings-description">
-            Scale text across attn. The taskboard can use its own size, independent of the rest of
+            Scale text across attn. The garden can use its own size, independent of the rest of
             the app.
           </p>
         </div>
@@ -1355,41 +1355,41 @@ export function SettingsModal({
           </div>
           <div className="settings-row-card">
             <div>
-              <p className="settings-row-title">Taskboard</p>
+              <p className="settings-row-title">The garden</p>
               <p className="settings-row-copy">
-                The ticket board and ticket details. Matches the app size until you change it.
+                Seeds, plots, and their logs. Matches the app size until you change it.
               </p>
             </div>
-            <div className="settings-font-scale" data-testid="settings-taskboard-font-scale">
+            <div className="settings-font-scale" data-testid="settings-garden-font-scale">
               <button
                 type="button"
                 className="settings-action"
-                onClick={onDecreaseTicketBoardScale}
-                aria-label="Decrease taskboard font size"
+                onClick={onDecreaseGardenScale}
+                aria-label="Decrease garden font size"
               >
                 −
               </button>
               <span
                 className="settings-font-scale-value"
-                data-testid="settings-taskboard-font-scale-value"
+                data-testid="settings-garden-font-scale-value"
               >
-                {ticketBoardScale === null
+                {gardenScale === null
                   ? 'Match app'
-                  : `${Math.round((effectiveTicketBoardScale ?? ticketBoardScale) * 100)}%`}
+                  : `${Math.round((effectiveGardenScale ?? gardenScale) * 100)}%`}
               </span>
               <button
                 type="button"
                 className="settings-action"
-                onClick={onIncreaseTicketBoardScale}
-                aria-label="Increase taskboard font size"
+                onClick={onIncreaseGardenScale}
+                aria-label="Increase garden font size"
               >
                 +
               </button>
-              {ticketBoardScale !== null && (
+              {gardenScale !== null && (
                 <button
                   type="button"
                   className="settings-action"
-                  onClick={onMatchAppTicketBoardScale}
+                  onClick={onMatchAppGardenScale}
                 >
                   Match app
                 </button>

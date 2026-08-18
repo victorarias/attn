@@ -232,13 +232,10 @@ func TestRecoveryAdoptRevivesCrashedTicketToWorking(t *testing.T) {
 	}
 }
 
-// A session can own more than one crashed ticket. Each revival is its own status
-// change and publishes its own fact, but the board they all re-push is one list:
-// the client sees one board, not one per ticket.
-func TestReviveOfSeveralTicketsPushesTheBoardOnce(t *testing.T) {
+// A session can own more than one crashed ticket, and adopting it revives every
+// one of them — a single survivor left crashed is a ticket nothing will ever move.
+func TestReviveRestoresEveryCrashedTicketOfTheSession(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
-	var boards int
-	d.ticketsBroadcastHook = func([]protocol.TicketRow) { boards++ }
 
 	now := time.Now()
 	for _, id := range []string{"tk-a", "tk-b", "tk-c"} {
@@ -251,13 +248,9 @@ func TestReviveOfSeveralTicketsPushesTheBoardOnce(t *testing.T) {
 			t.Fatalf("crash %s: %v", id, err)
 		}
 	}
-	boards = 0
 
 	d.reviveCrashedTicketsForSession("sess-1")
 
-	if boards != 1 {
-		t.Fatalf("reviving three tickets pushed %d boards, want 1", boards)
-	}
 	for _, id := range []string{"tk-a", "tk-b", "tk-c"} {
 		ticket, err := d.store.GetTicket(id)
 		if err != nil || ticket == nil {

@@ -127,6 +127,11 @@ async function main() {
   }
   const attnBin = resolveAttnBin();
   const runAttn = makeAttnRunner(attnBin, profile);
+  // `ticket list --json` prints an array; runAttn's own parse looks for an object.
+  const ticketBoard = () => {
+    const { stdout } = runAttn(['ticket', 'list', '--json']);
+    return JSON.parse(stdout.slice(stdout.indexOf('[')));
+  };
 
   const runner = createScenarioRunner(options, {
     scenarioId: 'ORDINARY-DELEGATION-TICKET',
@@ -223,10 +228,11 @@ async function main() {
         client.request('close_session', { sessionId: workerId }).catch((error) => console.warn('[ordinary-delegation] close_session worker failed: ' + (error instanceof Error ? error.message : String(error)))));
       await observer.waitForSession({ id: workerId, timeoutMs: 30_000 });
 
-      // The tickets panel learns about the ticket via broadcasts.
+      // The board is read through the CLI: the app shows the garden now, and
+      // its ticket surfaces (with the bridge verbs that read them) are gone.
       const boundList = await pollFor(
         async () => {
-          const { tickets } = await client.request('ticket_list');
+          const tickets = ticketBoard();
           const bound = tickets.find((ticket) => ticket.assignee === workerId);
           return bound ? { bound, tickets } : null;
         },
@@ -301,29 +307,12 @@ async function main() {
       return events;
     });
 
-    const { screenshotPath, screenshotCaptured } = await runner.step('capture_panel_screenshot', async () => {
-      await client.request('ticket_open_detail', { ticketId });
-      const shotPath = path.join(runner.runDir, 'ordinary-delegation-ticket-panel.png');
-      let captured = false;
-      try {
-        const shot = await client.request('capture_screenshot_data', { selector: '[data-testid="ticket-detail-panel"]' });
-        if (shot?.pngBase64) {
-          fs.writeFileSync(shotPath, Buffer.from(shot.pngBase64, 'base64'));
-          captured = true;
-        }
-      } catch (error) {
-        runner.log(`[RealAppHarness] Panel screenshot skipped: ${error instanceof Error ? error.message : String(error)}`);
-      }
-      return { screenshotPath: shotPath, screenshotCaptured: captured };
-    });
-
     const summary = runner.finishSuccess({
       profile,
       delegatorId,
       chiefId,
       workerId,
       ticketId,
-      screenshot: screenshotCaptured ? screenshotPath : null,
     });
     console.log('[RealAppHarness] Ordinary-delegation ticket scenario passed.');
     console.log(JSON.stringify(summary, null, 2));

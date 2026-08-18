@@ -10,35 +10,13 @@ import (
 	"github.com/victorarias/attn/internal/store"
 )
 
-// The board read side of the work tracker: a snapshot in initial_state plus a
-// tickets_updated broadcast per mutation, and a get_ticket request/result for one
-// row's detail. Pushes carry bare rows so a busy board stays cheap.
-
-// ticketsForBroadcast is the payload of both initial_state and tickets_updated:
-// the whole non-archived board as slim rows. The brief stays off it — the board
-// is re-pushed on every ticket mutation and to every client on connect, and no
-// client renders a description from a row.
-func (d *Daemon) ticketsForBroadcast() []protocol.TicketRow {
-	if d.store == nil {
-		return nil
-	}
-	rows, err := d.store.ListTickets(store.TicketListFilter{})
-	if err != nil {
-		d.logf("list tickets: %v", err)
-		return nil
-	}
-	out := make([]protocol.TicketRow, 0, len(rows))
-	for _, t := range rows {
-		if t != nil {
-			out = append(out, ticketToProtocolRow(t))
-		}
-	}
-	return out
-}
+// The board read side of the work tracker. Every read is an agent pulling over
+// its own socket: the app shows the garden, so nothing about a ticket is pushed
+// to a WebSocket client any more.
 
 // ticketRows lists the board through a filter as full wire records without the
 // activity thread, newest first. This is the agent's board read (ticket_list),
-// which carries the brief; the app's feed uses ticketsForBroadcast.
+// which carries the brief.
 func (d *Daemon) ticketRows(filter store.TicketListFilter) []protocol.Ticket {
 	if d.store == nil {
 		return nil
@@ -101,9 +79,10 @@ func (d *Daemon) handleTicketShow(conn net.Conn, msg *protocol.TicketShowMessage
 	})
 }
 
-// publishTicketFact publishes the fact a mutator caused; projectTicketsUpdated
-// does the board push. The ticket id is required: a subject-less fact would be a
-// snapshot invalidation.
+// publishTicketFact publishes the fact a mutator caused. The ticket id is
+// required: a subject-less fact would be a snapshot invalidation. Nothing
+// projects these to the wire — see factsWithoutWire — but they stay the durable
+// record the read verbs and any subscribing app are served from.
 func (d *Daemon) publishTicketFact(name, ticketID string) {
 	if strings.TrimSpace(ticketID) == "" {
 		// Keep the board correct, but make the producer's lost id visible.
@@ -112,53 +91,14 @@ func (d *Daemon) publishTicketFact(name, ticketID string) {
 	d.publishFact(name, ticketID, nil)
 }
 
-// projectTicketsUpdated re-pushes the whole non-archived board to every client.
-// Like every other whole-list projection it goes through projectSnapshot, so a
-// bulk ticket operation puts one board on the wire instead of one per ticket.
-func (d *Daemon) projectTicketsUpdated() {
-	if d.store == nil {
+// afterTicketMutation runs the shared post-mutation fan-out: notify the other
+// participants (the assigned agent) and publish the fact. A no-op on error.
+func (d *Daemon) afterTicketMutation(ticketID string, err error) {
+	if err != nil {
 		return
 	}
-	d.projectSnapshot(snapshotTickets, func() {
-		tickets := d.ticketsForBroadcast()
-		// TicketsUpdatedMessage is its own top-level event, so the wsHub's
-		// WebSocketEvent-only broadcastListener cannot see it; tests use this hook.
-		if d.ticketsBroadcastHook != nil {
-			d.ticketsBroadcastHook(tickets)
-		}
-		if d.wsHub == nil {
-			return
-		}
-		d.broadcastMessage(&protocol.TicketsUpdatedMessage{
-			Event:   protocol.EventTicketsUpdated,
-			Tickets: tickets,
-		})
-	})
-}
-
-// sendGetTicketWSResult replies to get_ticket, correlated by requestID. An
-// unknown id is a failed result: the TTL sweep can remove a ticket mid-click.
-func (d *Daemon) sendGetTicketWSResult(client *wsClient, requestID, ticketID string) {
-	msg := protocol.TicketResultMessage{
-		Event:     protocol.EventTicketResult,
-		RequestID: requestID,
-	}
-	ticket, err := d.store.GetTicket(ticketID)
-	switch {
-	case err != nil:
-		msg.Error = protocol.Ptr(err.Error())
-	case ticket == nil:
-		msg.Error = protocol.Ptr("ticket not found: " + ticketID)
-	default:
-		full, fullErr := d.ticketToProtocolFull(ticket)
-		if fullErr != nil {
-			msg.Error = protocol.Ptr(fullErr.Error())
-			break
-		}
-		msg.Success = true
-		msg.Ticket = &full
-	}
-	d.sendToClient(client, msg)
+	d.notifyTicketObservers(ticketID)
+	d.publishTicketFact(FactTicketChanged, ticketID)
 }
 
 // ticketToProtocol maps a store ticket to its wire shape; artifacts are hydrated
@@ -192,26 +132,6 @@ func ticketToProtocol(t *store.Ticket) protocol.Ticket {
 		pt.Activity = append(pt.Activity, ticketActivityToProtocol(a))
 	}
 	return pt
-}
-
-// ticketToProtocolRow maps a store ticket to its board-feed row.
-func ticketToProtocolRow(t *store.Ticket) protocol.TicketRow {
-	row := protocol.TicketRow{
-		ID:          t.ID,
-		Title:       t.Title,
-		Status:      protocol.TicketStatus(t.Status),
-		Assignee:    t.Assignee,
-		Cwd:         t.Cwd,
-		LastAgentID: t.LastAgentID,
-		UpdatedAt:   t.UpdatedAt.Format(time.RFC3339),
-	}
-	if t.ClosedAt != nil {
-		row.ClosedAt = protocol.Ptr(t.ClosedAt.Format(time.RFC3339))
-	}
-	if t.ReconciledAt != nil {
-		row.ReconciledAt = protocol.Ptr(t.ReconciledAt.Format(time.RFC3339))
-	}
-	return row
 }
 
 func (d *Daemon) ticketToProtocolFull(t *store.Ticket) (protocol.Ticket, error) {

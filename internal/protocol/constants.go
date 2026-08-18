@@ -10,7 +10,7 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "260"
+const ProtocolVersion = "261"
 
 // Error codes. A failed response may carry one beside its message text, naming
 // what a caller can do about it rather than leaving it to match English. The
@@ -163,11 +163,6 @@ const (
 	CmdAppWatch                              = "app_watch"
 	CmdAppViewCrash                          = "app_view_crash"
 	CmdAppCommand                            = "app_command"
-	CmdGetTicket                             = "get_ticket"
-	CmdTicketChangeStatus                    = "ticket_change_status"
-	CmdTicketAddComment                      = "ticket_add_comment"
-	CmdTicketEditDescription                 = "ticket_edit_description"
-	CmdTicketResume                          = "ticket_resume"
 	CmdPresentOpen                           = "present_open"
 	CmdPresentFeedback                       = "present_feedback"
 	CmdGetPresentations                      = "get_presentations"
@@ -223,6 +218,7 @@ const (
 	CmdSeedNotes                             = "seed_notes"
 	CmdSeedLink                              = "seed_link"
 	CmdSeedReady                             = "seed_ready"
+	CmdSeedResume                            = "seed_resume"
 	CmdCrewList                              = "crew_list"
 	CmdCrewWake                              = "crew_wake"
 	CmdCrewSleep                             = "crew_sleep"
@@ -416,7 +412,6 @@ const (
 	EventRenameResult                    = "rename_result"
 	EventChiefOfStaffResult              = "chief_of_staff_result"
 	EventSessionContextWindowCapResult   = "session_context_window_cap_result"
-	EventTicketsUpdated                  = "tickets_updated"
 	EventGardenSeedsUpdated              = "garden_seeds_updated"
 	EventAppsUpdated                     = "apps_updated"
 	EventAppCommandResult                = "app_command_result"
@@ -425,10 +420,7 @@ const (
 	EventCrewUpdated                     = "crew_updated"
 	EventCrewWakeResult                  = "crew_wake_result"
 	EventCrewSleepResult                 = "crew_sleep_result"
-	EventTicketResult                    = "ticket_result"
-	EventTicketActionResult              = "ticket_action_result"
 	EventTicketAttachResult              = "ticket_attach_result"
-	EventTicketResumeResult              = "ticket_resume_result"
 	EventGetPresentationsResult          = "get_presentations_result"
 	EventGetPresentationRoundResult      = "get_presentation_round_result"
 	EventPresentSubmitRoundResult        = "present_submit_round_result"
@@ -518,6 +510,7 @@ const (
 	EventOpenMarkdownResult              = "open_markdown_result"
 	EventOpenSeedResult                  = "open_seed_result"
 	EventSeedDocumentGetResult           = "seed_document_get_result"
+	EventSeedResumeResult                = "seed_resume_result"
 	EventSessionMessagesGetResult        = "session_messages_get_result"
 	EventSessionMessagesChanged          = "session_messages_changed"
 	EventPastConversationsResult         = "past_conversations_result"
@@ -962,34 +955,6 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 		}
 		return peek.Cmd, &msg, nil
 
-	case CmdGetTicket:
-		var msg GetTicketMessage
-		if err := json.Unmarshal(data, &msg); err != nil {
-			return "", nil, err
-		}
-		return peek.Cmd, &msg, nil
-
-	case CmdTicketChangeStatus:
-		var msg TicketChangeStatusMessage
-		if err := json.Unmarshal(data, &msg); err != nil {
-			return "", nil, err
-		}
-		return peek.Cmd, &msg, nil
-
-	case CmdTicketAddComment:
-		var msg TicketAddCommentMessage
-		if err := json.Unmarshal(data, &msg); err != nil {
-			return "", nil, err
-		}
-		return peek.Cmd, &msg, nil
-
-	case CmdTicketResume:
-		var msg TicketResumeMessage
-		if err := json.Unmarshal(data, &msg); err != nil {
-			return "", nil, err
-		}
-		return peek.Cmd, &msg, nil
-
 	case CmdPresentOpen:
 		var msg PresentOpenMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
@@ -1027,13 +992,6 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 
 	case CmdPresentClose:
 		var msg PresentCloseMessage
-		if err := json.Unmarshal(data, &msg); err != nil {
-			return "", nil, err
-		}
-		return peek.Cmd, &msg, nil
-
-	case CmdTicketEditDescription:
-		var msg TicketEditDescriptionMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, err
 		}
@@ -1419,6 +1377,13 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 
 	case CmdSeedReady:
 		var msg SeedReadyMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdSeedResume:
+		var msg SeedResumeMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, err
 		}

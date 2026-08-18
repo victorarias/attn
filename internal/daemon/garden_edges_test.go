@@ -204,7 +204,7 @@ func TestGardenEdges_ReadyInfersTheDispatchedPlot(t *testing.T) {
 		t.Fatalf("undispatched ready = %v, want both seeds", got)
 	}
 
-	if err := d.recordGardenDispatch("sess-a", crown.ID); err != nil {
+	if err := d.recordGardenDispatch("sess-a", crown.ID, "", ""); err != nil {
 		t.Fatalf("recordGardenDispatch: %v", err)
 	}
 
@@ -234,7 +234,7 @@ func TestGardenEdges_ReadyInfersTheDispatchedPlot(t *testing.T) {
 func TestGardenEdges_ReadyFallsBackWhenTheCrownIsGone(t *testing.T) {
 	d := newGardenDaemon(t)
 	plant(t, d, protocol.SeedPlantMessage{SourceSessionID: protocol.Ptr("sess-a"), Title: "still here"})
-	if err := d.recordGardenDispatch("sess-a", "s-zzzzzz"); err != nil {
+	if err := d.recordGardenDispatch("sess-a", "s-zzzzzz", "", ""); err != nil {
 		t.Fatalf("recordGardenDispatch: %v", err)
 	}
 

@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useSettings } from '../contexts/SettingsContext';
 
-const SETTINGS_KEY = 'ticketBoardScale';
+const SETTINGS_KEY = 'gardenScale';
 const MIN_SCALE = 0.7;
 const MAX_SCALE = 1.5;
 const SCALE_STEP = 0.1;
@@ -11,14 +11,14 @@ function clamp(value: number): number {
 }
 
 /**
- * Font scale for the ticket board + ticket detail surfaces, independent of the
- * app-wide uiScale. `null` means "match app": no override is stored and the
- * `--ticket-board-scale` CSS variable falls back to `var(--ui-scale)`.
+ * Font scale for the garden surfaces, independent of the app-wide uiScale.
+ * `null` means "match app": no override is stored and the `--garden-scale` CSS
+ * variable falls back to `var(--ui-scale)`.
  *
  * `appScale` is the current uiScale, used as the starting point when the user
  * first steps away from "match app".
  */
-export function useTicketBoardScale(appScale: number) {
+export function useGardenScale(appScale: number) {
   const { settings, setSetting } = useSettings();
   const initializedFromSettings = useRef(false);
 
@@ -40,9 +40,9 @@ export function useTicketBoardScale(appScale: number) {
   // stylesheet fallback (var(--ui-scale)) take over.
   useEffect(() => {
     if (scale === null) {
-      document.documentElement.style.removeProperty('--ticket-board-scale');
+      document.documentElement.style.removeProperty('--garden-scale');
     } else {
-      document.documentElement.style.setProperty('--ticket-board-scale', scale.toString());
+      document.documentElement.style.setProperty('--garden-scale', scale.toString());
     }
   }, [scale]);
 
@@ -67,9 +67,9 @@ export function useTicketBoardScale(appScale: number) {
   }, [applyScale]);
 
   return {
-    /** The stored override, or null when the board matches the app scale. */
+    /** The stored override, or null when the garden matches the app scale. */
     scale,
-    /** What the board actually renders at right now. */
+    /** What the garden actually renders at right now. */
     effectiveScale: scale ?? appScale,
     increaseScale,
     decreaseScale,

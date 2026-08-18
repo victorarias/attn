@@ -1,8 +1,8 @@
 :root {
   --ui-scale: 1;
-  /* Ticket board font scale; follows the app scale unless useTicketBoardScale
-     sets an explicit override on the document root. */
-  --ticket-board-scale: var(--ui-scale);
+  /* Garden font scale; follows the app scale unless useGardenScale sets an
+     explicit override on the document root. */
+  --garden-scale: var(--ui-scale);
   /* Base font sizes - multiply by scale for responsive sizing */
   --font-size-xs: calc(9px * var(--ui-scale));
   --font-size-sm: calc(11px * var(--ui-scale));
@@ -70,16 +70,15 @@
   --syntax-function: #61afef;
 }
 
-/* Ticket board surfaces re-derive the font tokens from the board's own scale,
-   so the taskboard font size can differ from the rest of the app. */
-.tb-panel,
-.ticket-detail-panel {
-  --font-size-xs: calc(9px * var(--ticket-board-scale));
-  --font-size-sm: calc(11px * var(--ticket-board-scale));
-  --font-size-md: calc(13px * var(--ticket-board-scale));
-  --font-size: calc(14px * var(--ticket-board-scale));
-  --font-size-lg: calc(18px * var(--ticket-board-scale));
-  --font-size-xl: calc(24px * var(--ticket-board-scale));
+/* Garden surfaces re-derive the font tokens from the garden's own scale, so a
+   wall of seeds can be read at a different size than the rest of the app. */
+.garden-panel {
+  --font-size-xs: calc(9px * var(--garden-scale));
+  --font-size-sm: calc(11px * var(--garden-scale));
+  --font-size-md: calc(13px * var(--garden-scale));
+  --font-size: calc(14px * var(--garden-scale));
+  --font-size-lg: calc(18px * var(--garden-scale));
+  --font-size-xl: calc(24px * var(--garden-scale));
 }
 
 /* System light: applies when OS is light and no explicit data-theme is set */

@@ -51,22 +51,22 @@ func TestCoalesceSnapshotsKeepsDistinctSnapshotsSeparate(t *testing.T) {
 	}
 }
 
-// The board was the one whole-list projection outside the machinery: it pushed
-// its 200KB message per fact even inside a bulk block. It is a snapshot like
-// every other list, so it collapses like one.
-func TestCoalesceSnapshotsCollapsesTheTicketBoard(t *testing.T) {
+// A whole-list projection pushes its whole message per fact, even inside a bulk
+// block. The garden is a snapshot like every other list, so it collapses like
+// one.
+func TestCoalesceSnapshotsCollapsesTheGarden(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
-	var boards int
-	d.ticketsBroadcastHook = func([]protocol.TicketRow) { boards++ }
+	var pushes int
+	d.gardenBroadcastHook = func([]protocol.Seed, int) { pushes++ }
 
 	d.coalesceSnapshots(func() {
-		for _, id := range []string{"tk-1", "tk-2", "tk-3", "tk-4", "tk-5"} {
-			d.publishTicketFact(FactTicketStatusChanged, id)
+		for _, id := range []string{"s-1", "s-2", "s-3", "s-4", "s-5"} {
+			d.publishFact(FactGardenNoted, id, nil)
 		}
 	})
 
-	if boards != 1 {
-		t.Fatalf("five ticket facts in one bulk block pushed %d boards, want 1", boards)
+	if pushes != 1 {
+		t.Fatalf("five garden facts in one bulk block pushed %d gardens, want 1", pushes)
 	}
 }
 

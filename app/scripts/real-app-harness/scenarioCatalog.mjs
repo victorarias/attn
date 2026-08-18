@@ -90,12 +90,11 @@ export const scenarioCatalog = [
     timeoutMs: 240_000,
   },
   {
-    id: 'ticket-lifecycle',
-    label: 'Ticket lifecycle: chief delegates, worker reports, chief reviews in the panel',
-    command: ['pnpm', 'run', 'real-app:scenario-ticket-lifecycle'],
-    // Bootstraps a chief + a real codex delegation + the full worker→chief
-    // review loop in one app lifecycle; needs more than the default budget.
-    timeoutMs: 360_000,
+    id: 'garden-seed-reopen',
+    label: 'Garden surfaces: a delegated pane names its seed, and a closed tender is reopened from the drill',
+    command: ['pnpm', 'run', 'real-app:scenario-garden-seed-reopen'],
+    // Boots the app, a session, a delegation, and one respawn.
+    timeoutMs: 240_000,
   },
   {
     id: 'ordinary-delegation-ticket',

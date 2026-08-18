@@ -143,15 +143,23 @@ func NotesSchema() docstore.CollectionSchema {
 	}
 }
 
-// Dispatch records that a session was dispatched at a crown. It is scope
-// inference, nothing more: flag-free `ready` inside that session answers with
-// the plot's ready seeds and launch priming starts from the crown — never a
-// fence (the session may tend or plant anything) and never an assignment
-// (who-holds-what stays the per-seed tender, which is why no surface renders
-// this record). Keyed by session id: a session is dispatched at one crown.
+// Dispatch is the seed a session reports to, and how to relaunch the session
+// that reports to it. Keyed by session id: a session is dispatched at one seed.
+//
+// `Crown` is that seed — the plot a delegation was aimed at, or the seed
+// planted for it. It is scope inference for the session's own reading of the
+// garden (flag-free `ready` answers with the plot, launch priming starts from
+// the crown) and never a fence: the session may tend or plant anything, and
+// who-holds-what stays the per-seed tender.
+//
+// `Cwd` and `Agent` are what a resume needs. They live here because a session
+// row is deleted when the session closes, and reopening a delegate whose
+// session is gone is exactly the case that has to work.
 type Dispatch struct {
 	SessionID string `json:"session_id"`
 	Crown     string `json:"crown"`
+	Cwd       string `json:"cwd,omitempty"`
+	Agent     string `json:"agent,omitempty"`
 }
 
 // DispatchesSchema declares the dispatch collection. `crown` is declared so

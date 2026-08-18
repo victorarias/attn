@@ -58,23 +58,19 @@ func requireBus(t *testing.T, what string, cond func() bool) {
 	}
 }
 
-// A ticket mutation publishes a durable, subject-carrying fact — and still
-// produces exactly one board push, unchanged from before the migration.
-func TestTicketMutationPublishesAFactAndPushesTheBoardOnce(t *testing.T) {
+// A garden mutation publishes a durable, subject-carrying fact — and produces
+// exactly one garden push.
+func TestGardenMutationPublishesAFactAndPushesTheGardenOnce(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	t.Cleanup(d.stopEventBus)
 
-	var boards int
-	d.ticketsBroadcastHook = func([]protocol.TicketRow) { boards++ }
+	var pushes int
+	d.gardenBroadcastHook = func([]protocol.Seed, int) { pushes++ }
 
-	now := time.Now()
-	if _, err := d.store.CreateTicket(store.Ticket{ID: "tk-1", Title: "work"}, "sess-a", now); err != nil {
-		t.Fatalf("CreateTicket: %v", err)
-	}
-	d.publishTicketFact(FactTicketCommented, "tk-1")
+	d.publishFact(FactGardenNoted, "s-1", nil)
 
-	if boards != 1 {
-		t.Fatalf("one fact produced %d board pushes, want exactly 1", boards)
+	if pushes != 1 {
+		t.Fatalf("one fact produced %d garden pushes, want exactly 1", pushes)
 	}
 
 	events, err := d.store.BusEventsSince(0, 10)
@@ -84,12 +80,12 @@ func TestTicketMutationPublishesAFactAndPushesTheBoardOnce(t *testing.T) {
 	if len(events) != 1 {
 		t.Fatalf("log holds %d events, want 1", len(events))
 	}
-	if events[0].Name != FactTicketCommented {
-		t.Fatalf("fact name = %q, want %q", events[0].Name, FactTicketCommented)
+	if events[0].Name != FactGardenNoted {
+		t.Fatalf("fact name = %q, want %q", events[0].Name, FactGardenNoted)
 	}
 	// The subject is what separates a fact from a snapshot invalidation.
-	if events[0].Subject != "tk-1" {
-		t.Fatalf("fact subject = %q, want the ticket id", events[0].Subject)
+	if events[0].Subject != "s-1" {
+		t.Fatalf("fact subject = %q, want the seed id", events[0].Subject)
 	}
 }
 
@@ -320,27 +316,22 @@ func rewireBusWithFailingAppend(t *testing.T, d *Daemon) *failingAppendBusStore 
 	return backing
 }
 
-// A ticket mutation has already committed by the time its fact is published. If
-// the durable append then fails, the board push must still go out: before the
-// bus existed this was a direct broadcast, and a client cannot be allowed to
-// miss a committed mutation because the event log had a bad night.
-func TestBoardStillPushesWhenTheBusAppendFails(t *testing.T) {
+// A mutation has already committed by the time its fact is published. If the
+// durable append then fails, the wire push must still go out: before the bus
+// existed this was a direct broadcast, and a client cannot be allowed to miss a
+// committed mutation because the event log had a bad night.
+func TestSnapshotStillPushesWhenTheBusAppendFails(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	backing := rewireBusWithFailingAppend(t, d)
 
-	var boards int
-	d.ticketsBroadcastHook = func([]protocol.TicketRow) { boards++ }
-
-	now := time.Now()
-	if _, err := d.store.CreateTicket(store.Ticket{ID: "tk-1", Title: "work"}, "sess-a", now); err != nil {
-		t.Fatalf("CreateTicket: %v", err)
-	}
+	var pushes int
+	d.gardenBroadcastHook = func([]protocol.Seed, int) { pushes++ }
 
 	backing.setFail(errors.New("disk had a bad night"))
-	d.publishTicketFact(FactTicketStatusChanged, "tk-1")
+	d.publishFact(FactGardenNoted, "s-1", nil)
 
-	if boards != 1 {
-		t.Fatalf("a committed ticket mutation produced %d board pushes while the bus append was failing, want 1", boards)
+	if pushes != 1 {
+		t.Fatalf("a committed mutation produced %d pushes while the bus append was failing, want 1", pushes)
 	}
 	// The fact is genuinely lost — only its durability, not the wire.
 	logged, err := d.store.BusEventsSince(0, 10)
@@ -352,11 +343,11 @@ func TestBoardStillPushesWhenTheBusAppendFails(t *testing.T) {
 	}
 
 	// Recovery: once the store is healthy the next fact is durable again, and the
-	// board still pushes exactly once for it.
+	// garden still pushes exactly once for it.
 	backing.setFail(nil)
-	d.publishTicketFact(FactTicketStatusChanged, "tk-1")
-	if boards != 2 {
-		t.Fatalf("board pushes = %d after recovery, want 2", boards)
+	d.publishFact(FactGardenNoted, "s-1", nil)
+	if pushes != 2 {
+		t.Fatalf("garden pushes = %d after recovery, want 2", pushes)
 	}
 	logged, err = d.store.BusEventsSince(0, 10)
 	if err != nil {

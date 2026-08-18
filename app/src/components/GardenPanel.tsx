@@ -29,6 +29,9 @@ interface GardenPanelProps {
   onOpenAsTile?: (seedId: string) => void;
   /** Open an attached markdown document as its own file tile. */
   onOpenMarkdownArtifact?: (path: string) => void;
+  /** Reopen the session tending a seed — the way back to a delegate whose
+   *  session is gone. Absent hides the affordance entirely. */
+  onResumeSeed?: (seedId: string) => void;
 }
 
 // formatPlantedAt renders an RFC3339 created_at as a short relative phrase.
@@ -148,6 +151,7 @@ export function GardenPanel({
   fetchSeedDocument,
   onOpenAsTile,
   onOpenMarkdownArtifact,
+  onResumeSeed,
 }: GardenPanelProps) {
   // The trail of crowns walked into, root last. Empty is the whole garden, which
   // is where the panel opens.
@@ -337,15 +341,33 @@ export function GardenPanel({
                 )}
                 {expanded && (
                   <div className="garden-seed__detail">
-                    {onOpenAsTile && (
-                      <button
-                        type="button"
-                        className="garden-seed__open-tile"
-                        onClick={() => onOpenAsTile(seed.id)}
-                      >
-                        Open as tile
-                      </button>
-                    )}
+                    <div className="garden-seed__actions">
+                      {onOpenAsTile && (
+                        <button
+                          type="button"
+                          className="garden-seed__open-tile"
+                          onClick={() => onOpenAsTile(seed.id)}
+                        >
+                          Open as tile
+                        </button>
+                      )}
+                      {/* The way back to a delegate: reopen the session tending
+                          this seed. Shown only when one holds it — with nobody
+                          tending, there is nothing to reopen, and the daemon
+                          would say exactly that. A running tender is focused
+                          rather than spawned, so the button reads the same
+                          either way. */}
+                      {onResumeSeed && seed.tender_session && (
+                        <button
+                          type="button"
+                          className="garden-seed__reopen"
+                          data-testid={`seed-reopen-${seed.id}`}
+                          onClick={() => onResumeSeed(seed.id)}
+                        >
+                          Reopen agent
+                        </button>
+                      )}
+                    </div>
                     <div className="garden-seed__meta">
                       <span>{seed.status}</span>
                       {seed.planter_member && <span>planted by {crewDisplayName(seed.planter_member)}</span>}

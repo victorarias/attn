@@ -27,10 +27,8 @@ import type { UISessionState } from '../../types/sessionState';
 import { HeaderNudgeIndicator, deriveNudgeMode } from '../NudgeIndicator';
 import { HeaderSettleKeptChip, HeaderSettlingIndicator } from '../SettlingIndicator';
 import { HeaderPresentationChip } from '../PresentationChip';
-import { PaneTicketChip } from '../PaneTicketChip';
-import { TicketDetailPanel } from '../TicketDetailPanel';
-import type { Seed, Ticket, TicketRow } from '../../hooks/useDaemonSocket';
-import { useEscapeStack } from '../../hooks/useEscapeStack';
+import { PaneSeedChip } from '../PaneSeedChip';
+import type { Seed } from '../../hooks/useDaemonSocket';
 import type { Presentation } from '../../types/generated';
 import { useGhosttyPaneRuntime } from './useGhosttyPaneRuntime';
 import type { PaneRuntimeEventRouter } from './paneRuntimeEventRouter';
@@ -140,27 +138,17 @@ interface SessionTerminalWorkspaceProps {
     autoSettleDismissArmed?: boolean;
     isActive?: boolean;
     presentation?: Presentation;
-    // The board row for the ticket bound to this session (assignee == id), when
-    // one exists. Drives the pane-header ticket chip + in-pane overlay.
-    ticket?: TicketRow;
+    // The seed this session reports to, when a delegation bound one. Drives the
+    // pane-header seed chip.
+    seedId?: string;
   }>;
   // A seed may be tended outside the workspace where its reading tile sits.
   seedTargetSessions?: WorkspaceTileSessionOption[];
   gardenSeeds?: Seed[];
-  // Daemon-facing ticket actions, threaded straight into the overlay's
-  // TicketDetailPanel. Optional so a workspace without ticket wiring still
-  // renders; the chip's overlay only opens when these are present.
-  ticketActions?: {
-    fetchTicket: (ticketId: string) => Promise<Ticket>;
-    onChangeStatus: (ticketId: string, status: Ticket['status'], expectedEventSeq: number, comment?: string) => Promise<void>;
-    onAddComment: (ticketId: string, comment: string, expectedEventSeq: number) => Promise<void>;
-    onEditDescription: (ticketId: string, description: string, expectedEventSeq: number) => Promise<void>;
-    onAttach?: (ticketId: string, paths: string[], state?: string, comment?: string, expectedEventSeq?: number) => Promise<unknown>;
-    onRenameArtifact?: (path: string, newPath: string) => Promise<unknown>;
-    onDeleteArtifact?: (path: string) => Promise<unknown>;
-    onOpenArtifact?: (path: string) => void;
-    onResume: (ticketId: string) => void;
-  };
+  // Opens a seed as its annotated reading tile. Absent means the pane header
+  // shows the seed chip as unclickable chrome nothing can act on, so it is not
+  // rendered at all.
+  onOpenSeed?: (seedId: string) => void;
   // Agents whose sessions are conversations, not terminals: their panes draw
   // the host's message stream instead of a PTY. The daemon decides this (the
   // driver's `conversation` capability) and publishes it in settings; this is
@@ -239,7 +227,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
     workspaceSessions = [],
     seedTargetSessions = EMPTY_SEED_TARGET_SESSIONS,
     gardenSeeds = EMPTY_GARDEN_SEEDS,
-    ticketActions,
+    onOpenSeed,
     conversationAgents,
     annotationApi,
     workspace,
@@ -289,9 +277,6 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
     // Bumped when a terminal announces readiness; re-runs the leaf focus effect so
     // the committed active leaf, not the mounting terminal, decides where focus goes.
     const [paneReadyFocusRequest, setPaneReadyFocusRequest] = useState(0);
-    // The agent pane whose bound-ticket overlay is open (one per workspace at a
-    // time), or null. Pane-scoped and non-modal — not part of blockingOverlayOpen.
-    const [ticketOverlayPaneId, setTicketOverlayPaneId] = useState<string | null>(null);
     const [renamePane, setRenamePane] = useState<{
       sessionId: string;
       name: string;
@@ -617,17 +602,6 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
       }
     }, [maximizedLeafId, leafIds]);
 
-    // Close the ticket overlay if its pane leaves the layout (e.g. the pane was
-    // closed while the overlay was open), mirroring the maximizedPaneId cleanup.
-    useEffect(() => {
-      if (!ticketOverlayPaneId) {
-        return;
-      }
-      if (!paneIds.includes(ticketOverlayPaneId)) {
-        setTicketOverlayPaneId(null);
-      }
-    }, [paneIds, ticketOverlayPaneId]);
-
     // Focusing the terminal is a leaf handoff, not just a DOM focus call: it
     // has to release any focused tile. `activePaneId` does not change here (the
     // pane was already the session's active one), so without the release the
@@ -638,19 +612,6 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
       // Single attempt — terminal is already mounted in every case this fires.
       runtime.focusPane(activePaneId, 0);
     }, [activePaneId, runtime]);
-
-    // The single close path for the ticket overlay: clears the open pane and
-    // restores focus through the active GhosttyTerminal handle (critical pattern
-    // #6 — never a blind main-terminal focus). Every close affordance (Escape,
-    // chip re-click, the panel ✕, Resume) funnels through here.
-    const closeTicketOverlay = useCallback(() => {
-      setTicketOverlayPaneId(null);
-      focusActivePane();
-    }, [focusActivePane]);
-
-    // Escape closes the overlay via the shared LIFO stack, so it nests correctly
-    // with the board surface and other overlays.
-    useEscapeStack(closeTicketOverlay, ticketOverlayPaneId !== null);
 
     // Focusing a tile means focusing its scrollable body: that is what enables
     // keyboard scrolling, satisfies the shortcut dispatcher's terminal-target
@@ -952,15 +913,15 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
               isActive: Boolean(paneSession.isActive),
             })
           : null;
-        const paneTicket = paneSession?.ticket;
-        const ticketOverlayOpen = ticketOverlayPaneId === agentPane.id;
+        const paneSeedId = paneSession?.seedId;
+        const paneSeed = paneSeedId ? gardenSeeds.find((candidate) => candidate.id === paneSeedId) : undefined;
         // The pane header is always on for an agent pane. It carries the
         // session's name — generated from the conversation, so it says what this
         // agent is actually doing — alongside the presentation chip, the
-        // auto-settle countdown, the nudge indicator, and the bound-ticket chip.
+        // auto-settle countdown, the nudge indicator, and the seed chip.
         // Which agent you are looking at is not something to hide behind a split,
         // and the chips it hosts (a turn about to be closed for you, an unread
-        // ticket) are exactly the things that must never be invisible.
+        // seed) are exactly the things that must never be invisible.
         //
         // Only dragging stays split-only: a lone tile has nowhere to move to, so
         // it gets the non-draggable variant.
@@ -1051,21 +1012,13 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
                   onCancel={() => onCancelCountdown?.(agentPane.sessionId)}
                 />
               ) : null}
-              {paneTicket && ticketActions ? (
-                <PaneTicketChip
-                  ticket={paneTicket}
+              {paneSeedId && onOpenSeed ? (
+                <PaneSeedChip
+                  seedId={paneSeedId}
+                  seed={paneSeed}
                   unread={Boolean(paneSession?.ticketUnread)}
-                  open={ticketOverlayOpen}
                   sessionId={agentPane.sessionId}
-                  onToggle={() => {
-                    // Re-clicking the chip closes (restoring focus via the shared
-                    // close path); clicking it while closed opens on this pane.
-                    if (ticketOverlayOpen) {
-                      closeTicketOverlay();
-                    } else {
-                      setTicketOverlayPaneId(agentPane.id);
-                    }
-                  }}
+                  onOpen={() => onOpenSeed(paneSeedId)}
                 />
               ) : null}
             </div>
@@ -1112,37 +1065,6 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
                   onTerminalModelRecovered={onTerminalModelRecovered}
                 />
               )}
-              {ticketOverlayOpen && paneTicket && ticketActions ? (
-                <div
-                  className="workspace-pane-ticket-overlay"
-                  data-testid={`ticket-overlay-${agentPane.id}`}
-                  tabIndex={-1}
-                  ref={(node) => {
-                    // Take focus on open so keystrokes stop reaching the PTY;
-                    // preventScroll keeps the pane from jumping.
-                    node?.focus({ preventScroll: true });
-                  }}
-                >
-                  <TicketDetailPanel
-                    isOpen
-                    ticketId={paneTicket.id}
-                    ticketRow={paneTicket}
-                    fetchTicket={ticketActions.fetchTicket}
-                    onChangeStatus={ticketActions.onChangeStatus}
-                    onAddComment={ticketActions.onAddComment}
-                    onEditDescription={ticketActions.onEditDescription}
-                    onAttach={ticketActions.onAttach}
-                    onRenameArtifact={ticketActions.onRenameArtifact}
-                    onDeleteArtifact={ticketActions.onDeleteArtifact}
-                    onOpenArtifact={ticketActions.onOpenArtifact}
-                    onResume={(ticketId) => {
-                      closeTicketOverlay();
-                      ticketActions.onResume(ticketId);
-                    }}
-                    onClose={closeTicketOverlay}
-                  />
-                </div>
-              ) : null}
             </div>
           </div>
         );
@@ -1229,11 +1151,9 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
       resolvedTheme,
       runtime,
       showPaneHeader,
-      ticketOverlayPaneId,
-      ticketActions,
+      onOpenSeed,
       conversationAgents,
       annotationApi,
-      closeTicketOverlay,
       onCancelCountdown,
     ]);
 
