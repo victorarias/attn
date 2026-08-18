@@ -1,95 +1,78 @@
 # attn-pi plugin guide
 
-**Read pi's own docs before changing this plugin.** The complete set for the
-pinned version is installed at
-`node_modules/@earendil-works/pi-coding-agent/docs/` (`bun install` here if it
-is missing): `extensions.md` for the extension API, the event lifecycle and
-session replacement; `sdk.md` for the headless runtime nisse's host drives;
-`session-format.md` for the JSONL and `SessionManager`; then `rpc.md`,
-`settings.md`, `compaction.md`, `tui.md`, `models.md`.
+**Read pi's own docs before changing this plugin.** The set for the pinned
+version is installed at `node_modules/@earendil-works/pi-coding-agent/docs/`
+(`bun install` here if it is missing): `extensions.md` for the extension API,
+the event lifecycle and session replacement; `sdk.md` for the headless runtime
+nisse's host drives; `session-format.md` for the JSONL and `SessionManager`;
+then `rpc.md`, `settings.md`, `compaction.md`, `tui.md`, `models.md`.
 
-**This file carries only two things:** attn-specific invariants, and pi
-behavior that is verified but undocumented — each stamped with the pi version
-it was verified against. Do not add a fact pi documents; link it. An invariant
-about one function belongs in a comment at that function. When an entry below
-graduates into pi's docs, delete it here.
-
-Canonical vision: `docs/vision/pi-attn-plugins.md`. Grounding with source
-citations (stamped at pi 0.80.10): `docs/grounding/pi-plugins.md`. Vocabulary
-— pi the engine vs nisse the agent vs a host, conversation session, auto mode:
+Canonical vision: `docs/vision/pi-attn-plugins.md`. Vocabulary — pi the engine
+vs nisse the agent vs a host, conversation session, auto mode:
 `docs/glossary.md`. This is attn's only driver plugin, so the driver contract
 itself lives in `internal/daemon/plugin_driver.go`.
 
-## Pinning pi
+## Bumping pi
 
-pi is a 0.x rolling release (~1-2/week) whose breaking changes are documented
-only as prose under "### Breaking Changes" in each package's `CHANGELOG.md`.
+pi has no API-compatibility gate: it never checks that an extension was built
+against the pi it loads into, so a bump fails at the first missing call site at
+runtime, not at build. (Its package manager does semver-check *installed
+extension packages* — that is a different thing and pi documents it in
+`packages.md`.) Read the "### Breaking Changes" sections in each package's
+`CHANGELOG.md`, then pass `spike-harness/`, which drives pi's SDK without attn
+and is the gate a bump has to clear.
 
-- **pi has no extension/version compat gate** (0.83.0: nothing in
-  `core/extensions/loader.js` or the package manager reads a version). An
-  extension built against old types loads silently and fails at the first
-  missing call site. Pin the exact version, treat upgrades as deliberate
-  changelog-gated events, and have the suite self-check pi's version at
-  `session_start` rather than assume compatibility.
-- `spike-harness/` drives pi's SDK without attn and is the gate a version bump
-  has to pass; see its README.
-- The compiled binary cannot read pi's `VERSION`: pi reads its own
-  package.json off disk at runtime and a `bun build --compile` binary has no
-  copy, so `VERSION` degrades to `"0.0.0"`. The pin is inlined from this
-  plugin's exact dependency entry instead, and a disagreement with a
-  runtime-readable VERSION is spawn-fatal.
+## pi behavior attn depends on and pi does not document
 
-## Verified pi behavior pi does not document
+Verified against the pinned pi (0.83.0) by reading
+`node_modules/@earendil-works/`. Re-check an entry after a bump.
 
-Re-verified against the pinned pi on 2026-08-18 unless an entry says
-otherwise.
-
-- **`session_shutdown` does not fire on an uncaught exception or on SIGKILL**
-  (0.83.0). It fires on clean quit and SIGTERM/SIGHUP, which `extensions.md`
-  does document; what it omits is that `uncaughtCrash` calls `process.exit(1)`
-  with no emit. Never treat a missing goodbye as meaningful: the PTY child
-  exit the driver observes is the authoritative liveness signal, and declared
-  state rides on top.
-- **Module scope survives a session transition, but not a reload** (0.83.0).
-  pi caches the extension module per process, keyed on cwd and a generation
-  counter. A session replacement builds a fresh `ResourceLoader`, so the cache
-  is kept and module-scope state survives resume/fork/new — which is why the
-  relay client and `AutoMode` live there. `ctx.reload()` and `/reload` reuse
-  the loaded one and call `clearExtensionCache()`, so the module is
-  re-imported and everything at module scope is rebuilt; a socket held there
-  is orphaned, not closed. A cwd change clears it too. (That factories re-run
-  and that captured contexts throw afterwards IS documented — `extensions.md`,
-  "Session replacement lifecycle and footguns".)
-- **`pi --session-id <id>` exists and is undocumented** (0.83.0). It creates
-  the session when missing, and it is how the driver mints native identity at
-  spawn and on resume. Never parse pi's session picker.
-- **pi writes a `model_change` and a `thinking_level_change` into every
-  session file before anything is said** (0.83.0). `session-format.md`
-  documents the entry types, not that they always lead. Reconstruction must
-  ignore a `model_change` that precedes the first message, or every new
-  conversation claims to have switched models and (not being an assistant
-  message) declares `waiting_input` on arrival.
-- **`session.clearQueue()` is all-or-nothing** (0.83.0) — pi offers no
-  per-entry removal, which is why attn's `clear_queue` is not either.
-- **pi spawns each tool subprocess into its own process group** (measured
-  2026-08-05), so a group kill misses them; only pi's own dispose, which the
-  host runs on SIGTERM, tears them down.
-- **pi's event union is neither stable nor changelogged**: four event types
-  appeared between 0.80.10 and 0.83.0 with no entry. Never claim
-  exhaustiveness over it — log an unknown type once and drop it.
-- **`bindExtensions` is required per session.** `sdk.md` says to call it again
-  after a replacement; the failure mode it omits is that without it
-  `session_start` never fires and resource discovery never runs, so extensions
-  silently do nothing.
-- **pi's TUI under attn's PTY** (pi-tui 0.83.0): it never uses the alternate
-  screen (no mode 1049), never sends CPR (no `ESC[6n`), queries only OSC 11
-  once for light/dark detection, negotiates the Kitty keyboard protocol with
-  `ESC[>7u ESC[?u ESC[c`, wraps every frame in DEC 2026 synchronized output,
-  and self-fires SIGWINCH after enabling raw mode. attn's worker answers OSC
-  11 from the daemon-pushed theme and answers the trailing DA1, so pi falls
-  back to modifyOtherKeys deterministically — degraded but correct; do not
-  "fix" this by answering the kitty query. Still not live-verified: resize
+- **A nisse host never gets a `session_shutdown`.** The emit lives on
+  `AgentSessionRuntime.dispose()`; `AgentSession.dispose()`, which
+  `host/index.ts` calls, does not emit it at all, and the host builds its
+  session with `createAgentSession` rather than the runtime. In the pi TUI it
+  fires on clean quit and SIGTERM/SIGHUP but not on an uncaught exception
+  (`uncaughtCrash` goes straight to `process.exit(1)`) or SIGKILL. Either way:
+  **child exit is the liveness signal; a missing goodbye means nothing.**
+- **Module scope survives a session transition only while cwd does not
+  change.** pi's extension module cache is keyed on cwd and a generation
+  counter: a resume/fork/new in the same directory keeps it, resuming a session
+  from another folder clears it, and `/reload` clears it outright. So the relay
+  client and `AutoMode` at module scope are rebuilt in both of those cases, and
+  a socket held there is orphaned rather than closed. pi's docs tell extension
+  authors the opposite contract — rebuild in `session_start` — so do not
+  lean on it harder than the relay already does.
+- **The worker must keep answering CPR even though pi never sends one.** pi's
+  own renderer sends no CPR and never enters the alternate screen, but the
+  external-editor path spawns `$VISUAL`/`$EDITOR` (default `nano`) with
+  `stdio: "inherit"`, so a vim or nvim user writes CPR and mode 1049 straight
+  into attn's PTY.
+- **pi's light/dark probe reaches attn only through its fallback.** pi asks
+  DSR `CSI ?996n` first and falls back to OSC 11; attn answers OSC 11 from the
+  daemon-pushed theme and answers `?996n` nowhere. pi also toggles mode 2031.
+- **pi negotiates the Kitty keyboard protocol at start** with
+  `ESC[>7u ESC[?u ESC[c` and pops it with `ESC[<u` on stop. attn's worker
+  answers the trailing DA1, so pi falls back to modifyOtherKeys
+  deterministically — degraded but correct; do not "fix" this by answering the
+  kitty query.
+- pi self-fires SIGWINCH when its TUI starts (POSIX), so a stale size
+  self-heals, and it wraps its render buffers in DEC 2026 — though cursor
+  positioning is written outside that wrapper. Still not live-verified: resize
   races under a real attn PTY.
+- **`pi --session-id <id>`** creates the session when missing and is how the
+  driver mints native identity at spawn and on resume. It is in pi's `--help`
+  and CHANGELOG but in no page under `docs/`. Never parse pi's session picker.
+- **`session.clearQueue()` is all-or-nothing** — pi has no per-entry queue
+  removal, which is why attn's `clear_queue` has none either.
+- **pi's bash tool spawns its shell detached, in its own process group**
+  (POSIX only; `grep`/`find` and other tool subprocesses are not detached).
+  A hard kill orphans that shell and everything under it (3x reproduced,
+  2026-08-04), which is why teardown SIGTERMs the host first.
+- **The nisse binary reports pi `VERSION` as `"0.0.0"`.** pi resolves VERSION
+  from a package.json beside the executable, and `build-bundled-plugins.sh`
+  puts none next to `bin/attn-nisse`. The pin is inlined from this plugin's
+  `package.json` instead, and a disagreement with a runtime-readable VERSION
+  is spawn-fatal.
 
 ## Driver
 
@@ -264,10 +247,9 @@ agent unchanged; everything here that says nisse is this agent in particular.
   moves on the host's answer and never on the click; the daemon rewrites
   `LaunchIntent.Model` from it so a revive relaunches on the model the user
   chose.
-- **Teardown is SIGTERM first, then the group.** The SIGTERM is the
-  load-bearing half — pi's own dispose is what tears its tool subprocesses
-  down (see the process-group entry above) and a hard kill orphans them (3x
-  reproduced, 2026-08-04). Never "simplify" this to a group kill.
+- **Teardown SIGTERMs the host, then kills the group.** The SIGTERM is the
+  load-bearing half — pi's own dispose is what tears the detached bash shell
+  down (see the bash-tool entry above). Never "simplify" this to a group kill.
 - Session storage is attn's (`<data-dir>/hosts/state/<session>`), never
   `~/.pi/agent/sessions`. Auth and resource discovery still resolve against
   the real `~/.pi/agent`, exactly as a bare `pi` does.
