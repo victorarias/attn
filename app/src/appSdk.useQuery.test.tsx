@@ -19,14 +19,14 @@ function doc(id: string, rev: number, status: string) {
 }
 
 /** A host stand-in that hands the test the subscriber the SDK registered. */
-function fakeRuntime() {
+function fakeRuntime({ liveOnSubscribe = true }: { liveOnSubscribe?: boolean } = {}) {
   const subscribers: DocumentSubscriber[] = []
   let unsubscribes = 0
   const runtime: AppViewRuntime = {
     namespace: "app/approval-gate",
     subscribe: (subscriber) => {
       subscribers.push(subscriber)
-      subscriber.onLive(true)
+      if (liveOnSubscribe) subscriber.onLive(true)
       return () => {
         unsubscribes += 1
       }
@@ -182,6 +182,79 @@ describe("useQuery", () => {
 
     expect(screen.getByTestId("error").textContent).toBe("invalid_query")
     expect(host.subscribers).toHaveLength(0)
+  })
+
+
+  it("shows nothing of the previous query when the query changes", () => {
+    // A view that changes its filter, sort or limit asks a different question.
+    // Rendering the old answer under the new label — and calling it live — is the
+    // one way a window can lie about what it is.
+    const host = fakeRuntime({ liveOnSubscribe: false })
+    function Limited({ limit }: { limit: number }) {
+      const { docs, live, asOfSeq } = useQuery<Body>("changes", { limit })
+      return (
+        <div>
+          <div data-testid="live">{live ? "live" : "not live"}</div>
+          <div data-testid="seq">{asOfSeq}</div>
+          <div data-testid="ids">{docs.map((d) => d.id).join(",")}</div>
+        </div>
+      )
+    }
+    const view = render(
+      <AppViewRuntimeProvider value={host.runtime}>
+        <Limited limit={10} />
+      </AppViewRuntimeProvider>,
+    )
+    act(() => {
+      host.latest().onLive(true)
+      host.latest().onDelivery({
+        delivery: 1,
+        asOfSeq: 7,
+        order: ["a"],
+        upsert: [doc("a", 1, "pending")],
+      })
+    })
+    expect(screen.getByTestId("ids").textContent).toBe("a")
+
+    view.rerender(
+      <AppViewRuntimeProvider value={host.runtime}>
+        <Limited limit={20} />
+      </AppViewRuntimeProvider>,
+    )
+
+    expect(screen.getByTestId("ids").textContent).toBe("")
+    expect(screen.getByTestId("seq").textContent).toBe("0")
+    expect(screen.getByTestId("live").textContent).toBe("not live")
+    // The new question is asked with no bodies claimed: they answered the old one.
+    expect(host.latest().have()).toEqual([])
+  })
+
+  it("keeps two mounts of the same query out of each other's bodies", () => {
+    // The daemon credits `have` per subscription. One shared cache would let one
+    // tile's forget-delete invalidate bodies the daemon still credits to the
+    // other, so the second holder resumes nothing instead.
+    const host = fakeRuntime()
+    const first = mount(host.runtime, "shared")
+    act(() => {
+      host.latest().onDelivery({
+        delivery: 1,
+        asOfSeq: 1,
+        order: ["a"],
+        upsert: [doc("a", 4, "pending")],
+      })
+    })
+    const firstSubscriber = host.latest()
+
+    const second = mount(host.runtime, "shared")
+    expect(host.latest().have()).toEqual([])
+    // The first tile still holds what it was sent.
+    expect(firstSubscriber.have()).toEqual([{ id: "a", rev: 4 }])
+
+    second.unmount()
+    first.unmount()
+    // With both released, a remount resumes from the holder's cache again.
+    mount(host.runtime, "shared")
+    expect(host.latest().have()).toEqual([{ id: "a", rev: 4 }])
   })
 
   it("reports having no host rather than pretending to query one", () => {

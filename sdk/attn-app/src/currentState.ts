@@ -1,3 +1,11 @@
+// attn's current state, as an app view reads it.
+//
+// These shapes are hand-copied from the wire's generated types: this package is
+// published as declarations an app typechecks against with no npm, so it cannot
+// import the frontend's generated.ts. app/src/appSdk.currentStateDrift.test.mjs
+// is what keeps the copy honest — it fails by name when a field here and the
+// same field on the wire stop agreeing.
+
 /** One agent session in attn's current state. */
 export interface Session {
   readonly activity?: string

@@ -11,6 +11,7 @@ import { open } from '@tauri-apps/plugin-dialog';
 import { browserHostLabel, claimBrowserHostFocus, controlBrowserHost } from '../../browser/host';
 import { parseNotebookTileParams, serializeNotebookTileParams, type TileContentState, type TileLeaf } from '../../types/workspace';
 import { deriveTileTitle, tilePathBasename } from '../../utils/tilePresentation';
+import { useAppViewTitleResolver } from '../../hooks/useAppViewTitle';
 import { BrowserTileBody } from './BrowserTileBody';
 import { MarkdownReader } from '../MarkdownReader';
 import type { MarkdownAnnotationsSendHandle } from '../MarkdownReader';
@@ -20,7 +21,6 @@ import { useNotebookSurfaceContext } from '../../contexts/NotebookSurfaceContext
 import { NotebookTile } from '../notebook/NotebookTile';
 import { AppTileHost } from '../appViews/AppTileHost';
 import { parseAppViewTileKind } from '../../utils/appBundle';
-import { useDaemonStore } from '../../store/daemonSessions';
 import type { NotebookSurfaceHandle } from '../NotebookSurface';
 import './WorkspaceDockTile.css';
 
@@ -131,9 +131,8 @@ export function WorkspaceDockTile({
     || (tile.tileKind === 'notebook' ? parseNotebookTileParams(tile.tileParams).path : tile.tileParams)
     || '';
   const appView = parseAppViewTileKind(tile.tileKind);
-  const apps = useDaemonStore((state) => state.apps);
-  const title = deriveTileTitle(tile, content, (app, view) =>
-    apps.find((a) => a.name === app)?.views?.find((v) => v.name === view)?.title);
+  const appViewTitle = useAppViewTitleResolver();
+  const title = deriveTileTitle(tile, content, appViewTitle);
   const browserLabel = browserHostLabel(workspaceId, tile.tileId);
   const [browserAddress, setBrowserAddress] = useState(tile.tileParams || '');
   const pendingBrowserParamsRef = useRef<string | null>(null);

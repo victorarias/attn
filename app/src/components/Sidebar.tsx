@@ -18,6 +18,7 @@ import { formatShortcut } from '../shortcuts/formatShortcut';
 import { isAttentionSessionState, type UISessionState } from '../types/sessionState';
 import { tileContentKey, type TileContentState, type TileLeaf } from '../types/workspace';
 import { deriveTileTitle } from '../utils/tilePresentation';
+import { useAppViewTitleResolver } from '../hooks/useAppViewTitle';
 import type { WorkspaceWithSessions } from '../utils/workspaceViewModels';
 import type { QueueBands as QueueBandsModel } from '../utils/queueBands';
 import type { WorkspaceSelectionStyle } from '../utils/workspaceSelectionStyle';
@@ -79,7 +80,8 @@ function TileSidebarRow({
   onClose: () => void;
   onReload: () => void;
 }) {
-  const title = deriveTileTitle(tile, content);
+  const appViewTitle = useAppViewTitleResolver();
+  const title = deriveTileTitle(tile, content, appViewTitle);
   return (
     <div
       className={`session-item workspace-tile-item grouped ${selected ? 'selected' : ''} ${muted ? 'muted-session' : ''}`.trim()}

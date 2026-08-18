@@ -74,7 +74,7 @@ export function AppTileHost({ app, view, workspaceId, sessionId, tileId, params 
     }
     let cancelled = false;
     setLoadError(null);
-    void loadAppView(appBundleURL(app, wantedHash, view))
+    void loadAppView(appBundleURL(app, wantedHash, view, attempt))
       .then((component) => {
         if (cancelled) return;
         setMounted({ component, contentHash: wantedHash, versionId: wantedVersion });

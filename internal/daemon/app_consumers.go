@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/victorarias/attn/internal/appbuild"
@@ -195,14 +194,35 @@ type appDispatchPlan struct {
 	collections []string
 }
 
-func (d *Daemon) appLane(name string) *sync.Mutex {
+// appLane serializes everything one app does. It is a channel rather than a
+// sync.Mutex so a waiter can carry a deadline: a command queued behind a handler
+// that never returns must refuse inside its own budget instead of adding its
+// wait to it, which is what keeps the daemon's answer ahead of the frontend's
+// timeout.
+type appLane chan struct{}
+
+func (l appLane) Lock() { l <- struct{}{} }
+
+func (l appLane) Unlock() { <-l }
+
+// acquire takes the lane, or gives up when the context does.
+func (l appLane) acquire(ctx context.Context) error {
+	select {
+	case l <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (d *Daemon) appLane(name string) appLane {
 	d.appLaneMu.Lock()
 	defer d.appLaneMu.Unlock()
 	if d.appLanes == nil {
-		d.appLanes = make(map[string]*sync.Mutex)
+		d.appLanes = make(map[string]appLane)
 	}
 	if d.appLanes[name] == nil {
-		d.appLanes[name] = &sync.Mutex{}
+		d.appLanes[name] = make(appLane, 1)
 	}
 	return d.appLanes[name]
 }

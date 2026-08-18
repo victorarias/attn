@@ -411,7 +411,7 @@ type Daemon struct {
 	// appLanes serialize one app's handlers, commands, reconcile fence, and
 	// serving-version moves. Different apps keep running concurrently.
 	appLaneMu sync.Mutex
-	appLanes  map[string]*sync.Mutex
+	appLanes  map[string]appLane
 	// appStalls is the auto-disable clock, one entry per app that is currently
 	// failing on an event. See appStall.
 	appStallMu sync.Mutex

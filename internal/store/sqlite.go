@@ -1165,14 +1165,17 @@ CREATE INDEX IF NOT EXISTS idx_automode_denials_recent ON automode_denials(id DE
     idx_automode_proposals_pending_ask
     ON automode_proposals(kind, target, value, proposed_by)
     WHERE state = 'pending';`},
-	// The reconcile tables, at 112 rather than the 108 they were written as.
-	// 108 and 111 are both burned — each was applied to a production database by
-	// a branch still in flight — and migrateDB skips anything at or below the
-	// highest version a database already carries, so a database that took auto
-	// mode's 109/110 first would never see a 108. Every statement here is
-	// IF NOT EXISTS, so a database that did apply the old number re-runs this to
-	// the same shape.
-	{112, "record app reconciliation owed across cursor fences", `CREATE TABLE IF NOT EXISTS app_reconcile_requests (
+	// Applied by applyMigration114, which carries each single model into its
+	// layer's list and drops the column it came from.
+	{114, "auto mode judges from an ordered model list per layer", ``},
+	// The reconcile tables, at 115 rather than the 108 they were written as.
+	// 108, 111, 112 and 113 are all burned — each was applied to a production
+	// database by a branch still in flight — and migrateDB skips anything at or
+	// below the highest version a database already carries, so a database that
+	// took auto mode's 109/110/114 first would never see a lower number. Every
+	// statement here is IF NOT EXISTS, so a database that did apply an earlier
+	// number re-runs this to the same shape.
+	{115, "record app reconciliation owed across cursor fences", `CREATE TABLE IF NOT EXISTS app_reconcile_requests (
     id                  INTEGER PRIMARY KEY AUTOINCREMENT,
     app_name            TEXT NOT NULL,
     reason              TEXT NOT NULL,
@@ -1203,15 +1206,10 @@ CREATE TABLE IF NOT EXISTS app_reconcile_progress (
 	// append call already use their empty-string/zero representation for commands
 	// and view crashes, and rebuilding this history table only to turn those values
 	// into NULL would add migration risk without adding information.
-	// Applied by applyMigration113, whose ALTERs are column-guarded. Besides
+	// Applied by applyMigration116, whose ALTERs are column-guarded. Besides
 	// tolerating a schema-version rewind in recovery tests, the guard prevents a
 	// rerun from reclassifying reconcile rows as subscriptions.
-	{113, "record app reconcile invocation lifecycles", ``},
-	// 112 and 113 are burned: they are in flight on another branch and already
-	// applied to real databases, so this one is 114.
-	// Applied by applyMigration114, which carries each single model into its
-	// layer's list and drops the column it came from.
-	{114, "auto mode judges from an ordered model list per layer", ``},
+	{116, "record app reconcile invocation lifecycles", ``},
 }
 
 // migration99SQL is everything migration 99 does after its guarded ALTER.
@@ -1616,8 +1614,8 @@ func migrateDB(db *sql.DB, dbPath string) error {
 				tx.Rollback()
 				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
 			}
-		} else if m.version == 113 {
-			if err := applyMigration113(tx); err != nil {
+		} else if m.version == 116 {
+			if err := applyMigration116(tx); err != nil {
 				tx.Rollback()
 				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
 			}
@@ -1666,7 +1664,7 @@ func applyMigration107(tx *sql.Tx) error {
 	return err
 }
 
-func applyMigration113(tx *sql.Tx) error {
+func applyMigration116(tx *sql.Tx) error {
 	hadKind, err := columnExists(tx, "app_invocations", "kind")
 	if err != nil {
 		return err

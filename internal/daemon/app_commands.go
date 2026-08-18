@@ -135,8 +135,20 @@ func (d *Daemon) runAppCommand(msg *protocol.AppCommandMessage) (json.RawMessage
 	if d.store == nil {
 		return nil, fmt.Errorf("this daemon has no store, so it runs no apps")
 	}
+	// The budget covers the wait for the lane as well as the dispatch, so the
+	// daemon always answers first: the frontend waits longer on purpose, and a
+	// command queued behind a stuck handler that added its wait to its own budget
+	// would blow through that margin and lose attn's specific refusal.
+	budget := d.appDispatchBudget()
+	ctx, cancel := context.WithTimeout(context.Background(), budget)
+	defer cancel()
+
 	lane := d.appLane(name)
-	lane.Lock()
+	if err := lane.acquire(ctx); err != nil {
+		return nil, fmt.Errorf(
+			"command %q of app %s waited %s for the app to finish what it was already running and never got a turn; %s is running one thing at a time, and `attn app logs %s` names it",
+			command, name, budget, name, name)
+	}
 	defer lane.Unlock()
 
 	plan, err := d.planAppCommand(name, command)
@@ -145,8 +157,6 @@ func (d *Daemon) runAppCommand(msg *protocol.AppCommandMessage) (json.RawMessage
 	}
 
 	started := d.appNow()
-	ctx, cancel := context.WithTimeout(context.Background(), d.appDispatchBudget())
-	defer cancel()
 	result, dispatchErr := d.dispatchAppCommand(ctx, plan, payload)
 	took := d.appNow().Sub(started)
 

@@ -2796,7 +2796,7 @@ function AppContent({
         run: () => sendMuteWorkspace(workspace.id, workspace.endpointId),
       },
     ];
-  }, [actionMenuItems, activeWorkspaceForCommands, activeSessionId, sendPinWorkspace, sendPinSession, sendMuteWorkspace]);
+  }, [actionMenuItems, appViewMenuItems, activeWorkspaceForCommands, activeSessionId, sendPinWorkspace, sendPinSession, sendMuteWorkspace]);
 
 
   // Each arrangement has one notion of what wants the user, and the mode selects

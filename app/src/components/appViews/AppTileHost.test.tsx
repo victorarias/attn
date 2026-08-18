@@ -111,6 +111,10 @@ describe('a view that cannot mount', () => {
     loadAppView.mockResolvedValue(() => <div>approvals body</div>);
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
     await screen.findByText('approvals body');
+    // A distinct URL, or the browser's module map would answer a top-level throw
+    // and a missing default export from cache and Retry could never recover.
+    expect(loadAppView.mock.calls[1][0]).not.toBe(loadAppView.mock.calls[0][0]);
+    expect(loadAppView.mock.calls[1][0]).toContain(HASH_A);
   });
 
   it('names the binding when the module exports no component', async () => {

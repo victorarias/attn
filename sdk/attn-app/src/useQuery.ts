@@ -66,24 +66,48 @@ const RESUME_CACHE_LIMIT = 64
  * Bodies by query, kept past unmount so a remount resumes with `have` and the
  * daemon sends only what changed. Insertion-ordered, refreshed on write, so the
  * oldest untouched query is the one evicted.
+ *
+ * One cache serves one subscription at a time. The daemon credits `have`
+ * per subscription, so two tiles running the same query against one shared cache
+ * would resume each other's bodies: one mount's forget-delete invalidates what
+ * the daemon still credits to the other, and under steady writes the pair
+ * ping-pongs full resubscribes. A cache is therefore checked out while a
+ * subscription holds it, and a second holder of the same query gets a private
+ * cache that resumes nothing — bytes on its first delivery, never a wrong window.
  */
-const resumeCaches = new Map<string, Map<string, RawDocument>>()
+const resumeCaches = new Map<string, { bodies: Map<string, RawDocument>; held: boolean }>()
 
-function cacheFor(key: string): Map<string, RawDocument> {
+/**
+ * Take the cache for this query, or a private one when another subscription
+ * already holds it. Every checkout is paired with a `releaseCache`.
+ */
+function checkoutCache(key: string): { bodies: Map<string, RawDocument>; release: () => void } {
   const existing = resumeCaches.get(key)
-  if (existing) {
+  if (existing && !existing.held) {
+    existing.held = true
     resumeCaches.delete(key)
     resumeCaches.set(key, existing)
-    return existing
+    return { bodies: existing.bodies, release: () => (existing.held = false) }
   }
-  const fresh = new Map<string, RawDocument>()
+  if (existing) {
+    // Held elsewhere: a detached cache, kept out of the map so releasing it
+    // cannot clobber the holder's bodies.
+    return { bodies: new Map<string, RawDocument>(), release: () => {} }
+  }
+  const fresh = { bodies: new Map<string, RawDocument>(), held: true }
   resumeCaches.set(key, fresh)
   while (resumeCaches.size > RESUME_CACHE_LIMIT) {
-    const oldest = resumeCaches.keys().next()
-    if (oldest.done) break
-    resumeCaches.delete(oldest.value)
+    let evicted = false
+    for (const [candidate, entry] of resumeCaches) {
+      // Never evict a cache a live subscription is resuming from.
+      if (entry.held) continue
+      resumeCaches.delete(candidate)
+      evicted = true
+      break
+    }
+    if (!evicted) break
   }
-  return fresh
+  return { bodies: fresh.bodies, release: () => (fresh.held = false) }
 }
 
 /** The identity of a query, which is what a resume cache is keyed by. */
@@ -135,6 +159,17 @@ export function useQuery<Body = unknown>(
   })
   const [live, setLive] = useState(false)
   const [error, setError] = useState<QueryError | null>(null)
+  // The query this state describes. A view that changes its filter, sort or limit
+  // must not render the previous query's window labelled as the new one's, and it
+  // must not stay `live` across the gap — so the reset happens during the render
+  // that changes the key, before anything downstream reads either.
+  const [describedKey, setDescribedKey] = useState(key)
+  if (describedKey !== key) {
+    setDescribedKey(key)
+    setState({ docs: [], asOfSeq: 0 })
+    setLive(false)
+    setError(null)
+  }
   // Bumped when a delivery names a body nobody holds. That is the one invariant
   // violation the contract anticipates, and its remedy is to start over with no
   // `have` — invisible to the view beyond one fuller delivery.
@@ -163,7 +198,7 @@ export function useQuery<Body = unknown>(
     setError(null)
     // Survives this effect, and this mount: it is what `have()` reads on a
     // resubscribe, and what a remount resumes from.
-    const cache = cacheFor(key)
+    const { bodies: cache, release } = checkoutCache(key)
     let dropped = false
 
     const apply = (delivery: QueryDelivery) => {
@@ -210,6 +245,7 @@ export function useQuery<Body = unknown>(
     return () => {
       dropped = true
       unsubscribe()
+      release()
     }
     // `key` is the query's whole identity, so it stands in for the options object
     // a caller rebuilds on every render.

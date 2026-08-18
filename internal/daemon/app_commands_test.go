@@ -264,6 +264,27 @@ func TestAppCommandAbandonsAHandlerThatNeverReturns(t *testing.T) {
 	}
 }
 
+// The frontend waits 75s against the daemon's 60s so attn's own refusal — which
+// names the app, the command and what to do — always arrives first. A command
+// that added its wait for the app's lane to that budget would break the ordering
+// and hand the tile the generic "the daemon did not answer" instead.
+func TestAppCommandQueuedBehindABusyAppRefusesInsideItsOwnBudget(t *testing.T) {
+	d := newAppDaemon(t)
+	d.appDispatchWait = 300 * time.Millisecond
+	d.appPingWait = 50 * time.Millisecond
+	installApp(t, d, "reviewer", commandManifest(appbuild.Command{Name: "approve"}))
+
+	// The lane held by something that is not going to give it back inside this
+	// command's budget — a handler mid-dispatch, a version move, a reconcile.
+	lane := d.appLane("reviewer")
+	lane.Lock()
+	defer lane.Unlock()
+
+	result := newAppCommandCaller().invoke(t, d, "reviewer", "approve", "")
+
+	mustFail(t, result, "approve", "reviewer", "300ms", "never got a turn", "attn app logs reviewer")
+}
+
 // Nothing to answer is worse than an error: a request with no id could never
 // reach the caller, so it is refused where the caller can still see it.
 func TestAppCommandWithoutARequestIDIsRefusedOnTheSpot(t *testing.T) {

@@ -11,8 +11,16 @@ export const APP_BUNDLE_ROUTE_PREFIX = '/apps/bundle/';
 /** The tile kind one of an app's views docks as: `app:<app>/<view>`. */
 export const APP_VIEW_TILE_KIND_PREFIX = 'app:';
 
-export function appBundleURL(app: string, contentHash: string, view: string): string {
-  return `${resolveDaemonHTTPOrigin()}${APP_BUNDLE_ROUTE_PREFIX}${app}/${contentHash}/${view}.js`;
+/**
+ * `attempt` is what makes Retry able to work at all. The browser's module map
+ * caches a module's evaluation result by URL for the lifetime of the page, so a
+ * bundle that threw at the top level or exported no component would return that
+ * same failure forever at the same URL, however many times the button is
+ * clicked. A retry asks for a distinct URL naming the same immutable artifact.
+ */
+export function appBundleURL(app: string, contentHash: string, view: string, attempt = 0): string {
+  const url = `${resolveDaemonHTTPOrigin()}${APP_BUNDLE_ROUTE_PREFIX}${app}/${contentHash}/${view}.js`;
+  return attempt > 0 ? `${url}?retry=${attempt}` : url;
 }
 
 export function appViewTileKind(app: string, view: string): string {
