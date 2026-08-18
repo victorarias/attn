@@ -199,6 +199,29 @@ describe('GhosttyTerminal', () => {
     t.free();
   });
 
+  // Every scalar getter shares one wasm scratch buffer, so each must read
+  // exactly the width the ABI declares for its field. rowWrapsIntoNext leaves a
+  // 64-bit row handle there, and hover detection calls it on the row above the
+  // pointer before the next wheel event asks about mouse tracking.
+  it('answers scalar reads truthfully after a wide write left a handle in the scratch buffer', () => {
+    const t = terminal(20, 5, { scrollbackLimit: 1 << 20 });
+    for (let i = 0; i < 40; i += 1) t.write(`line${i}\r\n`);
+    t.write('\x1b[?7h');
+    t.update();
+
+    expect(t.rowWrapsIntoNext(1)).toBe(false);
+    expect(t.hasMouseTracking()).toBe(false);
+    expect(t.isAlternateScreen()).toBe(false);
+    expect(t.getMode(7)).toBe(true);
+    expect(t.getScrollbackLength()).toBe(36);
+
+    t.write('\x1b[?1002h');
+    t.update();
+    t.rowWrapsIntoNext(1);
+    expect(t.hasMouseTracking()).toBe(true);
+    t.free();
+  });
+
   it('reads scrollback rows by history offset', () => {
     const t = terminal(20, 3, { scrollbackLimit: 1 << 20 });
     for (let i = 0; i < 10; i += 1) t.write(`row${i}\r\n`);
@@ -209,6 +232,26 @@ describe('GhosttyTerminal', () => {
     expect(line!.slice(0, 4).map((c) => String.fromCodePoint(c.codepoint)).join('')).toBe('row0');
     expect(t.getScrollbackGraphemeString(0, 0)).toBe('r');
     expect(t.getScrollbackLine(8)).toBeNull();
+    t.free();
+  });
+
+  // Readers that want one line must not pay for the grid. The row this hands
+  // back has to be indistinguishable from getViewport()'s slice of it,
+  // including the blank tail past the row's last written cell.
+  it('reads one active row without decoding the rest of the viewport', () => {
+    const t = terminal(20, 4);
+    t.write('alpha\r\nbravo\r\ncharlie');
+    t.update();
+    const viewport = t.getViewport();
+    for (let row = 0; row < 4; row += 1) {
+      const line = t.getActiveLine(row);
+      expect(line).not.toBeNull();
+      expect(line!.map((c) => c.codepoint)).toEqual(
+        viewport.slice(row * 20, (row + 1) * 20).map((c) => c.codepoint),
+      );
+    }
+    expect(t.getActiveLine(-1)).toBeNull();
+    expect(t.getActiveLine(4)).toBeNull();
     t.free();
   });
 

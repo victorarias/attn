@@ -637,6 +637,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     const synchronizedOutputRenderTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const scheduledOutputRenderRef = useRef<number | null>(null);
     const scheduledOutputRenderForceRef = useRef(false);
+    const scheduledScrollRenderRef = useRef<number | null>(null);
     const lastScheduledOutputPaintAtRef = useRef<number | null>(null);
     const renderCountRef = useRef(0);
     const renderCpuTotalMsRef = useRef(0);
@@ -1120,7 +1121,26 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         scheduledOutputRenderRef.current = null;
       }
       scheduledOutputRenderForceRef.current = false;
+      if (scheduledScrollRenderRef.current !== null) {
+        cancelAnimationFrame(scheduledScrollRenderRef.current);
+        scheduledScrollRenderRef.current = null;
+      }
     }, []);
+
+    // A wheel gesture delivers events far faster than the display refreshes — a
+    // macOS trackpad reaches 120 Hz and adds a multi-second momentum tail — and
+    // a paint with the viewport scrolled off the bottom reassembles the visible
+    // cells. Painting per event queues more work than the main thread can
+    // drain, so the window stops answering until the tail ends. The offset math
+    // stays inline, so the events still accumulate; only the paint is capped at
+    // one per frame.
+    const scheduleScrollRender = useCallback(() => {
+      if (scheduledScrollRenderRef.current !== null) return;
+      scheduledScrollRenderRef.current = requestAnimationFrame(() => {
+        scheduledScrollRenderRef.current = null;
+        renderSurface(true);
+      });
+    }, [renderSurface]);
 
     // `force` is not optional on purpose. A forced paint repaints a clean model
     // (what an image placement needs); an unforced one is a no-op when nothing
@@ -1164,21 +1184,24 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       }, SYNCHRONIZED_OUTPUT_RENDER_TIMEOUT_MS);
     }, [scheduleOutputRender]);
 
+    // Reads the one row it was asked for. Hover detection calls this up to
+    // MAX_WRAP_JOIN_ROWS times per pointer position, and reassembling every
+    // visible cell to slice a single line out of it is what made one wheel
+    // step with the viewport scrolled off the bottom cost the whole viewport
+    // seven times over.
     const lineAtVisibleRow = useCallback((row: number): string => {
       const terminal = terminalRef.current;
       if (!terminal) return '';
       const history = terminal.getScrollbackLength();
       const bufferRow = bufferRowFromViewportRow(row, history, viewportOffsetRef.current);
-      const scrollback = bufferRow < history;
-      const cells = getViewportCells() ?? terminal.getViewport();
-      return cellText(
-        terminal,
-        cells.slice(row * terminal.cols, (row + 1) * terminal.cols),
-        scrollback ? bufferRow : bufferRow - history,
-        0,
-        scrollback,
-      );
-    }, [getViewportCells]);
+      if (bufferRow < history) {
+        const line = terminal.getScrollbackLine(bufferRow);
+        return line ? cellText(terminal, line, bufferRow, 0, true) : '';
+      }
+      const activeRow = bufferRow - history;
+      const line = terminal.getActiveLine(activeRow);
+      return line ? cellText(terminal, line, activeRow, 0, false) : '';
+    }, []);
 
     const selectionLineAtBufferRow = useCallback((row: number, startCol: number, endCol: number): string => {
       const terminal = terminalRef.current;
@@ -1190,10 +1213,11 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       }
       const viewportRow = row - history;
       if (viewportRow < 0 || viewportRow >= terminal.rows) return '';
-      const active = terminal.getViewport();
+      const active = terminal.getActiveLine(viewportRow);
+      if (!active) return '';
       return cellText(
         terminal,
-        active.slice(viewportRow * terminal.cols + startCol, viewportRow * terminal.cols + endCol),
+        active.slice(startCol, endCol),
         viewportRow,
         startCol,
         false,
@@ -3560,7 +3584,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           if ((nextOffset === 0 && wheel.lines > 0) || (nextOffset === scrollbackLength && wheel.lines < 0)) {
             wheelRemainderRowsRef.current = 0;
           }
-          renderSurface(true);
+          scheduleScrollRender();
         }}
         onMouseDown={(event) => {
           if (isWorkspaceResizeActive(containerRef.current)) {
