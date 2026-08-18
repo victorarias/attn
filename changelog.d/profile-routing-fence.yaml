@@ -1,0 +1,14 @@
+kind: fixed
+area: profiles
+change: >
+  A profile can no longer act on another profile's data. `ATTN_PROFILE=<name>`
+  together with a data dir, socket, database, config, plugin dir, or websocket
+  port that belongs somewhere else is now refused outright — before anything
+  opens a database, takes the PID lock, or stops a running daemon — with an
+  error naming the profile, every variable that disagreed, and the command that
+  clears them. Selecting a profile with `attn profile-env <name>` now also
+  clears an inherited `ATTN_DATA_DIR`, which is what made the contradiction
+  possible: an explicit data dir outranks the profile, so an agent session's
+  inherited routing could point `make install PROFILE=<name>` at the production
+  install and migrate its database. `attn profile` reports the conflict instead
+  of refusing, so there is always a command that explains it.

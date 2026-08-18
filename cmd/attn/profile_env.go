@@ -9,13 +9,12 @@ import (
 	"github.com/victorarias/attn/internal/config"
 )
 
-var profileRoutingOverrides = []string{
-	"ATTN_SOCKET_PATH",
-	"ATTN_DB_PATH",
-	"ATTN_CONFIG_PATH",
-	"ATTN_WS_PORT",
-	"ATTN_PLUGIN_DIR",
-}
+// profileRoutingOverrides is every variable that outranks ATTN_PROFILE when a
+// path or endpoint is resolved, read from the same authority
+// config.ValidateProfileRouting fences on: selecting a profile must clear
+// exactly what the fence refuses, so `profile-env` is what a caller runs to
+// satisfy it rather than something they work around.
+var profileRoutingOverrides = config.RoutingOverrideEnv()
 
 // runProfileEnv emits shell commands for sourcing the profile into a shell.
 // Usage:
@@ -107,6 +106,7 @@ Usage:
 
 Profile names must match [a-z0-9][a-z0-9-]{0,15}. "dev" is reserved for the
 development sibling install (port 29849, data dir ~/.attn-dev). Selecting or
-clearing a profile also clears inherited ATTN socket, database, config, websocket
-port, and plugin-directory overrides so the selected profile is authoritative.`)
+clearing a profile also clears inherited ATTN data-dir, socket, database, config,
+websocket port, and plugin-directory overrides so the selected profile is
+authoritative — one of those left behind makes every attn command refuse to run.`)
 }

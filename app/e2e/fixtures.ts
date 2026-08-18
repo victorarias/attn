@@ -183,6 +183,10 @@ async function startDaemon(ghUrl: string): Promise<{ proc: ChildProcess; socketP
     env: {
       ...process.env,
       PATH: `${stubs.binDir}${path.delimiter}${process.env.PATH}`,
+      // The throwaway daemon is routed entirely by these explicit paths, so it
+      // must not also claim the surrounding shell's profile: a profile whose
+      // resolved paths are somebody else's is refused (ValidateProfileRouting).
+      ATTN_PROFILE: '',
       ATTN_DATA_DIR: tempDir,
       ATTN_CLIENT_TOKEN: E2E_CLIENT_TOKEN,
       ATTN_WS_PORT: TEST_DAEMON_PORT, // Use test port to avoid conflicts with production daemon
@@ -274,6 +278,8 @@ function createManagedDaemon(ghUrl: string): ManagedDaemon {
       env: {
         ...process.env,
         PATH: `${stubs.binDir}${path.delimiter}${process.env.PATH}`,
+        // Same reason as the fixture daemon above: explicit paths, no profile.
+        ATTN_PROFILE: '',
         ATTN_DATA_DIR: tempDir,
         ATTN_CLIENT_TOKEN: E2E_CLIENT_TOKEN,
         ATTN_WS_PORT: TEST_DAEMON_PORT,

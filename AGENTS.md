@@ -112,8 +112,12 @@ permissions.
   show the change.
 - Named profile: select it with `eval "$(./attn profile-env <name>)"`, then run
   `make install PROFILE=<name>`. The shell's `ATTN_PROFILE` must match.
-- `profile-env` clears inherited routing overrides. Verify the emitted
-  `[attn profile=…]` banner before acting.
+- `profile-env` clears inherited routing overrides (`ATTN_DATA_DIR` included).
+  Verify the emitted `[attn profile=…]` banner before acting.
+- `ATTN_PROFILE` set beside a data dir, socket, DB, config, plugin dir, or WS
+  port belonging to another profile is refused outright — the error names both
+  sides and the `env -u …` that fixes it. Your session inherits production
+  routing, so scrub it (or `profile-env`) before any profile command.
 - Inspect with `attn profile`, `attn profile list`, or
   `attn profile resolve --json`; remove with `attn profile clean <name>`.
 - **Clean up the profile you created.** Nothing reaps it for you: its daemon
