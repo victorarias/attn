@@ -135,6 +135,17 @@ func TestAReconcileThatKeepsThrowingDisablesTheAppAndSaysSo(t *testing.T) {
 		}
 	}
 	status := appStatus(t, d, "greeter").AppStatusResult
+	// The bus's real delivery loop also drives the pre-drain hook, so a
+	// background retry can be mid-attempt when this is read: a truthful running
+	// state with no last error yet. Wait for the attempt to settle rather than
+	// racing it — the property is that the last failure is carried, not that no
+	// other attempt can be in flight.
+	if status.Reconcile.LastError == nil || !strings.Contains(*status.Reconcile.LastError, "TypeError") {
+		waitForCond(t, 5*time.Second, "the last reconcile failure to reach app status", func() bool {
+			status = appStatus(t, d, "greeter").AppStatusResult
+			return status.Reconcile.LastError != nil && strings.Contains(*status.Reconcile.LastError, "TypeError")
+		})
+	}
 	if status.Stall == nil || status.Stall.Kind != appStallKindReconcile ||
 		protocol.Deref(status.Stall.ThroughRequestID) != int(claim.ThroughRequestID) {
 		t.Fatalf("stall = %+v, want the reconcile claim", status.Stall)

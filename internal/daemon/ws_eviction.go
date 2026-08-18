@@ -92,14 +92,20 @@ func (h *wsHub) pruneEvictionsLocked(now time.Time) {
 // evict drops a client the hub has given up on and files the reason for its
 // return. Callers hold h.mu, so the hang-up runs on its own goroutine — closing
 // a wedged socket must never stall the fan-out.
+//
+// The channel closes before the record is filed, not after: a hello that is
+// mid-processing on this same connection reaches takeEviction at its tail, and
+// a record it can still send to is a notice queued to the connection the
+// eviction is killing. Closed-first means every taker fails to send and
+// re-files, so the notice survives for the client's next connection.
 func (h *wsHub) evict(client *wsClient, reason string) {
 	record := evictionRecord{
 		at:          time.Now(),
 		reason:      reason,
 		undelivered: client.slowCount + len(client.send),
 	}
-	h.rememberEviction(client.ClientID(), record)
 	client.closeSendChannelWithStatus(websocket.StatusPolicyViolation, reason)
+	h.rememberEviction(client.ClientID(), record)
 	go client.hangUp(websocket.StatusPolicyViolation, reason, evictionCloseGrace)
 }
 
@@ -150,7 +156,9 @@ func rawConnFrom(ctx context.Context) net.Conn {
 
 // sendEvictionNotice tells a returning client what happened to its last
 // connection; sent from the hello handler, where the client names itself.
-func (d *Daemon) sendEvictionNotice(client *wsClient, record evictionRecord) {
+// Reports whether the notice was handed to the connection's write pump — a
+// caller that gets false owns the record it took and must re-file it.
+func (d *Daemon) sendEvictionNotice(client *wsClient, record evictionRecord) bool {
 	notice := &protocol.ClientEvictionNoticeMessage{
 		Event:               protocol.EventClientEvictionNotice,
 		EvictedAt:           record.at.Format(time.RFC3339),
@@ -160,11 +168,11 @@ func (d *Daemon) sendEvictionNotice(client *wsClient, record evictionRecord) {
 	data, err := json.Marshal(notice)
 	if err != nil {
 		d.logf("eviction notice marshal error: %v", err)
-		return
+		return false
 	}
 	d.logf(
 		"telling client %s it was evicted at %s (%s)",
 		client.ClientID(), notice.EvictedAt, record.reason,
 	)
-	_ = d.sendOutbound(client, outboundMessage{kind: messageKindText, payload: data})
+	return d.sendOutbound(client, outboundMessage{kind: messageKindText, payload: data})
 }

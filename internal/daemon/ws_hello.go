@@ -50,7 +50,16 @@ func (d *Daemon) handleClientHello(client *wsClient, msg *protocol.ClientHelloMe
 	)
 	d.admitClient(client)
 	if record, ok := d.wsHub.takeEviction(clientID); ok {
-		d.sendEvictionNotice(client, record)
+		if !d.sendEvictionNotice(client, record) {
+			// The eviction was filed while this connection was already saying hello
+			// (the hub evicts on its own goroutine, and a re-hello races it), and the
+			// connection can no longer be written — its send channel is closed, or
+			// its buffer is full the way the eviction's cause says it is. Consuming
+			// the record here would lose the only copy, so it goes back on file for
+			// this client's next hello. No duplicate is possible: a delivered notice
+			// is never re-filed.
+			d.wsHub.rememberEviction(clientID, record)
+		}
 	}
 }
 
