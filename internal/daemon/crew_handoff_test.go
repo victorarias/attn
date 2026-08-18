@@ -660,3 +660,39 @@ func TestCrewHandoff_AnOutpostHoldsNoneOfIt(t *testing.T) {
 		t.Fatalf("the handoffs dir holds %v; an outpost wrote into a home", names)
 	}
 }
+
+// The nap replaces the session rather than reloading in place, so it is
+// agent-agnostic by construction — this pins that: a codex member's successor
+// comes back on codex, primed by the letter the day just filed, and is not
+// handed the Claude model pin on the way.
+func TestCrewHandoff_ACodexMembersSuccessorComesBackOnCodex(t *testing.T) {
+	d, backend, _ := newWakeableDaemon(t)
+	if resp := crewSet(t, d, protocol.CrewSetMessage{Member: "trellis", Agent: protocol.Ptr("codex")}); !resp.Ok {
+		t.Fatalf("crew set: %v", protocol.Deref(resp.Error))
+	}
+	woken, err := d.crewWake("trellis", "")
+	if err != nil {
+		t.Fatalf("wake: %v", err)
+	}
+
+	resp := crewHandoffCall(t, d, woken.SessionID, "Codex signing off: the fence lands first.")
+	if !resp.Ok {
+		t.Fatalf("handoff: %v", protocol.Deref(resp.Error))
+	}
+	spawns := spawnedSessions(t, backend)
+	successor := spawns[len(spawns)-1]
+	if successor.Agent != "codex" {
+		t.Errorf("the successor launched on %q, want codex", successor.Agent)
+	}
+	if successor.Model != "" {
+		t.Errorf("the codex successor was pinned to model %q, want the harness default", successor.Model)
+	}
+
+	_, block, bound, err := d.crewPrimeForSession(protocol.Deref(resp.CrewHandoffResult.SessionID))
+	if err != nil || !bound {
+		t.Fatalf("prime successor: bound=%t err=%v", bound, err)
+	}
+	if !strings.Contains(block, "Codex signing off: the fence lands first.") {
+		t.Fatal("the codex successor's priming does not carry the letter just filed")
+	}
+}

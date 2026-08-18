@@ -5497,6 +5497,9 @@ model CrewMember {
   home_dir: string;
   // Where the member's sessions launch; absent until the wake slice records one.
   cwd?: string;
+  // The harness this member's days run on. Absent means the crew default
+  // (claude); a wake's own `agent` still wins for that one day.
+  agent?: string;
   // The places the member's charter is about.
   awareness_dirs: string[];
   // The session living this member's current day. Present only while that
@@ -5594,6 +5597,9 @@ model CrewSetMessage {
   cmd: "crew_set";
   member: string;
   cwd?: string;
+  // The harness the member's days run on. An empty string clears it back to
+  // the crew default — the way out, said the way `cwd` says it.
+  agent?: string;
   awareness_dirs?: string[];
 
   // The way out. An empty awareness_dirs cannot say "clear it": the field is

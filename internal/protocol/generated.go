@@ -2087,6 +2087,9 @@ type CrewListResult struct {
 }
 
 type CrewMember struct {
+	// Agent corresponds to the JSON schema field "agent".
+	Agent *string `json:"agent,omitempty,omitzero"`
+
 	// AwarenessDirs corresponds to the JSON schema field "awareness_dirs".
 	AwarenessDirs []string `json:"awareness_dirs"`
 
@@ -2129,6 +2132,9 @@ type CrewPrimeResult struct {
 }
 
 type CrewSetMessage struct {
+	// Agent corresponds to the JSON schema field "agent".
+	Agent *string `json:"agent,omitempty,omitzero"`
+
 	// AwarenessDirs corresponds to the JSON schema field "awareness_dirs".
 	AwarenessDirs []string `json:"awareness_dirs,omitempty,omitzero"`
 

@@ -45,6 +45,11 @@ const HomesDirName = "crew"
 // CharterFileName is the one file that makes a directory a member's home.
 const CharterFileName = "CHARTER.md"
 
+// DefaultAgent is the harness a member wakes on when its record names none.
+// The crew simulation has run on Claude Code since 2026-08-06, so a member
+// registered before the agent field existed keeps waking exactly where it was.
+const DefaultAgent = "claude"
+
 // Member is a member's stored body — the registry record, without the store's
 // own envelope. Every declared field is written unconditionally, empty string
 // included, so a filter on `binding_session = ""` matches the members that are
@@ -64,6 +69,10 @@ type Member struct {
 	// CWD is where the member's sessions launch; empty until the wake slice
 	// records one.
 	CWD string `json:"cwd"`
+	// Agent is the harness this member's days run on. Empty means DefaultAgent —
+	// a member is plain markdown, so any harness can live in one, and the field
+	// is what says which. A wake's own `--agent` still wins for one day.
+	Agent string `json:"agent"`
 	// AwarenessDirs are the places the member's charter is about.
 	AwarenessDirs []string `json:"awareness_dirs"`
 	// BindingSession is the session living this member's current day, or empty.
@@ -85,6 +94,14 @@ type Member struct {
 	// bounds a night, and a daemon restart in the middle of one must not hand
 	// back a fresh allowance.
 	AutonomousWakes []string `json:"autonomous_wakes"`
+}
+
+// LaunchAgent is the harness this member's day starts on.
+func (m Member) LaunchAgent() string {
+	if agent := strings.TrimSpace(strings.ToLower(m.Agent)); agent != "" {
+		return agent
+	}
+	return DefaultAgent
 }
 
 // FiledLetterFor answers whether sessionID has already filed this member's

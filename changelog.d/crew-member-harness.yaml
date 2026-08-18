@@ -1,0 +1,11 @@
+kind: added
+area: cli
+change: >
+  A crew member can now live its day on any harness attn can launch, not just
+  Claude Code. `attn crew set <member> --agent codex` records the harness the
+  member's days run on, `attn crew list` shows it, and every wake — from the
+  CLI, the sidebar, or a message that woke a sleeping member — launches there
+  and carries the same priming (charter, freshest letter, the verbs of the
+  member's own home). `attn crew wake <member> --agent <other>` still picks a
+  harness for one day without moving the member, and passing `--agent` empty to
+  `crew set` puts the member back on the default.

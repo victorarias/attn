@@ -2420,6 +2420,7 @@ export interface CrewListResult {
 }
 
 export interface Member {
+    agent?:           string;
     awareness_dirs:   string[];
     binding_session?: string;
     charter_path:     string;
@@ -2430,6 +2431,7 @@ export interface Member {
 }
 
 export interface CrewMember {
+    agent?:           string;
     awareness_dirs:   string[];
     binding_session?: string;
     charter_path:     string;
@@ -2458,6 +2460,7 @@ export interface CrewPrimeResult {
 }
 
 export interface CrewSetMessage {
+    agent?:                string;
     awareness_dirs?:       string[];
     clear_awareness_dirs?: boolean;
     cmd:                   CrewSetMessageCmd;
@@ -14593,6 +14596,7 @@ const typeMap: any = {
         { json: "members", js: "members", typ: a(r("Member")) },
     ], "any"),
     "Member": o([
+        { json: "agent", js: "agent", typ: u(undefined, "") },
         { json: "awareness_dirs", js: "awareness_dirs", typ: a("") },
         { json: "binding_session", js: "binding_session", typ: u(undefined, "") },
         { json: "charter_path", js: "charter_path", typ: "" },
@@ -14601,6 +14605,7 @@ const typeMap: any = {
         { json: "id", js: "id", typ: "" },
     ], "any"),
     "CrewMember": o([
+        { json: "agent", js: "agent", typ: u(undefined, "") },
         { json: "awareness_dirs", js: "awareness_dirs", typ: a("") },
         { json: "binding_session", js: "binding_session", typ: u(undefined, "") },
         { json: "charter_path", js: "charter_path", typ: "" },
@@ -14619,6 +14624,7 @@ const typeMap: any = {
         { json: "priming_bytes", js: "priming_bytes", typ: 0 },
     ], "any"),
     "CrewSetMessage": o([
+        { json: "agent", js: "agent", typ: u(undefined, "") },
         { json: "awareness_dirs", js: "awareness_dirs", typ: u(undefined, a("")) },
         { json: "clear_awareness_dirs", js: "clear_awareness_dirs", typ: u(undefined, true) },
         { json: "cmd", js: "cmd", typ: r("CrewSetMessageCmd") },

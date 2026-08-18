@@ -49,12 +49,12 @@ func (c *Client) CrewSleep(member string) (*protocol.CrewSleepResult, error) {
 	return resp.CrewSleepResult, nil
 }
 
-// CrewSet records where a member's sessions launch and what its charter is
-// about. A nil field is left as it was; awarenessDirs non-nil and empty clears
+// CrewSet records where a member's sessions launch, which harness it lives on,
+// and what its charter is about. A nil field is left as it was; awarenessDirs non-nil and empty clears
 // the list, which travels as its own flag because an empty list marshals away.
-func (c *Client) CrewSet(member string, cwd *string, awarenessDirs []string) (*protocol.CrewSetResult, error) {
+func (c *Client) CrewSet(member string, cwd, agent *string, awarenessDirs []string) (*protocol.CrewSetResult, error) {
 	msg := protocol.CrewSetMessage{
-		Cmd: protocol.CmdCrewSet, Member: member, Cwd: cwd, AwarenessDirs: awarenessDirs,
+		Cmd: protocol.CmdCrewSet, Member: member, Cwd: cwd, Agent: agent, AwarenessDirs: awarenessDirs,
 	}
 	if awarenessDirs != nil && len(awarenessDirs) == 0 {
 		msg.ClearAwarenessDirs = protocol.Ptr(true)
