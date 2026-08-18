@@ -2,7 +2,7 @@ import { describe, expect, it, vi, afterEach } from 'vitest';
 import { act, renderHook } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { SettingsProvider } from '../contexts/SettingsContext';
-import { useTicketBoardScale } from './useTicketBoardScale';
+import { useGardenScale } from './useGardenScale';
 
 function wrapperWith(settings: Record<string, string>, setSetting = vi.fn()) {
   return function Wrapper({ children }: { children: ReactNode }) {
@@ -14,15 +14,15 @@ function wrapperWith(settings: Record<string, string>, setSetting = vi.fn()) {
   };
 }
 
-const cssVar = () => document.documentElement.style.getPropertyValue('--ticket-board-scale');
+const cssVar = () => document.documentElement.style.getPropertyValue('--garden-scale');
 
 afterEach(() => {
-  document.documentElement.style.removeProperty('--ticket-board-scale');
+  document.documentElement.style.removeProperty('--garden-scale');
 });
 
-describe('useTicketBoardScale', () => {
+describe('useGardenScale', () => {
   it('matches the app by default: no override, no CSS variable', () => {
-    const { result } = renderHook(() => useTicketBoardScale(1.2), {
+    const { result } = renderHook(() => useGardenScale(1.2), {
       wrapper: wrapperWith({}),
     });
 
@@ -31,9 +31,9 @@ describe('useTicketBoardScale', () => {
     expect(cssVar()).toBe('');
   });
 
-  it('initializes from a stored ticketBoardScale setting and applies the CSS variable', () => {
-    const { result } = renderHook(() => useTicketBoardScale(1), {
-      wrapper: wrapperWith({ ticketBoardScale: '1.3' }),
+  it('initializes from a stored gardenScale setting and applies the CSS variable', () => {
+    const { result } = renderHook(() => useGardenScale(1), {
+      wrapper: wrapperWith({ gardenScale: '1.3' }),
     });
 
     expect(result.current.scale).toBe(1.3);
@@ -43,7 +43,7 @@ describe('useTicketBoardScale', () => {
 
   it('steps from the current app scale when first leaving match-app, and persists', () => {
     const setSetting = vi.fn();
-    const { result } = renderHook(() => useTicketBoardScale(1.1), {
+    const { result } = renderHook(() => useGardenScale(1.1), {
       wrapper: wrapperWith({}, setSetting),
     });
 
@@ -51,19 +51,19 @@ describe('useTicketBoardScale', () => {
 
     expect(result.current.scale).toBe(1.2);
     expect(cssVar()).toBe('1.2');
-    expect(setSetting).toHaveBeenCalledWith('ticketBoardScale', '1.2');
+    expect(setSetting).toHaveBeenCalledWith('gardenScale', '1.2');
   });
 
   it('clamps at the bounds', () => {
-    const { result } = renderHook(() => useTicketBoardScale(1), {
-      wrapper: wrapperWith({ ticketBoardScale: '1.5' }),
+    const { result } = renderHook(() => useGardenScale(1), {
+      wrapper: wrapperWith({ gardenScale: '1.5' }),
     });
 
     act(() => result.current.increaseScale());
     expect(result.current.scale).toBe(1.5);
 
-    const low = renderHook(() => useTicketBoardScale(1), {
-      wrapper: wrapperWith({ ticketBoardScale: '0.7' }),
+    const low = renderHook(() => useGardenScale(1), {
+      wrapper: wrapperWith({ gardenScale: '0.7' }),
     });
     act(() => low.result.current.decreaseScale());
     expect(low.result.current.scale).toBe(0.7);
@@ -71,8 +71,8 @@ describe('useTicketBoardScale', () => {
 
   it('match app clears the override, removes the CSS variable, and persists an empty value', () => {
     const setSetting = vi.fn();
-    const { result } = renderHook(() => useTicketBoardScale(1), {
-      wrapper: wrapperWith({ ticketBoardScale: '1.3' }, setSetting),
+    const { result } = renderHook(() => useGardenScale(1), {
+      wrapper: wrapperWith({ gardenScale: '1.3' }, setSetting),
     });
     expect(cssVar()).toBe('1.3');
 
@@ -80,13 +80,13 @@ describe('useTicketBoardScale', () => {
 
     expect(result.current.scale).toBeNull();
     expect(cssVar()).toBe('');
-    expect(setSetting).toHaveBeenCalledWith('ticketBoardScale', '');
+    expect(setSetting).toHaveBeenCalledWith('gardenScale', '');
   });
 
   it('does not persist the value it just synced from settings', () => {
     const setSetting = vi.fn();
-    renderHook(() => useTicketBoardScale(1), {
-      wrapper: wrapperWith({ ticketBoardScale: '1.3' }, setSetting),
+    renderHook(() => useGardenScale(1), {
+      wrapper: wrapperWith({ gardenScale: '1.3' }, setSetting),
     });
 
     expect(setSetting).not.toHaveBeenCalled();

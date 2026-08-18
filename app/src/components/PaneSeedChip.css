@@ -1,0 +1,78 @@
+/* PaneSeedChip — the clickable seed chip in the agent pane header. Status
+   colors reuse the garden's [data-status] tint contract: only DEFINED tokens (or
+   the documented #ef4444 fallback for the undefined --color-error), never bare
+   --color-accent/--color-error. Each status sets a single --psc-tint the chip's
+   rule/hover read. Status chrome, never text-selectable. */
+
+.pane-seed-chip {
+  --psc-tint: var(--color-border-hover);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  max-width: 220px;
+  margin: 0;
+  padding: 2px 9px;
+  font-family: inherit;
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  border: 1px solid color-mix(in srgb, var(--psc-tint) 55%, transparent);
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--psc-tint) 12%, transparent);
+  color: var(--color-text-secondary);
+  user-select: none;
+  -webkit-user-select: none;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.pane-seed-chip:hover {
+  background: color-mix(in srgb, var(--psc-tint) 22%, transparent);
+  border-color: color-mix(in srgb, var(--psc-tint) 85%, transparent);
+  color: var(--color-text-primary);
+}
+
+.pane-seed-chip-rule {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 2px;
+  background: var(--psc-tint);
+}
+
+.pane-seed-chip-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pane-seed-chip-unread {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-error, #ef4444);
+  box-shadow: 0 0 7px 1px color-mix(in srgb, var(--color-error, #ef4444) 70%, transparent);
+}
+
+/* Per-status tint, mirroring GardenPanel.css's seed-row statuses. */
+.pane-seed-chip[data-status='planted'] {
+  --psc-tint: var(--color-border-hover);
+}
+
+.pane-seed-chip[data-status='growing'] {
+  --psc-tint: var(--accent);
+}
+
+.pane-seed-chip[data-status='dormant'] {
+  --psc-tint: color-mix(in srgb, var(--accent) 45%, var(--color-text-tertiary));
+}
+
+.pane-seed-chip[data-status='harvested'] {
+  --psc-tint: var(--color-text-muted);
+}
+
+.pane-seed-chip[data-status='withered'] {
+  --psc-tint: var(--color-error, #ef4444);
+}

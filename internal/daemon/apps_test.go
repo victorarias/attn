@@ -268,21 +268,18 @@ func TestAppVersionChangeReconcilesAtTheFrozenCursorThenDeliversTheRetainedFact(
 	if second.ID == first.ID {
 		t.Fatalf("version did not move: first=%d second=%d", first.ID, second.ID)
 	}
-	claim, err := d.store.AppReconcilePending("approval-gate")
-	if err != nil || len(claim.Requests) != 1 {
-		t.Fatalf("pending = %+v, %v", claim, err)
-	}
-	if claim.ThroughSeq >= retainedSeq {
-		t.Fatalf("version fence %d covered retained undelivered fact %d", claim.ThroughSeq, retainedSeq)
-	}
 	if resp := appSetEnabled(t, d, "approval-gate", true); !resp.Ok {
 		t.Fatalf("enable: %v", protocol.Deref(resp.Error))
 	}
 	waitFor(t, "reconcile followed by retained fact delivery", func() bool {
 		return len(runtime.reconcileLog()) == 1 && len(runtime.dispatchLog()) == 1
 	})
-	if got := runtime.reconcileLog()[0].Reason.ThroughSeq; got != claim.ThroughSeq {
-		t.Fatalf("dispatched reconcile fence = %d, want %d", got, claim.ThroughSeq)
+	// The fence is read off the reconcile the runtime was actually handed, not
+	// off a mid-test peek at the pending claim: a drain already in flight when
+	// the app was disabled may legitimately consume that claim first, and what
+	// matters either way is the boundary the app rebuilt to.
+	if fence := runtime.reconcileLog()[0].Reason.ThroughSeq; fence >= retainedSeq {
+		t.Fatalf("version fence %d covered retained undelivered fact %d", fence, retainedSeq)
 	}
 	delivered := runtime.dispatchLog()[0]
 	if delivered.Event.Seq != retainedSeq || delivered.VersionID != second.ID {

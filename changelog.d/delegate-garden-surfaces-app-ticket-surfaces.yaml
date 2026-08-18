@@ -1,0 +1,11 @@
+kind: changed
+area: app
+change: >
+  The app's ticket surfaces are now garden surfaces. ⌘⇧T opens the garden
+  fullscreen where the ticket board used to be, a delegated pane's header
+  carries the seed it reports to (click it to open the seed as a tile), and the
+  panel drill can reopen the agent tending a seed — the affordance the board's
+  Resume button used to carry. The ticket detail panel is gone from the app.
+  Delegations that are already running are untouched: they keep reporting on
+  their tickets as well as their seeds, and `attn ticket show` / `attn ticket
+  list` keep reading the board from the command line.

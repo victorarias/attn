@@ -66,6 +66,9 @@ func (d *Daemon) ensureGardenCollections() {
 			d.publishCollectionRedeclared(schema.Namespace, schema.Collection)
 		}
 	}
+	d.dispatchSeedsMu.Lock()
+	d.dispatchSeeds, d.dispatchSeedsLoaded = nil, false
+	d.dispatchSeedsMu.Unlock()
 }
 
 // seedsCollection reads the seeds declaration, which carries the minted table
@@ -1034,15 +1037,16 @@ func (d *Daemon) dispatchesCollection() (*docstore.CollectionSchema, error) {
 	return d.collectionFor(garden.Namespace, garden.CollectionDispatches)
 }
 
-// recordGardenDispatch stamps a session as dispatched at a crown. Last write
-// wins on purpose: a session is dispatched at one crown, and re-dispatching a
-// recovered session at a new crown is a re-aim, not a conflict.
-func (d *Daemon) recordGardenDispatch(sessionID, crown string) error {
+// recordGardenDispatch stamps a session as dispatched at a seed, with the
+// directory and agent a resume would relaunch it from. Last write wins on
+// purpose: a session reports to one seed, and re-dispatching a recovered
+// session at a new crown is a re-aim, not a conflict.
+func (d *Daemon) recordGardenDispatch(sessionID, crown, cwd, agent string) error {
 	schema, err := d.dispatchesCollection()
 	if err != nil {
 		return err
 	}
-	body, err := garden.Dispatch{SessionID: sessionID, Crown: crown}.Encode()
+	body, err := garden.Dispatch{SessionID: sessionID, Crown: crown, Cwd: cwd, Agent: agent}.Encode()
 	if err != nil {
 		return err
 	}
@@ -1054,6 +1058,7 @@ func (d *Daemon) recordGardenDispatch(sessionID, crown string) error {
 		return err
 	}
 	d.announceCommittedWrite(fact, written.Seq)
+	d.rememberDispatchSeed(sessionID, crown)
 	return nil
 }
 
@@ -1079,25 +1084,113 @@ func (d *Daemon) validateDispatchCrown(crown string) error {
 	return nil
 }
 
-// gardenDispatchCrown is the crown a session was dispatched at, if any.
-func (d *Daemon) gardenDispatchCrown(sessionID string) (string, bool) {
+// gardenDispatch is a session's whole dispatch record, if it has one.
+func (d *Daemon) gardenDispatch(sessionID string) (garden.Dispatch, bool) {
 	if sessionID == "" || d.store == nil {
-		return "", false
+		return garden.Dispatch{}, false
 	}
 	schema, err := d.dispatchesCollection()
 	if err != nil {
-		return "", false
+		return garden.Dispatch{}, false
 	}
 	doc, found, err := d.store.GetDocument(*schema, sessionID)
 	if err != nil || !found {
-		return "", false
+		return garden.Dispatch{}, false
 	}
 	dispatch, err := garden.DecodeDispatch(doc.Body)
 	if err != nil {
 		d.logf("garden: dispatch record for %s has an unreadable body: %v", sessionID, err)
+		return garden.Dispatch{}, false
+	}
+	return dispatch, true
+}
+
+// gardenDispatchCrown is the seed a session reports to, if any.
+func (d *Daemon) gardenDispatchCrown(sessionID string) (string, bool) {
+	dispatch, ok := d.gardenDispatch(sessionID)
+	if !ok {
 		return "", false
 	}
 	return dispatch.Crown, dispatch.Crown != ""
+}
+
+// gardenDispatchSeedsBySession maps every session that reports to a seed. A
+// session list is broadcast on every state change, so this must cost nothing:
+// the map is read from the collection once and then written through on each
+// dispatch, rather than scanning a collection that grows with every delegation
+// attn has ever made.
+//
+// Empty — never an error — when the collection is absent or unreadable:
+// decoration must not fail a broadcast.
+func (d *Daemon) gardenDispatchSeedsBySession() map[string]string {
+	if d.store == nil {
+		return nil
+	}
+	d.dispatchSeedsMu.Lock()
+	defer d.dispatchSeedsMu.Unlock()
+	if !d.dispatchSeedsLoaded {
+		read, _, err := d.runDocQuery(docstore.Query{
+			Namespace:  garden.Namespace,
+			Collection: garden.CollectionDispatches,
+		})
+		if err != nil {
+			if !docstore.IsUndeclaredCollection(err) {
+				d.logf("garden: reading dispatch records for broadcast: %v", err)
+				return nil
+			}
+			// No garden here: remember that, so a daemon nobody plants in stops
+			// asking. Declaring the collections clears this.
+			d.dispatchSeeds, d.dispatchSeedsLoaded = nil, true
+			return nil
+		}
+		loaded := make(map[string]string, len(read.Documents))
+		for _, doc := range read.Documents {
+			dispatch, err := garden.DecodeDispatch(doc.Body)
+			if err != nil || dispatch.Crown == "" {
+				continue
+			}
+			loaded[doc.ID] = dispatch.Crown
+		}
+		d.dispatchSeeds = loaded
+		d.dispatchSeedsLoaded = true
+	}
+	return d.dispatchSeeds
+}
+
+// rememberDispatchSeed writes one dispatch through to the broadcast map. Called
+// after the record is committed, so a reader never sees a binding the database
+// does not hold.
+func (d *Daemon) rememberDispatchSeed(sessionID, crown string) {
+	d.dispatchSeedsMu.Lock()
+	defer d.dispatchSeedsMu.Unlock()
+	if !d.dispatchSeedsLoaded {
+		return // Not loaded yet; the first read builds it from the collection.
+	}
+	if crown == "" {
+		delete(d.dispatchSeeds, sessionID)
+		return
+	}
+	// Copied on write: a broadcast holds the map it was handed while it renders.
+	next := make(map[string]string, len(d.dispatchSeeds)+1)
+	for id, seed := range d.dispatchSeeds {
+		next[id] = seed
+	}
+	next[sessionID] = crown
+	d.dispatchSeeds = next
+}
+
+// decorateSessionSeed names the seed a session reports to. Mirrors
+// decorateCrewMember: set only when the session has a dispatch record, cleared
+// otherwise so it round-trips as an omitted field.
+func (d *Daemon) decorateSessionSeed(session *protocol.Session, seedBySession map[string]string) {
+	if session == nil {
+		return
+	}
+	if seed := seedBySession[session.ID]; seed != "" {
+		session.SeedID = protocol.Ptr(seed)
+		return
+	}
+	session.SeedID = nil
 }
 
 // gardenPrime is what a launching session is primed with: the same answer its

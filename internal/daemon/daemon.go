@@ -517,11 +517,20 @@ type Daemon struct {
 	workflowEngineMu      sync.Mutex
 	workflowEngineConn    map[string]workflowEngineSink
 	workflowBroadcastHook func(*protocol.WorkflowRunUpdatedMessage) // optional, tests only
-	ticketsBroadcastHook  func([]protocol.TicketRow)                // optional, tests only
 	gardenBroadcastHook   func([]protocol.Seed, int)                // optional, tests only
 	appsBroadcastHook     func([]protocol.AppRegistryEntry)         // optional, tests only
 	gardenMintID          func() (string, error)                    // optional, tests only
 	gardenMintNoteID      func() (string, error)                    // optional, tests only
+	// dispatchSeeds is which seed each session reports to, the map every session
+	// broadcast decorates from. nil until the first read builds it from the
+	// dispatch collection; written through by recordGardenDispatch after that.
+	// A daemon with no garden declared reads nothing and caches that: a session
+	// list is broadcast constantly, and probing an absent collection every time
+	// is work a quiet daemon must not do. Declaring the garden clears it.
+	dispatchSeedsMu     sync.Mutex
+	dispatchSeeds       map[string]string
+	dispatchSeedsLoaded bool
+
 	// gardenNotePageSize sizes the whole-log read's pages; zero means the store's
 	// own maximum. A test lowers it to walk several pages without writing a
 	// thousand notes.
@@ -3451,6 +3460,7 @@ func (d *Daemon) sessionForBroadcast(session *protocol.Session) *protocol.Sessio
 		d.chiefOfStaffSessionID(),
 		d.delegatedFromChiefSessionIDs(),
 		d.crewMembersBySession(),
+		d.gardenDispatchSeedsBySession(),
 	)
 }
 
@@ -3459,6 +3469,7 @@ func (d *Daemon) sessionForBroadcastWithChiefOfStaff(
 	chiefOfStaffSessionID string,
 	delegatedFromChief map[string]bool,
 	crewBySession map[string]string,
+	seedBySession map[string]string,
 ) *protocol.Session {
 	clone := cloneSession(session)
 	if clone == nil {
@@ -3471,6 +3482,7 @@ func (d *Daemon) sessionForBroadcastWithChiefOfStaff(
 	d.decorateChiefOfStaffWithSessionID(clone, chiefOfStaffSessionID)
 	d.decorateDelegatedFromChief(clone, delegatedFromChief)
 	d.decorateCrewMember(clone, crewBySession)
+	d.decorateSessionSeed(clone, seedBySession)
 	d.decorateSessionWithWorkspace(clone)
 	d.decorateSessionWithWorkspaceMute(clone)
 	d.decorateSessionWithCost(clone)
@@ -3487,9 +3499,10 @@ func (d *Daemon) sessionsForBroadcast(sessions []*protocol.Session) []protocol.S
 	chiefOfStaffSessionID := d.chiefOfStaffSessionID()
 	delegatedFromChief := d.delegatedFromChiefSessionIDs()
 	crewBySession := d.crewMembersBySession()
+	seedBySession := d.gardenDispatchSeedsBySession()
 	out := make([]protocol.Session, 0, len(sessions))
 	for _, session := range sessions {
-		if decorated := d.sessionForBroadcastWithChiefOfStaff(session, chiefOfStaffSessionID, delegatedFromChief, crewBySession); decorated != nil {
+		if decorated := d.sessionForBroadcastWithChiefOfStaff(session, chiefOfStaffSessionID, delegatedFromChief, crewBySession, seedBySession); decorated != nil {
 			out = append(out, *decorated)
 		}
 	}

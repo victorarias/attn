@@ -136,6 +136,7 @@ model Session {
   crew_member?: string;         // The crew member whose active binding this session is — "this session is trellis today". Stamped by the daemon at launch, judged live at broadcast, absent for every unbound session.
   delegated_from_chief?: boolean; // True when this session was delegated from the chief of staff (assignee of a chief-authored ticket)
   ticket_unread?: boolean;      // True when this session has unread ticket events (drives the incoming-nudge indicator)
+  seed_id?: string;             // The seed this session reports to: the crown a delegation was dispatched at, or the seed planted for it. Read from the session's dispatch record at broadcast, never stored on the session — the record is the single answer to what a session reports to. Absent for a session no delegation bound.
   nudge_fires_at?: string;      // ISO timestamp a pending ticket-nudge countdown will fire; absent when paused (active session) or no countdown
   turn_owed?: boolean;          // True when the user owes this session a turn. Derived at broadcast from the turn stamps plus the queue's exclusions (shell, chief, pinned, muted); never stored, and never recomputed by a client.
   turn_opened_at?: string;      // ISO timestamp the outstanding turn opened; the queue's sort key. Absent when nothing is owed.
@@ -372,10 +373,11 @@ model TicketArtifact {
 }
 
 // Ticket is the wire shape of a durable tracked-work record — a read by id
-// (get_ticket, ticket_show) or the agent's board read (ticket_list), which
-// carries the brief. `activity` and `artifacts` are the full history thread and
-// current attach files: populated on a full record, left empty on the
-// ticket_list rows. The app's board feed carries TicketRow instead.
+// (ticket_show) or the agent's board read (ticket_list), which carries the
+// brief. `activity` and `artifacts` are the full history thread and current
+// attach files: populated on a full record, left empty on the ticket_list rows.
+// Nothing pushes tickets: the app reads the garden, and every ticket read is an
+// agent pulling one over its socket.
 model Ticket {
   id: string;
   title: string;
@@ -400,30 +402,6 @@ model Ticket {
   artifacts: TicketArtifact[];
 }
 
-// TicketRow is a ticket as the board feed carries it — the whole non-archived
-// board is re-pushed on every ticket mutation and again on connect, so it holds
-// only what a board renders: identity, the column, who owns it, and the stamps
-// the app reads (updated_at drives the open detail view's live refresh,
-// closed_at the recently-closed filter, reconciled_at the orphan badge). The
-// brief, the history thread and the artifacts are detail-sized and belong to a
-// read by id (get_ticket over the socket, ticket_show over the CLI), never to a
-// list push.
-//
-// In generated.ts quicktype names an array's element type after the property
-// that holds it, not after the model: TicketRow arrives as `TicketElement` and
-// `Ticket` as `TicketObject`. Import the aliases at the top of
-// useDaemonSocket.ts (`TicketRow`, `Ticket`) rather than either generated name.
-model TicketRow {
-  id: string;
-  title: string;
-  status: TicketStatus;
-  assignee: string;
-  cwd: string;
-  last_agent_id: string;
-  updated_at: string;
-  closed_at?: string;
-  reconciled_at?: string;
-}
 
 model PR {
   // Core identity - always present
@@ -958,13 +936,12 @@ model TicketInboxMessage {
 }
 
 // TicketListMessage reads the board — every ticket, optionally filtered by status —
-// the way the app sees it, but pulled over the agent socket instead of pushed as a
-// tickets_updated broadcast. This is the read foundation the write verbs depend on:
+// the whole board, pulled over the agent socket. This is the read foundation the
+// write verbs depend on:
 // an agent finds a ticket-id here before it can comment on (or take/subscribe to) it.
 // Unlike the write verbs it is NOT identity-scoped — it is a global board read, so
 // source_session_id is optional and unused, present only for command-shape uniformity.
-// Rows carry the description (the brief) but not the activity thread — unlike the
-// app's board feed, whose TicketRow drops the brief too.
+// Rows carry the description (the brief) but not the activity thread.
 model TicketListMessage {
   cmd: "ticket_list";
   source_session_id?: string;
@@ -979,7 +956,7 @@ model TicketListResult {
 
 // TicketShowMessage reads one ticket's full record — metadata, description, and the
 // complete activity thread (with full bodies) plus current artifacts — pulled over the
-// agent socket instead of pushed as a tickets_updated broadcast. Unlike ticket_inbox
+// agent socket. Unlike ticket_inbox
 // this is non-consuming: it never advances the calling session's unread cursor, so
 // it can be re-read at will. Like ticket_list it is NOT identity-scoped — a global
 // read of a ticket by id, so source_session_id is optional and unused, present only
@@ -990,8 +967,8 @@ model TicketShowMessage {
   ticket_id: string;
 }
 
-// TicketShowResult is the full ticket record — the same shape the app's get_ticket
-// serves, with Activity and Artifacts populated.
+// TicketShowResult is the full ticket record, with Activity and Artifacts
+// populated.
 model TicketShowResult {
   ticket: Ticket;
 }
@@ -1091,89 +1068,6 @@ model TicketAttachResultMessage {
   result?: TicketAttachResult;
 }
 
-// GetTicketMessage fetches one ticket's full record — the row plus its activity
-// thread and current artifacts — for the detail view. A by-id read needs no caller
-// identity: the board feed (the initial_state push / tickets_updated broadcast)
-// already bounds what the app can see, and detail is the row it clicked. The
-// daemon replies with a ticket_result event correlated by request_id.
-model GetTicketMessage {
-  cmd: "get_ticket";
-  request_id?: string;
-  ticket_id: string;
-}
-
-// The chief/user acting on a ticket from the app. These are by-id mutations
-// authored as the human identity ("you"); the daemon notifies the assigned agent
-// and re-broadcasts the board. All three reply with the shared ticket_action_result
-// event, correlated by request_id; the updated record reaches the panel through the
-// tickets_updated broadcast (which the open detail view re-fetches on).
-
-// ticket_change_status moves a ticket to a chosen column (the chief picks the
-// status directly, unlike the agent's work-state forward channel). An optional
-// comment is recorded on the change.
-model TicketChangeStatusMessage {
-  cmd: "ticket_change_status";
-  request_id?: string;
-  ticket_id: string;
-  status: TicketStatus;
-  comment?: string;
-  expected_event_seq?: int32;
-}
-
-// ticket_add_comment appends a freeform note to a ticket's thread — the chief's
-// steer to the agent, carrying real content.
-model TicketAddCommentMessage {
-  cmd: "ticket_add_comment";
-  request_id?: string;
-  ticket_id: string;
-  comment: string;
-  expected_event_seq?: int32;
-}
-
-// ticket_edit_description replaces a ticket's brief (a re-brief / re-scope).
-model TicketEditDescriptionMessage {
-  cmd: "ticket_edit_description";
-  request_id?: string;
-  ticket_id: string;
-  description: string;
-  expected_event_seq?: int32;
-}
-
-// TicketActionResultMessage is the shared reply to a chief ticket action,
-// correlated by request_id. success/error report whether the mutation landed; the
-// resulting data reaches the UI through the tickets_updated broadcast.
-model TicketActionResultMessage {
-  event: "ticket_action_result";
-  request_id: string;
-  success: boolean;
-  error?: string;
-}
-
-// ticket_resume reopens the agent session bound to a ticket: same session id
-// (the assignee), the ticket's cwd, resuming the mirrored conversation when
-// resumable. The daemon owns the whole composite (register workspace + add pane +
-// spawn, with rollback) so no racy frontend seeding is involved; the frontend just
-// sends this command and focuses the result. The session/pane reach the UI through
-// the normal session_registered / workspace_layout_updated broadcasts.
-model TicketResumeMessage {
-  cmd: "ticket_resume";
-  request_id?: string;
-  ticket_id: string;
-}
-
-// TicketResumeResultMessage replies to ticket_resume, correlated by request_id.
-// session_id is the (re)opened session the frontend focuses; already_running is
-// true when the assignee session was still registered, so the daemon spawned
-// nothing and the frontend just focuses the existing pane.
-model TicketResumeResultMessage {
-  event: "ticket_resume_result";
-  request_id: string;
-  success: boolean;
-  error?: string;
-  session_id?: string;
-  workspace_id?: string;
-  already_running?: boolean;
-}
 
 model WorkspaceContextCheckoutMessage {
   cmd: "workspace_context_checkout";
@@ -3050,7 +2944,6 @@ model InitialStateMessage {
   github_hosts?: string[];
   settings?: Record<string>;
   warnings?: DaemonWarning[];
-  tickets?: TicketRow[];
   seeds?: Seed[];
   // How many seeds the garden holds, beside the bounded `seeds`. Carried here
   // as well as on garden_seeds_updated so a client that connects to an
@@ -3182,25 +3075,6 @@ model ChiefOfStaffResultMessage {
   error?: string;
 }
 
-// TicketsUpdatedMessage is the live board feed: the non-archived ticket rows,
-// re-pushed whenever any ticket mutates. It is the same shape carried in
-// InitialStateMessage.tickets, so a client renders the board identically from
-// the bootstrap snapshot and from each update.
-model TicketsUpdatedMessage {
-  event: "tickets_updated";
-  tickets: TicketRow[];
-}
-
-// TicketResultMessage is the reply to a get_ticket request, correlated by
-// request_id. `ticket` carries the full record on success; `error` is set and
-// `ticket` omitted when the id is unknown or the read failed.
-model TicketResultMessage {
-  event: "ticket_result";
-  request_id: string;
-  success: boolean;
-  ticket?: Ticket;
-  error?: string;
-}
 
 // GetPresentationsMessage reads the full list of presentations, the way the
 // app renders the present surface.
@@ -4757,6 +4631,33 @@ model SeedNotesMessage {
 model SeedNotesResult {
   "notes": SeedNote[];
   "total": int32;
+}
+
+// Reopen the agent that tends a seed. The tender is the delegate the seed was
+// bound to at dispatch, and its dispatch record carries the directory and agent
+// it was launched with, so the daemon owns every input and the client sends one
+// command. Same session id, so the mirrored conversation resumes; the session
+// and pane reach the UI through the normal session_registered /
+// workspace_layout_updated broadcasts. An untended seed refuses by name —
+// there is nobody to reopen.
+model SeedResumeMessage {
+  "cmd": "seed_resume";
+  "request_id"?: string;
+  "seed_id": string;
+}
+
+// SeedResumeResultMessage replies to seed_resume, correlated by request_id.
+// session_id is the (re)opened session the frontend focuses; already_running is
+// true when the tender session was still registered, so the daemon spawned
+// nothing and the frontend just focuses the existing pane.
+model SeedResumeResultMessage {
+  "event": "seed_resume_result";
+  "request_id": string;
+  "success": boolean;
+  "error"?: string;
+  "session_id"?: string;
+  "workspace_id"?: string;
+  "already_running"?: boolean;
 }
 
 // The whole garden, re-pushed whenever a seed changes. Clients filter by
@@ -6398,7 +6299,6 @@ model WebSocketEvent {
 
   workspace_context_result?: WorkspaceContextResult;
   ticket?: Ticket;
-  tickets?: TicketRow[];
   seeds?: Seed[];
   total?: int32;
   workspace_contexts?: WorkspaceContext[];
@@ -6422,16 +6322,13 @@ alias DaemonEvent =
   | RenameResultMessage
   | ChiefOfStaffResultMessage
   | SessionContextWindowCapResultMessage
-  | TicketsUpdatedMessage
   | GardenSeedsUpdatedMessage
+  | SeedResumeResultMessage
   | SeedDocumentGetResultMessage
   | CrewUpdatedMessage
   | CrewWakeResultMessage
   | CrewSleepResultMessage
-  | TicketResultMessage
-  | TicketActionResultMessage
   | TicketAttachResultMessage
-  | TicketResumeResultMessage
   | WorkspaceTileContentMessage
   | OpenSeedResultMessage
   | BrowserControlResponseMessage

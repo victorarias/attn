@@ -1,17 +1,17 @@
-/* TicketBoardSurface.css — fullscreen shell for the ticket board.
+/* GardenSurface.css — fullscreen shell for the garden.
    Mirrors .notebook-browser-shell: fixed inset-0, z-index 400, framed inner
    panel. Token-only; no invented hex. */
 
-.tb-surface-shell {
+.garden-surface-shell {
   position: fixed;
   inset: 0;
   z-index: 400;
   padding: 12px;
   background: var(--color-bg-app);
-  animation: tb-surface-reveal 170ms ease-out;
+  animation: garden-surface-reveal 170ms ease-out;
 }
 
-.tb-surface {
+.garden-surface {
   position: relative;
   height: 100%;
   display: flex;
@@ -22,15 +22,15 @@
   background: var(--color-bg-panel);
 }
 
-/* The board panel fills the framed surface; its own rounded-square corners are
-   clipped by the surface's overflow:hidden. */
-.tb-surface > .tb-panel {
+/* The panel fills the framed surface; its own corners are clipped by the
+   surface's overflow:hidden. */
+.garden-surface > .garden-panel {
   flex: 1 1 auto;
   min-height: 0;
 }
 
 @media (prefers-reduced-motion: no-preference) {
-  @keyframes tb-surface-reveal {
+  @keyframes garden-surface-reveal {
     from {
       opacity: 0;
       transform: scale(0.99);
@@ -43,7 +43,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .tb-surface-shell {
+  .garden-surface-shell {
     animation: none;
   }
 }

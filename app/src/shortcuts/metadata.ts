@@ -101,7 +101,9 @@ export const SHORTCUT_META: Record<ShortcutId, ShortcutMeta> = {
   'file.open': { label: 'Open a markdown file', category: 'app' },
   'notebook.openTile': { label: 'Open Editor tile', category: 'app' },
   'notebook.openFullscreen': { label: 'Open Notebook fullscreen', category: 'app' },
-  'board.open': { label: 'Open Tickets board', category: 'app' },
+  // The id outlives the surface it was named for: it keys the user's saved
+  // rebindings, and the garden replaced the board behind it.
+  'board.open': { label: 'Open the garden', category: 'app' },
   'app.quit': { label: 'Quit attn', category: 'app', protected: true },
 };
 

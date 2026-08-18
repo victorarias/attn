@@ -813,7 +813,6 @@ func (d *Daemon) sendInitialState(client *wsClient) {
 		GithubHosts:       state.GithubHosts,
 		Settings:          d.settingsWithAgentAvailability(),
 		Warnings:          d.getWarnings(),
-		Tickets:           state.Tickets,
 		Seeds:             state.Seeds,
 		SeedsTotal:        protocol.Ptr(d.countSeedsForBroadcast()),
 		Apps:              state.Apps,
@@ -1146,19 +1145,12 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 	case protocol.CmdNotificationMarkRead: // wire: notification_mark_read
 		notifMark := msg.(*protocol.NotificationMarkReadMessage)
 		go d.sendNotificationMarkReadWSResult(client, protocol.Deref(notifMark.RequestID), notifMark.NotificationID)
-	case protocol.CmdGetTicket: // wire: get_ticket
-		getTicket := msg.(*protocol.GetTicketMessage)
-		go d.sendGetTicketWSResult(client, protocol.Deref(getTicket.RequestID), getTicket.TicketID)
-	case protocol.CmdTicketChangeStatus: // wire: ticket_change_status
-		go d.handleTicketChangeStatus(client, msg.(*protocol.TicketChangeStatusMessage))
-	case protocol.CmdTicketAddComment: // wire: ticket_add_comment
-		go d.handleTicketAddComment(client, msg.(*protocol.TicketAddCommentMessage))
-	case protocol.CmdTicketEditDescription: // wire: ticket_edit_description
-		go d.handleTicketEditDescription(client, msg.(*protocol.TicketEditDescriptionMessage))
 	case protocol.CmdTicketAttach: // wire: ticket_attach
 		go d.handleTicketAttachWS(client, msg.(*protocol.TicketAttachMessage))
-	case protocol.CmdTicketResume: // wire: ticket_resume
-		go d.handleTicketResume(client, msg.(*protocol.TicketResumeMessage))
+	case protocol.CmdSeedResume: // wire: seed_resume
+		// Reopening a delegate spawns a session; like crew_wake the composite is
+		// the daemon's, so it runs off the read loop.
+		go d.handleSeedResume(client, msg.(*protocol.SeedResumeMessage))
 	case protocol.CmdCrewWake: // wire: crew_wake
 		// Waking spawns a session; the composite is the daemon's, so it runs off
 		// the read loop like every other spawning command.

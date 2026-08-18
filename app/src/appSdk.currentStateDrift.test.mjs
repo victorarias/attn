@@ -34,7 +34,11 @@ const SHAPES = [
   ['PR', 'PR'],
   ['RepoState', 'RepoState'],
   ['AuthorState', 'AuthorState'],
-  ['TicketRow', 'TicketRow'],
+  // No TicketRow pair: the app's ticket surfaces became garden surfaces, so
+  // the wire carries no TicketRow any more. The SDK still promises
+  // currentState.tickets, served by a daemon-local row
+  // (internal/daemon/current_state.go) — nothing generated left to drift
+  // against.
   ['SeedEdge', 'SeedEdge'],
   ['SeedPlotProgress', 'SeedPlotProgress'],
   ['SeedVar', 'SeedVar'],

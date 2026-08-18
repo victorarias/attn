@@ -145,7 +145,7 @@ func TestNotifyNudgesEligibleLeavesAcrossRuntimes(t *testing.T) {
 }
 
 // Full slice-6 roundtrip: a real chief producer (the human commenting on the
-// agent's bound ticket via handleTicketAddComment) drives notifyTicketObservers,
+// agent's bound ticket via handleTicketComment) drives notifyTicketObservers,
 // which nudges the codex agent through the same shared delivery policy as every
 // other runtime.
 // The agent then runs `attn ticket inbox`, consumes the chief's event, and a
@@ -161,13 +161,7 @@ func TestCodexNudgeRoundtrip(t *testing.T) {
 
 	// Drive a REAL chief→agent producer: the human comments on the codex agent's
 	// ticket, authored as "you" — an event the agent did not author, so it is unread.
-	client := &wsClient{send: make(chan outboundMessage, 8)}
-	d.handleTicketAddComment(client, &protocol.TicketAddCommentMessage{
-		Cmd:              protocol.CmdTicketAddComment,
-		TicketID:         ticketID,
-		Comment:          "please take a look at the failing test",
-		ExpectedEventSeq: currentTicketEventSeq(t, d, ticketID),
-	})
+	commentOnTicket(t, d, ticketID, "please take a look at the failing test")
 
 	// 1) The idle codex agent was nudged by the chief's comment on its ticket (after
 	// the countdown the comment armed fires).
@@ -282,16 +276,12 @@ func TestDelegatedAgentNotNudgedByOwnDeliveredBrief(t *testing.T) {
 // commentOnTicket gives the delegated agent an unread event: the chief/human
 // comments on the agent's bound ticket (authored as "you", store.TicketAuthorYou),
 // an event the agent did not author. This is the real chief→agent steer path
-// (handleTicketAddComment), the same one TestCodexNudgeRoundtrip drives.
+// (handleTicketComment), the same one TestCodexNudgeRoundtrip drives.
 func commentOnTicket(t *testing.T, d *Daemon, ticketID, comment string) {
 	t.Helper()
-	client := &wsClient{send: make(chan outboundMessage, 8)}
-	d.handleTicketAddComment(client, &protocol.TicketAddCommentMessage{
-		Cmd:              protocol.CmdTicketAddComment,
-		TicketID:         ticketID,
-		Comment:          comment,
-		ExpectedEventSeq: currentTicketEventSeq(t, d, ticketID),
-	})
+	if resp := callTicketComment(t, d, store.TicketAuthorYou, ticketID, comment); !resp.Ok {
+		t.Fatalf("comment on %s: %v", ticketID, protocol.Deref(resp.Error))
+	}
 }
 
 // The shared policy also covers chiefs. A report from a delegated agent wakes an

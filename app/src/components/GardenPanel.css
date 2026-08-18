@@ -226,8 +226,14 @@
   padding: 10px;
 }
 
-.garden-seed__open-tile {
-  align-self: flex-end;
+.garden-seed__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.garden-seed__open-tile,
+.garden-seed__reopen {
   background: var(--color-bg-button);
   border: 1px solid var(--color-border);
   border-radius: 5px;
@@ -237,7 +243,8 @@
   padding: 4px 8px;
 }
 
-.garden-seed__open-tile:hover {
+.garden-seed__open-tile:hover,
+.garden-seed__reopen:hover {
   border-color: var(--accent);
   color: var(--color-text-primary);
 }

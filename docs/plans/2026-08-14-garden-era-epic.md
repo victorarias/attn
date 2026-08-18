@@ -173,7 +173,7 @@ events.
 - [ ] Delegation reporting on seeds: bind at dispatch, log-note status,
       typed `attach`/`detach` with the artifact projection, agent-msg
       steering — the weight transfer.
-- [ ] App ticket surfaces → garden surfaces; this step moves the wire
+- [x] App ticket surfaces → garden surfaces; this step moves the wire
       and carries the ProtocolVersion bump in every lockstep spot.
 - [ ] Ticket write verbs → permanent CLI signposts; read verbs keep
       the archived store; bulk-convert backlog todos.

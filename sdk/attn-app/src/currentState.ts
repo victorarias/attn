@@ -31,6 +31,8 @@ export interface Session {
   readonly nudge_fires_at?: string
   readonly parent_session_id?: string
   readonly pinned_at?: string
+  /** The seed this session reports to, when it was dispatched onto one. */
+  readonly seed_id?: string
   readonly state: "idle" | "launching" | "pending_approval" | "recoverable" | "scheduled" | "unknown" | "waiting_input" | "working"
   readonly state_reason?: string
   readonly state_since: string
@@ -141,6 +143,8 @@ export interface AuthorState {
   readonly muted: boolean
 }
 
+// The app's own surfaces read the garden now; this row is kept for apps and is
+// shaped by internal/daemon/current_state.go, not by the app wire.
 export interface TicketRow {
   readonly assignee: string
   readonly closed_at?: string

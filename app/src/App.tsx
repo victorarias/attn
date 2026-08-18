@@ -18,8 +18,7 @@ import { ChiefOfStaffTransferPrompt } from './components/ChiefOfStaffTransferPro
 import { SessionContextCapPrompt } from './components/SessionContextCapPrompt';
 import { AppViewParamsPrompt } from './components/appViews/AppViewParamsPrompt';
 import { appViewTileKind } from './utils/appBundle';
-import { TicketDetailPanel } from './components/TicketDetailPanel';
-import { TicketBoardSurface } from './components/TicketBoardSurface';
+import { GardenSurface } from './components/GardenSurface';
 import { WorkflowRunView } from './components/WorkflowRunView';
 import { AutomationsPanel } from './components/AutomationsPanel';
 import { GardenPanel } from './components/GardenPanel';
@@ -99,7 +98,7 @@ import {
   fsIndexToNotebookEntries,
 } from './utils/fsChangeSignals';
 import { useUIScale } from './hooks/useUIScale';
-import { useTicketBoardScale } from './hooks/useTicketBoardScale';
+import { useGardenScale } from './hooks/useGardenScale';
 import { useTheme } from './hooks/useTheme';
 import { useOpenPR, type OpenPRProgress } from './hooks/useOpenPR';
 import { useUiAutomationBridge } from './hooks/useUiAutomationBridge';
@@ -116,7 +115,6 @@ import {
   resolvePreferredAgent,
 } from './utils/agentAvailability';
 import { normalizeInstallChannel, shouldCheckForReleaseUpdates } from './utils/installChannel';
-import { boundTicketForSession } from './utils/tickets';
 import { BUILD_PROFILE } from './utils/buildProfile';
 import { buildWorkspaceViewModels, filterSessionsRepresentedInWorkspaceLayouts } from './utils/workspaceViewModels';
 import {
@@ -441,7 +439,6 @@ function App() {
   const {
     daemonSessions,
     setDaemonSessions,
-    setTickets,
     setSeeds,
     setApps,
     setCrew,
@@ -624,7 +621,6 @@ function App() {
       setCriticalNotifications(critical);
       setNotificationsChangeSignal((n) => n + 1);
     },
-    onTicketsUpdate: setTickets,
     onSeedsUpdate: setSeeds,
     onAppsUpdate: setApps,
     onCrewUpdate: setCrew,
@@ -842,8 +838,6 @@ function AppContent({
     sendFsList,
     sendFsRead,
     sendFsWrite,
-    sendFsRename,
-    sendFsDelete,
     sendFsExists,
     sendFsReadAsset,
     sendFsWatch,
@@ -908,12 +902,7 @@ function AppContent({
     getAutomationDefinition,
     applyAutomationDefinition,
     deleteAutomationDefinition,
-    fetchTicket,
-    sendTicketChangeStatus,
-    sendTicketAddComment,
-    sendTicketEditDescription,
-    sendTicketAttach,
-    sendTicketResume,
+    sendSeedResume,
     sendCrewWake,
     sendCrewSleep,
   } = useDaemonApi();
@@ -1065,8 +1054,8 @@ function AppContent({
   const { scale, increaseScale, decreaseScale, resetScale } = useUIScale();
   const terminalFontSize = Math.round(14 * scale);
 
-  // Independent font scale for the ticket board surfaces (null = match app)
-  const ticketBoardScale = useTicketBoardScale(scale);
+  // Independent font scale for the garden surfaces (null = match app)
+  const gardenScale = useGardenScale(scale);
 
   // Theme (dark/light/system)
   const { preference: themePreference, resolved: resolvedTheme, setTheme } = useTheme();
@@ -1096,13 +1085,13 @@ function AppContent({
   const [workspaceContextsOpen, setWorkspaceContextsOpen] = useState(false);
   const [notebookOpen, setNotebookOpen] = useState(false);
   const [notebookRequestedPath, setNotebookRequestedPath] = useState<string | null>(null);
-  const [boardSurfaceOpen, setBoardSurfaceOpen] = useState(false);
+  const [gardenSurfaceOpen, setGardenSurfaceOpen] = useState(false);
   const [notificationsPanelOpen, setNotificationsPanelOpen] = useState(false);
   const [workspaceContextsLoading, setWorkspaceContextsLoading] = useState(false);
   const [workspaceContextsError, setWorkspaceContextsError] = useState<string | null>(null);
   const [workspaceContexts, setWorkspaceContexts] = useState<Awaited<ReturnType<typeof sendListWorkspaceContexts>>>([]);
   const whatsNew = useWhatsNew();
-  const { repoStates, authorStates, tickets, seeds, seedsTotal, apps, crew } = useDaemonStore();
+  const { repoStates, authorStates, seeds, seedsTotal, apps, crew } = useDaemonStore();
   const mutedRepos = useMemo(() =>
     repoStates.filter(r => r.muted).map(r => r.repo),
     [repoStates],
@@ -1268,6 +1257,7 @@ function AppContent({
       chiefOfStaff: daemonSession?.chief_of_staff ?? false,
       delegatedFromChief: daemonSession?.delegated_from_chief ?? false,
       ticketUnread: daemonSession?.ticket_unread ?? false,
+      seedId: daemonSession?.seed_id,
       nudgeFiresAt: daemonSession?.nudge_fires_at,
       turnOwed: daemonSession?.turn_owed ?? false,
       turnOpenedAt: daemonSession?.turn_opened_at,
@@ -1327,7 +1317,7 @@ function AppContent({
     void connect();
   }, [connect]);
 
-  type DockPanelId = 'workflowRun' | 'attention' | 'ticketDetail' | 'automations' | 'garden';
+  type DockPanelId = 'workflowRun' | 'attention' | 'automations' | 'garden';
 
   // Muted section expansion (controlled by Dashboard click)
   const [sidebarMutedExpanded, setSidebarMutedExpanded] = useState(false);
@@ -1353,19 +1343,11 @@ function AppContent({
     openPanels: {
         workflowRun: false,
         attention: false,
-        ticketDetail: false,
         automations: false,
         garden: false,
     },
     stack: [],
   });
-  // The ticket whose detail panel is open (null when none). Paired with the
-  // ticketDetail dock panel.
-  const [selectedTicketId, setSelectedTicketId] = useState<string | null>(null);
-  const selectedTicketRow = useMemo(
-    () => (selectedTicketId ? tickets.find((ticket) => ticket.id === selectedTicketId) : undefined),
-    [tickets, selectedTicketId],
-  );
   const dockPanelCloseTimersRef = useRef<Partial<Record<DockPanelId, number>>>({});
   const gitStatusSubscribedDirRef = useRef<string | null>(null);
 
@@ -1702,7 +1684,6 @@ function AppContent({
   const dockPanelStack = dockState.stack;
   const workflowRunPanelOpen = openDockPanels.workflowRun;
   const attentionPanelOpen = openDockPanels.attention;
-  const ticketDetailPanelOpen = openDockPanels.ticketDetail;
   const automationsPanelOpen = openDockPanels.automations;
   const gardenPanelOpen = openDockPanels.garden;
   const blockingOverlayOpen = locationPickerOpen
@@ -1713,7 +1694,7 @@ function AppContent({
     || actionMenuOpen
     || workspaceContextsOpen
     || notebookOpen
-    || boardSurfaceOpen
+    || gardenSurfaceOpen
     || chiefTransferTarget !== null
     || contextCapPromptSession !== null
     || appViewParamsPrompt !== null
@@ -1790,11 +1771,11 @@ function AppContent({
     setNotebookOpen(true);
   }, []);
 
-  const openBoardSurface = useCallback(() => {
-    setBoardSurfaceOpen(true);
+  const openGardenSurface = useCallback(() => {
+    setGardenSurfaceOpen(true);
   }, []);
-  const closeBoardSurface = useCallback(() => {
-    setBoardSurfaceOpen(false);
+  const closeGardenSurface = useCallback(() => {
+    setGardenSurfaceOpen(false);
   }, []);
   const toggleNotificationsPanel = useCallback(() => {
     setNotificationsPanelOpen((open) => !open);
@@ -1978,13 +1959,13 @@ function AppContent({
       run: () => openDockPanel('attention'),
     },
     {
-      id: 'tickets-board',
-      title: 'Open ticket board',
-      description: 'Tickets grouped by status',
-      keywords: ['ticket', 'board', 'kanban', 'tickets'],
+      id: 'garden-surface',
+      title: 'Open the garden',
+      description: 'Seeds and plots, grouped by state',
+      keywords: ['garden', 'seed', 'seeds', 'plot', 'board'],
       icon: <BoardActionIcon />,
       shortcut: [shortcutTokens('board.open')],
-      run: () => openBoardSurface(),
+      run: () => openGardenSurface(),
     },
     {
       // The switch itself lives in the sidebar's display popover, next to the
@@ -2015,7 +1996,7 @@ function AppContent({
       icon: <KeyboardActionIcon />,
       run: () => setShortcutEditorOpen(true),
     },
-  ], [openDockPanel, openWorkspaceContextNavigator, handleOpenNotebookTile, openBoardSurface, settings, handleToggleQueueMode]);
+  ], [openDockPanel, openWorkspaceContextNavigator, handleOpenNotebookTile, openGardenSurface, settings, handleToggleQueueMode, sendSetSetting]);
 
   const handleToggleActionMenu = useCallback(() => {
     if (actionMenuOpen) {
@@ -2023,7 +2004,7 @@ function AppContent({
       return;
     }
     if (settingsOpen || shortcutsOpen || locationPickerOpen || whatsNew.isOpen
-      || workspaceContextsOpen || notebookOpen || boardSurfaceOpen
+      || workspaceContextsOpen || notebookOpen || gardenSurfaceOpen
       || chiefTransferTarget !== null || contextCapPromptSession !== null
       || appViewParamsPrompt !== null || closedWorktree !== null || pendingSessionClose !== null
       || sessionCreationJob !== null || openPRLauncherJob !== null) {
@@ -2045,7 +2026,7 @@ function AppContent({
     whatsNew.isOpen,
     workspaceContextsOpen,
     notebookOpen,
-    boardSurfaceOpen,
+    gardenSurfaceOpen,
   ]);
   useEffect(() => {
     if (!settingError) {
@@ -2544,18 +2525,6 @@ function AppContent({
     fitSessionActivePane,
     sendRuntimeInput,
     isRuntimeAttached,
-    // Ticket detail panel. Inlined (not the handleOpen/CloseTicketDetail
-    // callbacks) because those are defined later in the body — past this call's
-    // temporal-dead zone — and these are the same two trivial operations.
-    openTicketDetail: (ticketId: string) => {
-      setSelectedTicketId(ticketId);
-      openDockPanel('ticketDetail');
-    },
-    closeTicketDetail: () => {
-      closeDockPanel('ticketDetail');
-      setSelectedTicketId(null);
-    },
-    tickets,
     openAutomationsPanel: () => openDockPanel('automations'),
     presentationNotices,
     resetSessionPaneTerminal,
@@ -3512,34 +3481,32 @@ function AppContent({
     });
   }, [getPaneSize, reloadSession, sessions, showError]);
 
-  // Ticket detail panel handlers — opened from a delegated session (the "from a
-  // session" entry); the panel fetches the full record for the selected id.
-  const handleOpenTicketDetail = useCallback((ticketId: string) => {
-    setSelectedTicketId(ticketId);
-    openDockPanel('ticketDetail');
-  }, [openDockPanel]);
+  // Open a seed as a tile: the daemon uses the active session to place it, then
+  // binds the tile's annotation target to the seed's tender. Without a placement
+  // session a garden-only open has no workspace, and annotations could never
+  // reach the driving session.
+  const handleOpenSeedTile = useCallback((seedId: string) => {
+    void sendOpenSeed(seedId, activeSessionId || '').catch((error) => {
+      showError(error instanceof Error ? error.message : 'Could not open the seed');
+    });
+  }, [sendOpenSeed, activeSessionId, showError]);
 
-  const handleCloseTicketDetail = useCallback(() => {
-    closeDockPanel('ticketDetail');
-    setSelectedTicketId(null);
-  }, [closeDockPanel]);
+  const handleOpenMarkdownArtifact = useCallback((path: string) => {
+    void sendOpenMarkdown(path, '').catch((error) => {
+      showError(error instanceof Error ? error.message : 'Could not open the document');
+    });
+  }, [sendOpenMarkdown, showError]);
 
-  // Resume a ticket's agent session. The daemon owns the whole resume composite
+  // Reopen the agent that tends a seed. The daemon owns the whole composite
   // (validate → register workspace → add pane → spawn, with rollback), so the
-  // frontend just sends one command and focuses the returned session; the session and
-  // pane arrive through the normal broadcasts (they are already in daemonSessions by
-  // the time the result lands). This replaces a racy frontend orchestration that
-  // seeded a local placeholder and lost it to a broadcast-driven store prune mid-
-  // flight ("Session spawn arguments were not prepared" + rollback). A still-running
-  // assignee is focused, not re-spawned (already_running, resolved daemon-side).
-  const handleResumeTicket = useCallback((ticketId: string) => {
-    sendTicketResume(ticketId)
-      .then((result) => {
-        handleSelectSession(result.sessionId);
-        handleCloseTicketDetail();
-      })
-      .catch((error) => showError(error instanceof Error ? error.message : 'Failed to resume ticket'));
-  }, [sendTicketResume, handleSelectSession, handleCloseTicketDetail, showError]);
+  // frontend sends one command and focuses the session it names; the session and
+  // pane arrive through the normal broadcasts. A still-running tender is focused,
+  // not re-spawned (already_running, resolved daemon-side).
+  const handleResumeSeed = useCallback((seedId: string) => {
+    sendSeedResume(seedId)
+      .then((result) => handleSelectSession(result.sessionId))
+      .catch((error) => showError(error instanceof Error ? error.message : 'Failed to reopen the agent'));
+  }, [sendSeedResume, handleSelectSession, showError]);
 
   // Start a crew member's day from the sidebar. The daemon owns the composite —
   // bind, register the member's workspace, add the pane, spawn primed — so this
@@ -3560,25 +3527,6 @@ function AppContent({
     sendCrewSleep(member)
       .catch((error) => showError(error instanceof Error ? error.message : `Failed to ask ${crewDisplayName(member)} to sleep`));
   }, [sendCrewSleep, showError]);
-
-  // The daemon-facing ticket actions the pane-header ticket overlay wires into
-  // its TicketDetailPanel. Memoized so the workspace's renderPaneSurface memo
-  // does not rebuild every render. Same senders the dock panel uses; resume is
-  // App's handleResumeTicket, which sends the daemon-owned ticket_resume command.
-  const ticketActions = useMemo(() => ({
-    fetchTicket,
-    onChangeStatus: sendTicketChangeStatus,
-    onAddComment: sendTicketAddComment,
-    onEditDescription: sendTicketEditDescription,
-    onAttach: sendTicketAttach,
-    onRenameArtifact: sendFsRename,
-    onDeleteArtifact: sendFsDelete,
-    onOpenArtifact: (path: string) => {
-      setNotebookRequestedPath(path);
-      setNotebookOpen(true);
-    },
-    onResume: handleResumeTicket,
-  }), [fetchTicket, sendTicketChangeStatus, sendTicketAddComment, sendTicketEditDescription, sendTicketAttach, sendFsRename, sendFsDelete, handleResumeTicket]);
 
   // The daemon calls the terminal annotation surface needs, as one stable
   // object: the surface re-fetches on identity change, so four separate props
@@ -3675,11 +3623,11 @@ function AppContent({
       onClick: openNotebookBrowser,
     },
     {
-      id: 'board',
-      title: 'Open Ticket Board (⌘⇧T)',
+      id: 'garden',
+      title: 'Open the Garden (⌘⇧T)',
       icon: <BoardActionIcon />,
-      active: boardSurfaceOpen,
-      onClick: openBoardSurface,
+      active: gardenSurfaceOpen,
+      onClick: openGardenSurface,
     },
     {
       id: 'notifications',
@@ -3718,8 +3666,8 @@ function AppContent({
     toggleDockPanel,
     notebookOpen,
     openNotebookBrowser,
-    boardSurfaceOpen,
-    openBoardSurface,
+    gardenSurfaceOpen,
+    openGardenSurface,
     notificationsPanelOpen,
     notificationsUnread,
     hasCriticalNotification,
@@ -3808,7 +3756,7 @@ function AppContent({
     onOpenFile: handleOpenMarkdownFile,
     onOpenNotebookTile: handleOpenNotebookTile,
     onOpenNotebookFullscreen: openNotebookBrowser,
-    onOpenBoard: openBoardSurface,
+    onOpenGarden: openGardenSurface,
     onQuit: handleQuitApp,
     enabled: !locationPickerOpen
       && !whatsNew.isOpen
@@ -3817,7 +3765,7 @@ function AppContent({
       && !shortcutEditorOpen
       && !workspaceContextsOpen
       && !notebookOpen
-      && !boardSurfaceOpen,
+      && !gardenSurfaceOpen,
   });
 
   // The daemon's resolved notebook storage root (settings['notebook.root.effective']).
@@ -4081,7 +4029,7 @@ function AppContent({
                       costUnknown: entry.costUnknown,
                       isActive: entry.id === activeSessionId,
                       presentation: presentationBySessionId.get(entry.id),
-                      ticket: boundTicketForSession(tickets ?? [], entry.id),
+                      seedId: entry.seedId,
                     }))}
                     seedTargetSessions={daemonSessions.map((session) => ({
                       sessionId: session.id,
@@ -4089,7 +4037,7 @@ function AppContent({
                       state: session.state,
                     }))}
                     gardenSeeds={seeds}
-                    ticketActions={ticketActions}
+                    onOpenSeed={handleOpenSeedTile}
                     conversationAgents={conversationPaneAgents}
                     annotationApi={annotationApi}
                     onTriggerNudge={sendTriggerNudge}
@@ -4218,32 +4166,6 @@ function AppContent({
               ),
             },
             {
-              id: 'ticketDetail',
-              isOpen: ticketDetailPanelOpen,
-              width: 'clamp(420px, 38vw, 640px)',
-              className: 'dock-panel dock-panel--ticket-detail',
-              children: (
-                <TicketDetailPanel
-                  isOpen={ticketDetailPanelOpen}
-                  ticketId={selectedTicketId}
-                  ticketRow={selectedTicketRow}
-                  fetchTicket={fetchTicket}
-                  onChangeStatus={sendTicketChangeStatus}
-                  onAddComment={sendTicketAddComment}
-                  onEditDescription={sendTicketEditDescription}
-                  onAttach={sendTicketAttach}
-                  onRenameArtifact={sendFsRename}
-                  onDeleteArtifact={sendFsDelete}
-                  onOpenArtifact={(path) => {
-                    setNotebookRequestedPath(path);
-                    setNotebookOpen(true);
-                  }}
-                  onResume={handleResumeTicket}
-                  onClose={handleCloseTicketDetail}
-                />
-              ),
-            },
-            {
               id: 'automations',
               isOpen: automationsPanelOpen,
               width: 'clamp(420px, 42vw, 640px)',
@@ -4259,7 +4181,6 @@ function AppContent({
                   getDefinition={getAutomationDefinition}
                   applyDefinition={applyAutomationDefinition}
                   deleteDefinition={deleteAutomationDefinition}
-                  onOpenTicket={handleOpenTicketDetail}
                   onSelectSession={handleSelectSession}
                   onFocusPane={(sessionId, paneId) => focusSessionPane(sessionId, paneId, 40)}
                 />
@@ -4277,21 +4198,9 @@ function AppContent({
                   seeds={seeds}
                   seedsTotal={seedsTotal}
                   fetchSeedDocument={sendSeedDocumentGet}
-                  onOpenAsTile={(seedId) => {
-                    // The daemon uses this session to place the tile, then
-                    // binds its annotation target to the seed's tender.
-                    // Without the placement session, a garden-only open has
-                    // no workspace and annotations can never reach the
-                    // driving session.
-                    void sendOpenSeed(seedId, activeSessionId || '').catch((error) => {
-                      console.error('[Garden] Could not open seed tile:', error);
-                    });
-                  }}
-                  onOpenMarkdownArtifact={(path) => {
-                    void sendOpenMarkdown(path, '').catch((error) => {
-                      console.error('[Garden] Could not open markdown artifact:', error);
-                    });
-                  }}
+                  onOpenAsTile={handleOpenSeedTile}
+                  onOpenMarkdownArtifact={handleOpenMarkdownArtifact}
+                  onResumeSeed={handleResumeSeed}
                 />
               ),
             },
@@ -4422,14 +4331,18 @@ function AppContent({
         changeSignal={notebookRootChangeSignal}
         chiefActive={notebookChiefActive}
       />
-      <TicketBoardSurface
-        isOpen={boardSurfaceOpen}
-        tickets={tickets}
-        onOpenTicket={(ticketId) => {
-          closeBoardSurface();
-          handleOpenTicketDetail(ticketId);
+      <GardenSurface
+        isOpen={gardenSurfaceOpen}
+        seeds={seeds}
+        seedsTotal={seedsTotal}
+        fetchSeedDocument={sendSeedDocumentGet}
+        onOpenAsTile={(seedId) => {
+          closeGardenSurface();
+          handleOpenSeedTile(seedId);
         }}
-        onClose={closeBoardSurface}
+        onOpenMarkdownArtifact={handleOpenMarkdownArtifact}
+        onResumeSeed={handleResumeSeed}
+        onClose={closeGardenSurface}
       />
       <NotificationsPanel
         open={notificationsPanelOpen}
@@ -4534,11 +4447,11 @@ function AppContent({
         onIncreaseUIScale={increaseScale}
         onDecreaseUIScale={decreaseScale}
         onResetUIScale={resetScale}
-        ticketBoardScale={ticketBoardScale.scale}
-        effectiveTicketBoardScale={ticketBoardScale.effectiveScale}
-        onIncreaseTicketBoardScale={ticketBoardScale.increaseScale}
-        onDecreaseTicketBoardScale={ticketBoardScale.decreaseScale}
-        onMatchAppTicketBoardScale={ticketBoardScale.matchApp}
+        gardenScale={gardenScale.scale}
+        effectiveGardenScale={gardenScale.effectiveScale}
+        onIncreaseGardenScale={gardenScale.increaseScale}
+        onDecreaseGardenScale={gardenScale.decreaseScale}
+        onMatchAppGardenScale={gardenScale.matchApp}
         listTasks={sendTaskList}
         retryTask={sendTaskRetry}
         taskChangeSignal={notebookTaskChangeSignal}

@@ -4,7 +4,6 @@ import { invoke, isTauri } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import type { Session } from '../store/sessions';
 import type { Presentation } from '../types/generated';
-import type { TicketRow } from './useDaemonSocket';
 import type { SessionAgent } from '../types/sessionAgent';
 import type { TerminalSplitDirection } from '../types/workspace';
 import { SHORTCUTS, type ShortcutId, type Combo, isChord } from '../shortcuts/registry';
@@ -24,7 +23,6 @@ import { readWarmWorkspaceLimit } from '../utils/terminalVirtualization';
 import { dumpTerminalGeometry } from '../utils/terminalDiagnosticsLog';
 import { clearPtyPerfSnapshot, getPtyPerfSnapshot, recordPtyDecode, recordWsJsonParse } from '../utils/ptyPerf';
 import { buildSessionRenderHealth } from '../utils/renderHealth';
-import { boundTicketForSession } from '../utils/tickets';
 import { collectWorkspaceLayoutDiagnostics, projectWorkspaceBounds } from '../utils/workspaceDiagnostics';
 import type { TerminalVisibleContentSnapshot } from '../utils/terminalVisibleContent';
 import type { TerminalVisibleStyleSnapshot } from '../utils/terminalStyleSummary';
@@ -98,15 +96,9 @@ interface UseUiAutomationBridgeArgs {
   fitSessionActivePane: (sessionId: string) => void;
   sendRuntimeInput: (runtimeId: string, data: string, source?: string) => void;
   isRuntimeAttached: (runtimeId: string) => boolean;
-  // Ticket detail panel (work-tracker). The mutation actions drive the real
-  // panel controls, so the bridge only needs to open/close the panel and read
-  // the live ticket rows; openDockPanel above is reused to mount the dock.
-  openTicketDetail?: (ticketId: string) => void;
-  closeTicketDetail?: () => void;
-  tickets?: TicketRow[];
   // Automations panel (profile-level). Mutation verbs drive the real panel
-  // controls (toggle/run-now/select), same rationale as the ticket panel
-  // above; the bridge only needs to open the dock and read the rendered DOM.
+  // controls (toggle/run-now/select); the bridge only needs to open the dock
+  // and read the rendered DOM.
   openAutomationsPanel?: () => void;
   // Presentation notices (pane-header review chips). Read-only for the
   // bridge: the chip DOM is the source of truth for what's actually rendered.
@@ -1369,9 +1361,6 @@ function clickTestId(testid: string) {
   }
 }
 
-// Serialize what the TicketDetailPanel is actually rendering, for assertions.
-// `statusOptions` is the decisive signal that `crashed` is not a manual
-// destination; `disabled` exposes the in-flight gating the review fixes added.
 // The garden panel, as a scenario reads it: where you are in the garden, and
 // what is in front of you. The trail and the rows are the two things a
 // navigation scenario asserts on, so both come back whole.
@@ -1424,55 +1413,9 @@ function collectSeedDocumentState(scope: string, seedId: string) {
   };
 }
 
-function collectTicketDetailUiState() {
-  const panel = document.querySelector('[data-testid="ticket-detail-panel"]');
-  if (!(panel instanceof HTMLElement)) {
-    return { present: false };
-  }
-  const text = (selector: string) => panel.querySelector(selector)?.textContent?.trim() ?? '';
-  const select = panel.querySelector('[data-testid="ticket-status-select"]');
-  const statusSelect = select instanceof HTMLSelectElement ? select : null;
-  const descriptionInput = panel.querySelector('[data-testid="ticket-description-input"]');
-  const editingDescription = descriptionInput instanceof HTMLTextAreaElement;
-  const addCommentButton = panel.querySelector('[data-testid="ticket-add-comment"]');
-  const saveDescriptionButton = panel.querySelector('[data-testid="ticket-save-description"]');
-  return {
-    present: true,
-    ticketId: text('.ticket-detail-id'),
-    title: text('.ticket-detail-title'),
-    // The raw status comes from the select; the badge is the human label.
-    status: statusSelect ? statusSelect.value : '',
-    statusBadge: text('.ticket-status-badge'),
-    statusOptions: statusSelect ? Array.from(statusSelect.options).map((option) => option.value) : [],
-    editingDescription,
-    description: editingDescription
-      ? descriptionInput.value
-      : text('.ticket-detail-description'),
-    activity: Array.from(panel.querySelectorAll('.ticket-activity-entry')).map((entry) => ({
-      kind: entry.getAttribute('data-kind') ?? '',
-      author: entry.querySelector('.ticket-activity-author')?.textContent?.trim() ?? '',
-      move: entry.querySelector('.ticket-activity-move')?.textContent?.trim() ?? '',
-      comment: entry.querySelector('.ticket-activity-comment')?.textContent?.trim() ?? '',
-    })),
-    artifacts: Array.from(panel.querySelectorAll('.ticket-artifact')).map((artifact) => ({
-      filename: artifact.querySelector('.ticket-artifact-name')?.textContent?.trim() ?? '',
-    })),
-    canResume: panel.querySelector('[data-testid="ticket-resume"]') instanceof HTMLElement,
-    loading: Boolean(panel.querySelector('.ticket-detail-loading')),
-    error: text('.ticket-detail-error'),
-    actionError: text('.ticket-action-error'),
-    disabled: {
-      statusSelect: statusSelect ? statusSelect.disabled : null,
-      addComment: addCommentButton instanceof HTMLButtonElement ? addCommentButton.disabled : null,
-      saveDescription:
-        saveDescriptionButton instanceof HTMLButtonElement ? saveDescriptionButton.disabled : null,
-    },
-  };
-}
-
 // Serialize what AutomationsPanel is actually rendering: definition rows
 // (with enabled/failure/inline-error state) and, when a definition is
-// selected, its run history. Mirrors collectTicketDetailUiState above.
+// selected, its run history.
 function collectAutomationsUiState() {
   const panel = document.querySelector('[data-testid="automations-panel"]');
   if (!(panel instanceof HTMLElement)) {
@@ -1893,9 +1836,6 @@ export function useUiAutomationBridge({
   fitSessionActivePane,
   sendRuntimeInput,
   isRuntimeAttached,
-  openTicketDetail,
-  closeTicketDetail,
-  tickets,
   openAutomationsPanel,
   presentationNotices,
   resetSessionPaneTerminal,
@@ -2522,6 +2462,25 @@ export function useUiAutomationBridge({
           sessionId,
           getActivePaneIdForSession,
         );
+      }
+      // The pane header's seed chip: what a delegated session says it reports
+      // to, read from the rendered header rather than from the store.
+      case 'session_seed_chip_get_state': {
+        const sessionId = typeof payload.sessionId === 'string' ? payload.sessionId : '';
+        if (!sessionId) {
+          throw new Error('session_seed_chip_get_state requires sessionId');
+        }
+        const chip = document.querySelector(`[data-testid="seed-chip-${sessionId}"]`);
+        if (!(chip instanceof HTMLElement)) {
+          return { present: false };
+        }
+        return {
+          present: true,
+          title: chip.querySelector('.pane-seed-chip-title')?.textContent?.trim() ?? '',
+          hint: chip.getAttribute('title') ?? '',
+          status: chip.getAttribute('data-status') ?? '',
+          unread: Boolean(chip.querySelector(`[data-testid="seed-chip-unread-${sessionId}"]`)),
+        };
       }
       case 'select_workspace': {
         // Mirrors the sidebar row click and ⌘1–9 (both call selectWorkspace).
@@ -3249,59 +3208,6 @@ export function useUiAutomationBridge({
           reloadAvailable: Boolean(root.querySelector('[data-testid="conversation-reload"]')),
         };
       }
-      // --- Ticket detail panel (work-tracker) ------------------------------
-      // Read-only board snapshot (foundation for the slice-5 board scenario).
-      case 'ticket_list':
-        return {
-          tickets: (tickets ?? []).map((ticket) => ({
-            id: ticket.id,
-            title: ticket.title,
-            status: ticket.status,
-            assignee: ticket.assignee,
-            last_agent_id: ticket.last_agent_id,
-            cwd: ticket.cwd,
-          })),
-        };
-      // Open the detail panel for the ticket bound to a delegated session
-      // (assignee == session id), mirroring the "from a session" entry point.
-      case 'ticket_open_via_dashboard': {
-        if (!openTicketDetail) {
-          throw new Error('ticket_open_via_dashboard is not configured');
-        }
-        const sessionId = typeof payload.sessionId === 'string' ? payload.sessionId : '';
-        if (!sessionId) {
-          throw new Error('ticket_open_via_dashboard requires sessionId');
-        }
-        const boundTicket = boundTicketForSession(tickets ?? [], sessionId);
-        if (!boundTicket) {
-          throw new Error(`No ticket is bound to session ${sessionId}`);
-        }
-        openTicketDetail(boundTicket.id);
-        await settleUi(3);
-        return collectTicketDetailUiState();
-      }
-      // Programmatic open (mirrors handleOpenTicketDetail) for when there is no
-      // dispatch row to click through.
-      case 'ticket_open_detail': {
-        if (!openTicketDetail) {
-          throw new Error('ticket_open_detail is not configured');
-        }
-        const ticketId = typeof payload.ticketId === 'string' ? payload.ticketId : '';
-        if (!ticketId) {
-          throw new Error('ticket_open_detail requires ticketId');
-        }
-        openTicketDetail(ticketId);
-        await settleUi(3);
-        return collectTicketDetailUiState();
-      }
-      case 'ticket_close_detail': {
-        if (!closeTicketDetail) {
-          throw new Error('ticket_close_detail is not configured');
-        }
-        closeTicketDetail();
-        await settleUi(2);
-        return { ok: true };
-      }
       case 'garden_get_state':
         return collectGardenUiState();
       // Walking the garden is a click on a crown's plot; the trail climbs back.
@@ -3354,6 +3260,15 @@ export function useUiAutomationBridge({
         }
         return collectSeedDocumentState('.garden-seed__detail', seedId);
       }
+      // The way back to a delegate whose session is gone: the drill's reopen
+      // button. The daemon owns the whole composite, so the verb only clicks.
+      case 'garden_resume_seed': {
+        const seedId = typeof payload.seedId === 'string' ? payload.seedId : '';
+        if (!seedId) throw new Error('garden_resume_seed requires seedId');
+        clickTestId(`seed-reopen-${seedId}`);
+        await settleUi(3);
+        return { ok: true };
+      }
       case 'seed_document_get_state': {
         const scope = typeof payload.selector === 'string' && payload.selector
           ? payload.selector
@@ -3363,70 +3278,8 @@ export function useUiAutomationBridge({
         const seedId = typeof payload.seedId === 'string' ? payload.seedId : '';
         return collectSeedDocumentState(scope, seedId);
       }
-      case 'ticket_detail_get_state':
-        return collectTicketDetailUiState();
-      // Drive the real status <select>. Reject a value the panel does not offer
-      // (e.g. `crashed`) the same way the UI does — the option simply isn't there.
-      case 'ticket_set_status': {
-        const status = typeof payload.status === 'string' ? payload.status : '';
-        if (!status) {
-          throw new Error('ticket_set_status requires status');
-        }
-        const select = document.querySelector('[data-testid="ticket-status-select"]');
-        if (!(select instanceof HTMLSelectElement)) {
-          throw new Error('Ticket status select not found (panel not open or actions not wired)');
-        }
-        const options = Array.from(select.options).map((option) => option.value);
-        if (!options.includes(status)) {
-          throw new Error(`Status "${status}" is not a selectable destination (options: ${options.join(', ')})`);
-        }
-        setControlValue(select, status);
-        await settleUi(3);
-        return collectTicketDetailUiState();
-      }
-      case 'ticket_submit_comment': {
-        const comment = typeof payload.comment === 'string' ? payload.comment : '';
-        if (!comment) {
-          throw new Error('ticket_submit_comment requires comment');
-        }
-        const input = document.querySelector('[data-testid="ticket-comment-input"]');
-        if (!(input instanceof HTMLTextAreaElement)) {
-          throw new Error('Ticket comment input not found');
-        }
-        input.focus();
-        setControlValue(input, comment);
-        await settleUi(1);
-        clickTestId('ticket-add-comment');
-        await settleUi(3);
-        return collectTicketDetailUiState();
-      }
-      case 'ticket_edit_description': {
-        if (typeof payload.description !== 'string') {
-          throw new Error('ticket_edit_description requires description');
-        }
-        // Enter edit mode first if the textarea is not already showing.
-        if (!document.querySelector('[data-testid="ticket-description-input"]')) {
-          clickTestId('ticket-edit-description');
-          await settleUi(2);
-        }
-        const input = document.querySelector('[data-testid="ticket-description-input"]');
-        if (!(input instanceof HTMLTextAreaElement)) {
-          throw new Error('Ticket description input not found');
-        }
-        input.focus();
-        setControlValue(input, payload.description);
-        await settleUi(1);
-        clickTestId('ticket-save-description');
-        await settleUi(3);
-        return collectTicketDetailUiState();
-      }
-      case 'ticket_resume': {
-        clickTestId('ticket-resume');
-        await settleUi(2);
-        return { ok: true };
-      }
       // Automations panel (profile-level). Mutations drive the real rendered
-      // controls (checkbox/button clicks), same convention as the ticket_*
+      // controls (checkbox/button clicks), same convention as the garden_*
       // verbs above; automations_get_state is the read-only DOM snapshot.
       case 'automations_open_panel': {
         if (!openAutomationsPanel) {

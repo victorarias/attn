@@ -583,7 +583,7 @@ func (d *Daemon) spawnDelegatedRuntime(msg *protocol.DelegateMessage, sessionID,
 	// prompt both read it: a delegate must launch already knowing the seed it
 	// reports to and, when it was dispatched at a crown, its plot.
 	seedID, err := d.bindDelegationSeed(sessionID, strings.TrimSpace(msg.SourceSessionID),
-		brief, name, strings.TrimSpace(protocol.Deref(msg.Plot)))
+		brief, name, strings.TrimSpace(protocol.Deref(msg.Plot)), directory, agent)
 	if err != nil {
 		return err
 	}

@@ -159,7 +159,7 @@ func TestDelegationRecoveryRebindsTheSameSeed(t *testing.T) {
 	}
 	first, _ := d.gardenDispatchCrown(result.SessionID)
 
-	again, err := d.bindDelegationSeed(result.SessionID, sourceSessionID, "Migrate the store to X", "Store migration", "")
+	again, err := d.bindDelegationSeed(result.SessionID, sourceSessionID, "Migrate the store to X", "Store migration", "", "", "")
 	if err != nil {
 		t.Fatalf("re-bind: %v", err)
 	}
@@ -434,5 +434,60 @@ func awaitStatusHandled(t *testing.T, d *Daemon, msg *protocol.SetTicketStatusMe
 	defer client.Close()
 	if _, err := io.ReadAll(client); err != nil {
 		t.Fatalf("read the status handler to completion: %v", err)
+	}
+}
+
+// The app reads "which seed does this session report to" off the session it is
+// already rendering, and the answer is the dispatch record — not the seed's
+// tender, which a crown-dispatched delegation never is.
+func TestBroadcastSessionCarriesTheSeedItReportsTo(t *testing.T) {
+	d, backend, sourceSessionID := newGardenDelegationDaemon(t)
+	consumeDelegatedPrompt(t, backend)
+	result, err := d.delegate(&protocol.DelegateMessage{
+		Cmd:             protocol.CmdDelegate,
+		SourceSessionID: sourceSessionID,
+		Brief:           "Report on a seed",
+		Agent:           protocol.Ptr("codex"),
+	})
+	if err != nil {
+		t.Fatalf("delegate: %v", err)
+	}
+	seedID, bound := d.gardenDispatchCrown(result.SessionID)
+	if !bound {
+		t.Fatal("the delegation bound no seed")
+	}
+
+	delegated := d.sessionForBroadcast(d.store.Get(result.SessionID))
+	if protocol.Deref(delegated.SeedID) != seedID {
+		t.Fatalf("delegated session seed_id = %v, want %s", delegated.SeedID, seedID)
+	}
+	// The session that dispatched it reports to nothing, and says so by omission.
+	source := d.sessionForBroadcast(d.store.Get(sourceSessionID))
+	if source.SeedID != nil {
+		t.Fatalf("dispatching session seed_id = %v, want unset", source.SeedID)
+	}
+}
+
+// The map every broadcast decorates from is written through as dispatches land,
+// so a session dispatched after the map was built still names its seed.
+func TestSeedDecorationSeesADispatchRecordedAfterTheFirstBroadcast(t *testing.T) {
+	d, backend, sourceSessionID := newGardenDelegationDaemon(t)
+	// A broadcast before anything is dispatched builds the (empty) map.
+	if s := d.sessionForBroadcast(d.store.Get(sourceSessionID)); s.SeedID != nil {
+		t.Fatalf("seed_id = %v before any dispatch, want unset", s.SeedID)
+	}
+	consumeDelegatedPrompt(t, backend)
+	result, err := d.delegate(&protocol.DelegateMessage{
+		Cmd:             protocol.CmdDelegate,
+		SourceSessionID: sourceSessionID,
+		Brief:           "Report on a seed",
+		Agent:           protocol.Ptr("codex"),
+	})
+	if err != nil {
+		t.Fatalf("delegate: %v", err)
+	}
+	seedID, _ := d.gardenDispatchCrown(result.SessionID)
+	if got := d.sessionForBroadcast(d.store.Get(result.SessionID)); protocol.Deref(got.SeedID) != seedID {
+		t.Fatalf("seed_id = %v after dispatch, want %s", got.SeedID, seedID)
 	}
 }
