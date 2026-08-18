@@ -114,6 +114,16 @@ class RecordingDelegate implements RelayDelegate {
   }
 }
 
+// A driver that takes a report and never answers it — what a runtime being
+// replaced looks like from inside pi: the bytes are accepted, the process goes
+// away before it forwards them, and nothing on the wire says so.
+class StallingDelegate extends RecordingDelegate {
+  async suiteReportStop(params: unknown): Promise<void> {
+    this.calls.push({ method: relayMethods.reportStop, params });
+    await new Promise(() => {});
+  }
+}
+
 async function buildHarness(): Promise<{ relay: RelayServer; delegate: RecordingDelegate; socketPath: string }> {
   const socketPath = nextSocketPath();
   const delegate = new RecordingDelegate();
@@ -417,6 +427,68 @@ describe("AttnPiSuite: the driver was replaced under a live session", () => {
 
     suite.close();
     second.close();
+  });
+});
+
+describe("AttnPiSuite: a report the driver never took", () => {
+  test("re-declares the settle to the replacement driver", async () => {
+    const socketPath = nextSocketPath();
+    const stalling = new StallingDelegate();
+    const first = new RelayServer({ socketPath, delegate: stalling });
+    await first.listen();
+
+    const suite = new AttnPiSuite({ socketPath, token: "tok-x", piVersion: "0.80.10" });
+    const pi = new FakePi();
+    suite.register(pi);
+    const ctx = new FakeContext("native-x");
+    pi.fire("session_start", { type: "session_start", reason: "startup" }, ctx);
+
+    const messages: AgentMessageLike[] = [{ role: "assistant", content: [{ type: "text", text: "essay done" }] }];
+    pi.fire("agent_end", { type: "agent_end", messages }, ctx);
+    pi.fire("agent_settled", { type: "agent_settled" }, ctx);
+    await waitFor(() => stalling.calls.some((call) => call.method === relayMethods.reportStop));
+
+    // The driver dies holding the settle. Without the re-declaration attn would
+    // show this session working until its next run, minutes or hours later.
+    first.close();
+    const replacement = new RecordingDelegate();
+    const second = new RelayServer({ socketPath, delegate: replacement });
+    await second.listen();
+
+    await waitFor(() => replacement.calls.some((call) => call.method === relayMethods.reportStop), 5_000);
+    expect(replacement.calls[0]?.method).toBe(relayMethods.hello);
+    expect(replacement.calls.find((call) => call.method === relayMethods.reportStop)?.params).toEqual({
+      token: "tok-x",
+      assistant_text: "essay done",
+    });
+
+    suite.close();
+    second.close();
+  });
+
+  test("keeps trying a socket nothing is listening on yet, and lands the report when a driver appears", async () => {
+    const socketPath = nextSocketPath(); // nothing listening
+    const suite = new AttnPiSuite({ socketPath, token: "tok-y", piVersion: "0.80.10" });
+    const pi = new FakePi();
+    suite.register(pi);
+    const ctx = new FakeContext("native-y");
+    pi.fire("session_start", { type: "session_start", reason: "startup" }, ctx);
+    pi.fire("agent_start", { type: "agent_start" }, ctx);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    const delegate = new RecordingDelegate();
+    const relay = new RelayServer({ socketPath, delegate });
+    await relay.listen();
+
+    await waitFor(() => delegate.calls.some((call) => call.method === relayMethods.reportState), 5_000);
+    expect(delegate.calls[0]?.method).toBe(relayMethods.hello);
+    expect(delegate.calls.find((call) => call.method === relayMethods.reportState)?.params).toEqual({
+      token: "tok-y",
+      state: "working",
+    });
+
+    suite.close();
+    relay.close();
   });
 });
 

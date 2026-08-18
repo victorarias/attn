@@ -51,7 +51,7 @@ Neither break has a witness. The whole chain is silent by construction.
 
 ## Slice 1 — a pi session survives a daemon restart
 
-Four changes, one PR. Each is necessary; together they close the chain.
+Five changes, one PR. Each is necessary; together they close the chain.
 
 **The runtime exits when its daemon connection closes.** A plugin runtime
 whose daemon is gone has nothing left to do, and staying alive is what
@@ -80,7 +80,18 @@ the live pi context the factory rebound. A `close` also schedules a
 reconnect with backoff capped at 30 s rather than waiting for the next
 report, so a nudge to a quiet session lands. That loop runs only while
 disconnected and stops on connect; a dial at a missing socket is one
-ENOENT.
+ENOENT — and a dial that fails schedules the retry itself, because a
+failed dial emits no `close` and nothing else would ever try again.
+
+**A report the driver never took is retained.** Reconnecting is not enough
+on its own: a run that settles during the outage has exactly one report to
+make, and fire-and-forget throws it away. The client holds the newest
+un-acknowledged report — only the newest, because a report says what the
+session *is* — and the hello that follows the next connect flushes it.
+Measured on a live session: prompt at 21:08:12 (`working`), daemon stopped
+at 21:08:19, back at 21:09:19, and the settle made inside that minute
+applied as `idle` at 21:09:27. Without it the session sat at `working`
+until it was prompted again.
 
 **The driver adopts `active_runs`.** `initialize()` rebuilds
 `runsByToken` / `runsBySessionID` from what the daemon hands back, so a
@@ -115,7 +126,7 @@ it looks like the fix did not work.
 ### Verification
 
 - Live: a pi session working through a daemon restart, state tracking it on
-  both sides of the restart. Recording on the PR.
+  both sides of the restart, read back from `attn state explain`.
 - The orphan count and RSS before and after, as a receipt.
 - `driver.test.ts` for adoption: register returning runs, a report landing
   at `seq+1`, a missing `seq` declining the run.

@@ -15,8 +15,11 @@ change: >
   next one takes over, a live pi re-dials and announces itself again, and the
   replacement runtime adopts the sessions attn reports as still running --
   continuing each one's report ordering rather than starting a counter of its
-  own. A daemon that starts up also shuts down any plugin runtime a previous
-  one left behind, instead of leaving it running forever.
+  own. A session that finishes its work while no runtime is listening holds on
+  to what it was about to say and delivers it as soon as one is, so an agent
+  that settles during the restart still shows as done. A daemon that starts up
+  also shuts down any plugin runtime a previous one left behind, instead of
+  leaving it running forever.
 symptom: >
   A pi session showed as idle in attn while it was visibly working, usually
   after an attn update, an app restart, or any other daemon restart.

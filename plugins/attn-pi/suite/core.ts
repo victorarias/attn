@@ -65,6 +65,11 @@ type JSONRPCRequest = { jsonrpc: "2.0"; id: JSONRPCID; method: string; params?: 
 type JSONRPCResponse = { jsonrpc: "2.0"; id: JSONRPCID; result?: unknown; error?: { code: number; message: string } };
 type Pending = { resolve: (result: unknown) => void; reject: (error: Error) => void };
 
+// A state report waiting to be acknowledged. Only the newest one is kept: a
+// report says what the session IS, so an older one that never landed has
+// nothing left to add.
+type RetainedReport = { method: string; params: unknown; inFlight: boolean };
+
 // Generous: suite.report_stop's driver-side handler runs an LLM
 // classification before answering, which can take a while.
 const suiteRequestTimeoutMs = 60_000;
@@ -91,6 +96,9 @@ export class RelaySuiteClient {
   // every dial, and by announce() when the run's identity changed under a
   // connection that stayed up.
   private announced = false;
+  // The newest state report the driver has not acknowledged, re-sent once the
+  // channel is back. See report().
+  private retained: RetainedReport | undefined;
 
   constructor(
     private readonly socketPath: string,
@@ -114,11 +122,45 @@ export class RelaySuiteClient {
    */
   announce(params: unknown): void {
     this.ensureConnected()
-      .then((socket) => this.writeHello(socket, params))
+      .then((socket) => {
+        this.writeHello(socket, params);
+        const retained = this.retained;
+        if (retained && !retained.inFlight) void this.deliver(retained);
+      })
       .catch(() => {
-        // Same bargain as send(): a relay that will not take our hello is not
-        // pi's problem. The next report re-dials.
+        // ensureConnected already scheduled the next attempt.
       });
+  }
+
+  /**
+   * Declares this session's state, and keeps declaring it until the driver
+   * takes it. A report can be lost in ways nothing here can see — the driver
+   * process exits between accepting the bytes and forwarding them, which is
+   * what an attn daemon restart does to whatever was in flight — and a lost one
+   * leaves attn showing a state the session left minutes ago. Only the newest
+   * report is retained, because that is the only one that is still true.
+   */
+  report(method: string, params: unknown): void {
+    const entry: RetainedReport = { method, params, inFlight: false };
+    this.retained = entry;
+    void this.deliver(entry);
+  }
+
+  private async deliver(entry: RetainedReport): Promise<void> {
+    entry.inFlight = true;
+    try {
+      const socket = await this.ensureConnected();
+      this.sayHello(socket);
+      await this.request(socket, entry.method, entry.params);
+      // Only this entry is retired: a newer report may have taken the slot
+      // while this one was in flight, and it has not been acknowledged.
+      if (this.retained === entry) this.retained = undefined;
+    } catch {
+      // Stays retained. The socket's close schedules a reconnect, and the
+      // hello that follows flushes it.
+    } finally {
+      entry.inFlight = false;
+    }
   }
 
   /**
@@ -156,9 +198,18 @@ export class RelaySuiteClient {
   private ensureConnected(): Promise<Socket> {
     if (this.socket && !this.socket.destroyed) return Promise.resolve(this.socket);
     if (!this.connecting) {
-      this.connecting = this.dial().finally(() => {
-        this.connecting = undefined;
-      });
+      this.connecting = this.dial()
+        .catch((error: unknown) => {
+          // A dial that never connects emits no close, so this is the only
+          // place that can keep trying — and something has to: attn delivers
+          // messages over this channel, so a session with nothing to report
+          // still needs it back.
+          this.scheduleReconnect();
+          throw error;
+        })
+        .finally(() => {
+          this.connecting = undefined;
+        });
     }
     return this.connecting;
   }
@@ -400,7 +451,7 @@ export class AttnPiSuite {
 
     pi.on("agent_start", (_event, ctx) => {
       this.currentContext = ctx;
-      void relay.client.send(relayMethods.reportState, { token: relay.token, state: "working" });
+      relay.client.report(relayMethods.reportState, { token: relay.token, state: "working" });
     });
 
     pi.on("agent_end", (event, ctx) => {
@@ -412,7 +463,7 @@ export class AttnPiSuite {
       this.currentContext = ctx;
       const assistantText = this.cachedAssistantText;
       this.cachedAssistantText = "";
-      void relay.client.send(relayMethods.reportStop, { token: relay.token, assistant_text: assistantText });
+      relay.client.report(relayMethods.reportStop, { token: relay.token, assistant_text: assistantText });
     });
   }
 
