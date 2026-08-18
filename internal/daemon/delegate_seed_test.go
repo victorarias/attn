@@ -251,16 +251,26 @@ func TestStatusReportsLandOnTheBoundSeedsLog(t *testing.T) {
 	if log.NotesTotal != 2 {
 		t.Fatalf("the seed's log holds %d entries, want one per report", log.NotesTotal)
 	}
-	// Newest first, as every garden read hands the log over.
-	newest, older := log.Notes[0], log.Notes[1]
-	if !strings.Contains(newest.Body, "ready_for_review") || !strings.Contains(newest.Body, "PR #1 is up") {
-		t.Fatalf("newest note = %q, want the state and the comment", newest.Body)
-	}
-	if !strings.Contains(older.Body, "in_progress") || !strings.Contains(older.Body, "reading the store layer") {
-		t.Fatalf("older note = %q", older.Body)
-	}
-	if newest.AuthorSession != result.SessionID {
-		t.Fatalf("author = %q, want the reporting delegate", newest.AuthorSession)
+	// Both reports are on the log, each carrying its state and its comment. The
+	// pair is matched by content rather than by position: two writes inside one
+	// clock tick share a stamp, and the log's tiebreaker is the note id, so
+	// which of them reads as newest is not a property to assert on.
+	for _, want := range []struct{ state, comment string }{
+		{"in_progress", "reading the store layer"},
+		{"ready_for_review", "PR #1 is up"},
+	} {
+		found := false
+		for _, note := range log.Notes {
+			if strings.Contains(note.Body, want.state) && strings.Contains(note.Body, want.comment) {
+				found = true
+				if note.AuthorSession != result.SessionID {
+					t.Fatalf("author of the %s note = %q, want the reporting delegate", want.state, note.AuthorSession)
+				}
+			}
+		}
+		if !found {
+			t.Fatalf("no note reported %s with its comment; the log holds %+v", want.state, log.Notes)
+		}
 	}
 	// The column moved; the seed did not close. Harvesting stays deliberate.
 	seed, _, err := d.readSeed(seedID)
