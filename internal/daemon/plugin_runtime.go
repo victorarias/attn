@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/victorarias/attn/internal/plugins"
+	"github.com/victorarias/attn/internal/procreap"
 	"github.com/victorarias/attn/internal/store"
 	"github.com/victorarias/attn/internal/supervise"
 )
@@ -76,15 +77,18 @@ func (d *Daemon) ensurePluginSupervisor() *pluginSupervisor {
 			execPluginProcessLauncher{registryDir: plugins.RuntimeRegistryDir(filepath.Dir(d.socketPath))},
 			nil,
 			func(manifest pluginManifest, generation uint64) []string {
+				// ATTN_PLUGIN_DATA_ROOT is set for every entrypoint kind: where a
+				// plugin keeps its own state has nothing to do with how it was
+				// packaged, and a path that exists in the bundle but not in a
+				// checkout is absent from exactly the tests that would exercise it.
+				// The plugin creates the directory; the daemon only names it.
 				overrides := []string{
 					"ATTN_SOCKET_PATH=" + d.socketPath,
 					"ATTN_PLUGIN_NAME=" + manifest.Name,
 					"ATTN_PLUGIN_GENERATION=" + strconv.FormatUint(generation, 10),
 					"ATTN_PLUGIN_ENTRYPOINT_KIND=" + string(manifest.Plugin.Kind),
 					"ATTN_PLUGIN_ROOT=" + manifest.Dir,
-				}
-				if manifest.Plugin.Kind == plugins.EntrypointExecutable {
-					overrides = append(overrides, "ATTN_PLUGIN_DATA_ROOT="+pluginDataDirForSocket(d.socketPath, manifest.Name))
+					"ATTN_PLUGIN_DATA_ROOT=" + pluginDataDirForSocket(d.socketPath, manifest.Name),
 				}
 				return d.pluginCommandEnv(overrides...)
 			},
@@ -148,7 +152,45 @@ func pluginDataDirForSocket(socketPath, pluginName string) string {
 	return filepath.Join(filepath.Dir(socketPath), "plugin-data", pluginName)
 }
 
+// reapStrandedPluginRuntimes kills plugin runtimes a previous daemon left
+// behind. A runtime exits on its own when its daemon connection closes, so this
+// only catches the ones that could not — killed with SIGKILL, or wedged — and
+// the PID lock guarantees no live daemon owns them. It has to run before any
+// plugin starts: a stranded runtime still holds its relay socket open, and a
+// session already connected to one would keep reporting into a process that can
+// reach no daemon at all.
+//
+// Unlike profile clean, this daemon keeps its registry, so every record it just
+// acted on is retired. A process that survived SIGKILL keeps its record — that
+// one is still out there.
+func (d *Daemon) reapStrandedPluginRuntimes() {
+	results := plugins.ReapRuntimeProcesses(filepath.Dir(d.socketPath))
+	if len(results) == 0 {
+		return
+	}
+	counts := map[procreap.ReapOutcome]int{}
+	for _, result := range results {
+		counts[result.Outcome]++
+		if result.Outcome == procreap.ReapSurvived || result.Path == "" {
+			continue
+		}
+		if err := procreap.RemoveEntry(result.Path); err != nil {
+			d.logf("plugin runtime reap: retire %s: %v", result.Path, err)
+		}
+	}
+	d.logf("plugin runtime reap: entries=%d terminated=%d killed=%d already_gone=%d unidentified=%d survived=%d unreadable=%d",
+		len(results),
+		counts[procreap.ReapTerminated],
+		counts[procreap.ReapKilled],
+		counts[procreap.ReapAlreadyGone],
+		counts[procreap.ReapUnidentified],
+		counts[procreap.ReapSurvived],
+		counts[procreap.ReapUnreadable],
+	)
+}
+
 func (d *Daemon) startInstalledPlugins() {
+	d.reapStrandedPluginRuntimes()
 	catalog, issues := d.pluginCatalog()
 	d.logf("plugin discovery user_dir=%s bundled_dir=%s catalog=%d issues=%d", d.pluginDir, d.bundledPluginDir, len(catalog), len(issues))
 	for _, issue := range issues {

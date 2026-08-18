@@ -114,6 +114,16 @@ class RecordingDelegate implements RelayDelegate {
   }
 }
 
+// A driver that takes a report and never answers it — what a runtime being
+// replaced looks like from inside pi: the bytes are accepted, the process goes
+// away before it forwards them, and nothing on the wire says so.
+class StallingDelegate extends RecordingDelegate {
+  async suiteReportStop(params: unknown): Promise<void> {
+    this.calls.push({ method: relayMethods.reportStop, params });
+    await new Promise(() => {});
+  }
+}
+
 async function buildHarness(): Promise<{ relay: RelayServer; delegate: RecordingDelegate; socketPath: string }> {
   const socketPath = nextSocketPath();
   const delegate = new RecordingDelegate();
@@ -342,6 +352,143 @@ describe("AttnPiSuite: auto mode denials -> suite.report_denial", () => {
     }
     expect(unhandled).toBeUndefined();
     suite.close();
+  });
+});
+
+// The driver process is replaced whenever attn's daemon restarts, and the pi it
+// launched keeps running. The relay path is stable per profile precisely so the
+// suite can find the replacement; these cover it finding one.
+describe("AttnPiSuite: the driver was replaced under a live session", () => {
+  test("re-dials the stable path, names its run again, and reports land on the new driver", async () => {
+    const socketPath = nextSocketPath();
+    const first = new RelayServer({ socketPath, delegate: new RecordingDelegate() });
+    await first.listen();
+
+    const suite = new AttnPiSuite({ socketPath, token: "tok-r", piVersion: "0.80.10" });
+    const pi = new FakePi();
+    suite.register(pi);
+    const ctx = new FakeContext("native-r");
+    pi.fire("session_start", { type: "session_start", reason: "startup" }, ctx);
+    pi.fire("agent_start", { type: "agent_start" }, ctx);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    // The replacement driver: same path, new listener, and no memory of the
+    // connection the first one held.
+    first.close();
+    const replacement = new RecordingDelegate();
+    const second = new RelayServer({ socketPath, delegate: replacement });
+    await second.listen();
+
+    pi.fire("agent_start", { type: "agent_start" }, ctx);
+
+    await waitFor(() => helloCalls(replacement).length >= 1);
+    await waitFor(() => replacement.calls.some((call) => call.method === relayMethods.reportState));
+
+    // The hello comes first: a report that overtook it would be answered
+    // "unknown pi suite token" and dropped.
+    expect(replacement.calls[0]?.method).toBe(relayMethods.hello);
+    expect(helloCalls(replacement)[0]).toEqual({
+      token: "tok-r",
+      pi_session_id: "native-r",
+      pi_version: "0.80.10",
+      reason: "reconnect",
+    });
+
+    suite.close();
+    second.close();
+  });
+
+  test("reconnects without a report to send, so attn can deliver a message to a quiet session", async () => {
+    const socketPath = nextSocketPath();
+    const first = new RelayServer({ socketPath, delegate: new RecordingDelegate() });
+    await first.listen();
+
+    const suite = new AttnPiSuite({ socketPath, token: "tok-q", piVersion: "0.80.10" });
+    const pi = new FakePi();
+    suite.register(pi);
+    const ctx = new FakeContext("native-q");
+    pi.fire("session_start", { type: "session_start", reason: "startup" }, ctx);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    first.close();
+    const replacement = new RecordingDelegate();
+    const second = new RelayServer({ socketPath, delegate: replacement });
+    await second.listen();
+
+    // Nothing fires on pi's side: the session is sitting at its prompt. The
+    // reconnect is what gives the replacement driver a connection at all.
+    await waitFor(() => helloCalls(replacement).length >= 1, 5_000);
+    expect(helloCalls(replacement)[0]).toEqual({
+      token: "tok-q",
+      pi_session_id: "native-q",
+      pi_version: "0.80.10",
+      reason: "reconnect",
+    });
+
+    suite.close();
+    second.close();
+  });
+});
+
+describe("AttnPiSuite: a report the driver never took", () => {
+  test("re-declares the settle to the replacement driver", async () => {
+    const socketPath = nextSocketPath();
+    const stalling = new StallingDelegate();
+    const first = new RelayServer({ socketPath, delegate: stalling });
+    await first.listen();
+
+    const suite = new AttnPiSuite({ socketPath, token: "tok-x", piVersion: "0.80.10" });
+    const pi = new FakePi();
+    suite.register(pi);
+    const ctx = new FakeContext("native-x");
+    pi.fire("session_start", { type: "session_start", reason: "startup" }, ctx);
+
+    const messages: AgentMessageLike[] = [{ role: "assistant", content: [{ type: "text", text: "essay done" }] }];
+    pi.fire("agent_end", { type: "agent_end", messages }, ctx);
+    pi.fire("agent_settled", { type: "agent_settled" }, ctx);
+    await waitFor(() => stalling.calls.some((call) => call.method === relayMethods.reportStop));
+
+    // The driver dies holding the settle. Without the re-declaration attn would
+    // show this session working until its next run, minutes or hours later.
+    first.close();
+    const replacement = new RecordingDelegate();
+    const second = new RelayServer({ socketPath, delegate: replacement });
+    await second.listen();
+
+    await waitFor(() => replacement.calls.some((call) => call.method === relayMethods.reportStop), 5_000);
+    expect(replacement.calls[0]?.method).toBe(relayMethods.hello);
+    expect(replacement.calls.find((call) => call.method === relayMethods.reportStop)?.params).toEqual({
+      token: "tok-x",
+      assistant_text: "essay done",
+    });
+
+    suite.close();
+    second.close();
+  });
+
+  test("keeps trying a socket nothing is listening on yet, and lands the report when a driver appears", async () => {
+    const socketPath = nextSocketPath(); // nothing listening
+    const suite = new AttnPiSuite({ socketPath, token: "tok-y", piVersion: "0.80.10" });
+    const pi = new FakePi();
+    suite.register(pi);
+    const ctx = new FakeContext("native-y");
+    pi.fire("session_start", { type: "session_start", reason: "startup" }, ctx);
+    pi.fire("agent_start", { type: "agent_start" }, ctx);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    const delegate = new RecordingDelegate();
+    const relay = new RelayServer({ socketPath, delegate });
+    await relay.listen();
+
+    await waitFor(() => delegate.calls.some((call) => call.method === relayMethods.reportState), 5_000);
+    expect(delegate.calls[0]?.method).toBe(relayMethods.hello);
+    expect(delegate.calls.find((call) => call.method === relayMethods.reportState)?.params).toEqual({
+      token: "tok-y",
+      state: "working",
+    });
+
+    suite.close();
+    relay.close();
   });
 });
 

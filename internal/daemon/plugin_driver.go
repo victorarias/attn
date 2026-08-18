@@ -34,10 +34,17 @@ type pluginDriverRegisterResult struct {
 	ActiveRuns []activePluginRun `json:"active_runs,omitempty"`
 }
 
+// activePluginRun hands one live run back to a driver that has just
+// (re)registered. Seq is the run's report cursor, and a replacement driver
+// process cannot work without it: reports are ordered by a strictly-increasing
+// seq per run, so a driver that restarted its own counter has every report
+// discarded. It is sent as a plain number rather than omitempty so a driver can
+// tell "the cursor is zero" from "this daemon does not send cursors".
 type activePluginRun struct {
 	SessionID string          `json:"session_id"`
 	RunID     string          `json:"run_id"`
 	Metadata  json.RawMessage `json:"metadata,omitempty"`
+	Seq       uint64          `json:"seq"`
 }
 
 type pluginDriverSpawnParams struct {
@@ -249,7 +256,7 @@ func (d *Daemon) handlePluginDriverMethod(plugin *pluginConnection, msg jsonRPCM
 		active := d.store.ListAgentDriverRuns(plugin.name)
 		runs := make([]activePluginRun, 0, len(active))
 		for _, run := range active {
-			item := activePluginRun{SessionID: run.SessionID, RunID: run.RunID}
+			item := activePluginRun{SessionID: run.SessionID, RunID: run.RunID, Seq: run.Seq}
 			if json.Valid([]byte(run.Metadata)) {
 				item.Metadata = json.RawMessage(run.Metadata)
 			}

@@ -85,6 +85,12 @@ func TestPluginDriverRegister_ReturnsOnlyActiveRunsOwnedByPlugin(t *testing.T) {
 	if run.SessionID != "owned" || run.RunID != "run-owned" || string(run.Metadata) != `{"native_id":"abc"}` {
 		t.Fatalf("active run=%+v", run)
 	}
+	// A driver process that replaces the one that opened the run has to
+	// continue the run's report cursor; a fresh counter would report under a
+	// seq the store has already passed and every report would be discarded.
+	if run.Seq != 1 {
+		t.Fatalf("active run seq=%d, want the run's report cursor (1)", run.Seq)
+	}
 }
 
 func TestHandleSpawnSession_PluginDriverLaunchesReturnedCommand(t *testing.T) {

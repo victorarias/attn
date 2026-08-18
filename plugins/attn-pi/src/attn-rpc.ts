@@ -31,12 +31,20 @@ export class AttnRPCClient {
   private readonly pending = new Map<string, Pending>();
   private readonly handlers = new Map<string, RPCHandler>();
 
+  // Set by close(), so a deliberate teardown does not look like the daemon
+  // hanging up on us.
+  private closing = false;
+
   constructor(
     private readonly options: {
       socketPath: string;
       name: string;
       version: string;
       generation: number;
+      // Called once when the daemon hangs up on a connection this client did
+      // not close itself. A runtime whose daemon is gone can do nothing for
+      // anybody, so the caller's job here is to exit.
+      onDaemonDisconnect?: () => void;
     },
   ) {}
 
@@ -63,6 +71,7 @@ export class AttnRPCClient {
     socket.on("close", () => {
       this.socket = undefined;
       this.failPending(new Error("attn plugin socket closed"));
+      if (!this.closing) this.options.onDaemonDisconnect?.();
     });
     this.socket = socket;
 
@@ -81,6 +90,7 @@ export class AttnRPCClient {
   }
 
   close(): void {
+    this.closing = true;
     this.socket?.destroy();
     this.socket = undefined;
     this.failPending(new Error("attn plugin client closed"));

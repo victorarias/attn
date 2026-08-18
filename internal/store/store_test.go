@@ -188,12 +188,41 @@ func TestStore_ListAgentDriverRunsFiltersByOwnerAndIncludesMetadata(t *testing.T
 	if !s.ApplyAgentDriverMetadata("session-a", "run-a", 1, `{"native":"one"}`) {
 		t.Fatal("ApplyAgentDriverMetadata failed")
 	}
+	if !s.ApplyAgentDriverState("session-a", "run-a", 4, protocol.StateWorking) {
+		t.Fatal("ApplyAgentDriverState failed")
+	}
 
+	// Seq is the run's report cursor: a driver process that replaces the one
+	// that opened the run has to continue from it, or every report it makes is
+	// discarded as stale.
 	if got := s.ListAgentDriverRuns("attn-example"); !reflect.DeepEqual(got, []ActiveAgentDriverRun{
-		{SessionID: "session-a", RunID: "run-a", Metadata: `{"native":"one"}`},
+		{SessionID: "session-a", RunID: "run-a", Metadata: `{"native":"one"}`, Seq: 4},
 		{SessionID: "session-b", RunID: "run-b"},
 	}) {
 		t.Fatalf("ListAgentDriverRuns()=%+v", got)
+	}
+}
+
+// The daemon runs on SQLite, and a replacement driver reads its inherited
+// cursor from this list — so the persisted branch has to carry it too.
+func TestStore_ListAgentDriverRunsCarriesThePersistedReportCursor(t *testing.T) {
+	s, err := NewWithDB(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("NewWithDB: %v", err)
+	}
+	defer s.Close()
+
+	s.Add(&protocol.Session{ID: "session-a", Agent: "external"})
+	if !s.BeginAgentDriverRun("session-a", "attn-example", "run-a") {
+		t.Fatal("BeginAgentDriverRun failed")
+	}
+	if !s.ApplyAgentDriverState("session-a", "run-a", 7, protocol.StateWorking) {
+		t.Fatal("ApplyAgentDriverState failed")
+	}
+
+	got := s.ListAgentDriverRuns("attn-example")
+	if len(got) != 1 || got[0].RunID != "run-a" || got[0].Seq != 7 {
+		t.Fatalf("ListAgentDriverRuns()=%+v, want run-a at seq 7", got)
 	}
 }
 
