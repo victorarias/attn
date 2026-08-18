@@ -137,42 +137,72 @@ it looks like the fix did not work.
 
 **A stale declaration becomes `unknown`.** The `resolver_owned` veto has no
 timeout behind it, so a driver that goes quiet freezes the session forever.
-The daemon compares the last plugin report against the last PTY output for
-sessions whose state is driver-declared; when output has been flowing and
-no report has arrived for longer than the tripwire, it applies `unknown`
-with reason `plugin_driver_silent` and logs the limit, the gap and the
-session.
+The plan wanted to compare the last plugin report against the last PTY
+output; reading the code killed that rule twice over. The daemon never sees
+output for a session nobody is attached to (`forwardPTYStreamEvents`), and
+the worker poll asks for health rather than `InfoResult.LastSeq`, so the
+signal is not there to compare against. Even with it the rule
+false-positives: pi repaints its spinner all through a long run, so "output
+flowing, no report" describes a healthy agent working for an hour.
+
+What the daemon does have is the channel itself, and both ends of it know
+when it broke. So the tripwire is armed by an event on each side and
+disarmed by a word from the other:
+
+- **Daemon side.** A plugin connection dropping — and a plugin runtime
+  being started at daemon startup, since the runs outlive both — arms an
+  alarm per live run of that plugin. Any report about the run disarms it.
+  Word, not registration: a driver that registers, declines to adopt the
+  run and says nothing is exactly as blind as one that never came back. On
+  expiry the daemon applies `unknown` through a `pluginDriverSilent` cause,
+  logging the session, the plugin, the run, the state it withdrew and the
+  gap.
+- **Driver side.** A run whose relay connection is gone is a run the driver
+  cannot see. If no `suite.hello` lands within the tripwire, the driver
+  reports `unknown` for it — the same admission, made by the half that
+  learns first when pi itself is the one that died.
 
 `unknown` is the right answer and not a guess: `attention.OpensTurn`
 already treats it as the daemon admitting it cannot tell, and
 `BreaksSnooze` lets it through — which is exactly the six hours this bug
-cost. The next plugin report wins over it, so recovery is automatic.
+cost.
 
-The tripwire is a tripwire: pi reports on every `agent_start`, so the real
-gap between "output is flowing" and "a report arrived" is seconds. It gets
-measured on a live session before the number is written down, and set far
-past it.
+Coming back is the other half, and the next report is not enough on its
+own: a session that was quietly idle when the channel broke has nothing to
+report until someone prompts it, so it would sit at `unknown` for as long
+as it sits at its prompt. So every `suite.hello` carries `pi_state`, what
+pi says it is right now, and the driver forwards it with `only_if_unknown`
+— attn takes it when it has nothing and ignores it otherwise. A hello is
+news about the channel, not about the agent: applied unconditionally it
+would restamp `state_since` and re-open a settled turn every time the
+channel blinked.
 
-**Relay failures get logged.** Fire-and-forget stays — nothing may turn a
+Two minutes on each side, and it is a tripwire rather than a deadline. The
+slowest legitimate reconnect adds up to about 65 s — `supervise`'s 5 s
+disconnect grace, its restart backoff capped at 30 s, and the suite's own
+reconnect backoff capped at 30 s — against 8 s measured on a live session
+across a 60 s daemon outage, and ~1 s for an ordinary restart.
+
+**Relay failures get counted.** Fire-and-forget stays — nothing may turn a
 failed report into a thrown exception inside pi — but "never throws" was
-read as "tells no one". Every swallowed failure logs once per episode to
-the plugin log, keyed so a disconnected driver does not write a line per
-report.
-
-**The startup race stops lying.** At 19:47 the veto said `resolver_owned`
-when the run record was present and `seq=5`; the worker-info replay simply
-beat `driver.register` by a second, so `pluginDriverReportsState` was still
-false. The trace should name that window rather than blaming the resolver.
+read as "tells no one". The suite has no way to log: a stray write corrupts
+pi's TUI, and the one channel out is the one that just failed. So it counts
+what it could not hand over and the count rides the next `suite.hello` as
+`dropped_reports`, where the driver writes the line. A hello carries the
+field only when there is something to say.
 
 **pi reports `pending_approval`.** `parseRelayReportState` accepts only
 `"working"`, while the daemon's `validatePluginReportedState` has always
 accepted `working | waiting_input | pending_approval | idle | unknown`. The
-protocol was ready; pi never used it. pi's extension API gives the suite a
-blocking `tool_call` hook — auto mode already sits on it — and
-`ctx.ui.confirm`, which the auto-mode breaker already uses. Both are
-windows where pi is blocked on the user and attn says `working`, so no turn
-opens and no nudge fires. The suite reports `pending_approval` entering
-them and `working` on the way out.
+protocol was ready; pi never used it. The window is narrower than this plan
+first assumed, though: pi ships no permission system of its own, so the one
+place it blocks on the user is auto mode's breaker asking through
+`ctx.ui.confirm`. Until now attn said `working` there — no turn opened, no
+nudge fired, and a question with nobody looking at the pane simply waited.
+The suite declares `pending_approval` entering that window and `working` on
+the way out. Auto mode's classification inside `tool_call` blocks too, but
+on a model rather than on the user, and `working` is already the honest
+answer for it.
 
 **An interrupt is reported, not classified.** `_emitAgentSettled` runs in a
 `finally`, so ESC does settle correctly. But the suite then feeds the
@@ -185,12 +215,24 @@ driver reports `idle` without classifying.
 
 - Live: pi blocked on an auto-mode breaker confirm shows `pending_approval`
   and opens a turn; ESC settles to `idle` with no classifier call.
-- Live: a driver killed mid-session degrades the state to `unknown` inside
-  the tripwire and recovers on the next report.
-- `synctest` for the staleness gate — it asserts elapsed time and that
-  nothing fires while output is quiet.
+- Live: a plugin runtime killed under a working pi session degrades the
+  state to `unknown` inside the tripwire and recovers on the next report.
+- `synctest` for the daemon-side alarm — it asserts elapsed time, and that
+  nothing fires for a state no driver declares or for a run that relaunched.
+- `driver.test.ts` for the driver-side alarm, the forwarded
+  `pending_approval`, and an abort settling without `attn.classify_stop`.
+- `suite.test.ts` for the approval window, the carried abort, and the
+  dropped-report count reaching the next hello.
 
 ## Out of scope
+
+A freshly spawned pi session shows `working` until its first turn settles:
+the worker's live signal takes it out of `launching` and nothing declares
+what it actually is, which is a pi sitting at its prompt. The hello now
+carries that answer, so closing it is a one-line change — but "a session
+just launched" reads as `idle`, which owes a turn, and whether a session
+the user is looking at should owe one the moment it opens is a question
+about every agent, not about pi.
 
 The 134 stale relay socket files in `$TMPDIR` stop accumulating once the
 path is stable and the runtime exits cleanly; the existing ones are litter

@@ -472,6 +472,9 @@ func (d *Daemon) handlePluginConnection(conn net.Conn, reader *bufio.Reader, hel
 		// arming the timer after the new connection is already healthy.
 		d.ensurePluginSupervisor().NoteDisconnected(plugin.name, plugin.generation)
 		registry.unregister(plugin)
+		// Its runs outlive it. Until a driver speaks for them again, nothing
+		// moves their state.
+		d.armPluginDriverSilenceWatch(plugin.name)
 		plugin.closePending(io.EOF)
 		d.publishSettingsFact(FactPluginDisconnected, plugin.name)
 	}()

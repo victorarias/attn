@@ -65,9 +65,21 @@ driver contract itself lives in `internal/daemon/plugin_driver.go`.
   `message_delivery`, relays suite reports to the daemon (the per-run seq
   cursor lives driver-side), and forwards `driver.deliver_message` to the
   suite. Stop verdicts come from daemon-side classification
-  (`attn.classify_stop`); an empty settle (nothing said) reports `idle`
-  without classifying. Never add screen-scraping state detectors for pi, and
-  never fall back to PTY typing for message delivery.
+  (`attn.classify_stop`); an empty settle (nothing said) and one the user
+  interrupted (pi's `stopReason: "aborted"`) both report `idle` without
+  classifying — a classification costs seconds and money to answer a question
+  the session already knows the answer to. Never add screen-scraping state
+  detectors for pi, and never fall back to PTY typing for message delivery.
+- A declared state is only as current as the channel that declares it, so both
+  ends of the relay watch it. A run whose relay connection is gone is reported
+  `unknown` once `unbackedGraceMs` passes, and the daemon runs the mirror of
+  that alarm for a driver that stops speaking (`internal/daemon`'s
+  `pluginDriverSilenceWatch`). Coming back is the other half: every
+  `suite.hello` carries `pi_state`, and the driver forwards it with
+  `only_if_unknown` so attn takes it when it has nothing and ignores it
+  otherwise — a session that was quietly idle through an outage has nothing to
+  report until someone prompts it, and applying a hello unconditionally would
+  restamp `state_since` and re-open a settled turn on every reconnect.
 
 ## nisse, the headless agent
 
@@ -318,8 +330,15 @@ has to pass; see its README.
 - The relay client lives at module scope and survives session transitions;
   every factory re-run re-binds the current pi/ctx (stale ones throw on any
   use — `driver.deliver_message` answers `delivered: false` then).
-- `agent_end` caches the last assistant message's text; `agent_settled` has
-  no payload and ships the cache as `suite.report_stop`.
+- `agent_end` caches the last assistant message's text and whether pi stopped
+  because the user took the turn back; `agent_settled` has no payload and ships
+  the cache as `suite.report_stop`.
+- The suite cannot log: a stray write corrupts pi's TUI. What it could not hand
+  over is counted and the count rides the next hello as `dropped_reports`, for
+  the driver to write the line.
+- `reportApprovalWindow` is the one place pi is blocked on the user — auto
+  mode's breaker asking through `ctx.ui.confirm`. Classification inside
+  `tool_call` blocks on a model, not on the user, and stays `working`.
 - `suite/index.ts` imports pi's `VERSION` from
   `@earendil-works/pi-coding-agent`; pi resolves it as a virtual module at
   load time, so the bundle step must keep that import `--external`.

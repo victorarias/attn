@@ -81,6 +81,11 @@ type pluginReportStateParams struct {
 	RunID     string `json:"run_id"`
 	Seq       uint64 `json:"seq"`
 	State     string `json:"state"`
+	// OnlyIfUnknown is a driver answering the question the daemon asked by
+	// declaring `unknown`: this is what the agent says it is, use it if you
+	// still have nothing. Applied unconditionally it would restamp
+	// `state_since` and re-open a settled turn on every reconnect.
+	OnlyIfUnknown bool `json:"only_if_unknown,omitempty"`
 }
 
 type pluginReportStopParams struct {
@@ -322,6 +327,7 @@ func (d *Daemon) handlePluginDriverMethod(plugin *pluginConnection, msg jsonRPCM
 		if err := d.authorizePluginSessionReport(plugin, params.SessionID, params.RunID); err != nil {
 			return nil, true, err
 		}
+		d.notePluginDriverReport(params.SessionID)
 		if err := d.recordAutoModeDenial(params); err != nil {
 			return nil, true, err
 		}
@@ -399,7 +405,16 @@ func validatePluginReportCursor(runID string, seq uint64) error {
 }
 
 func (d *Daemon) applyPluginReportedState(params pluginReportStateParams) bool {
+	// Before the ordering check, not after: a report the cursor discards is still
+	// a driver speaking for this session, which is all the silence alarm asks.
+	d.notePluginDriverReport(params.SessionID)
 	state := strings.TrimSpace(params.State)
+	if params.OnlyIfUnknown {
+		if session := d.store.Get(params.SessionID); session == nil || session.State != protocol.SessionStateUnknown {
+			return false
+		}
+		d.logf("plugin driver restates session=%s run=%s as %s after unknown", params.SessionID, params.RunID, state)
+	}
 	if !d.applyState(sessionStateChange{
 		sessionID: params.SessionID,
 		state:     state,
@@ -435,6 +450,7 @@ func (d *Daemon) applyPluginReportedStop(params pluginReportStopParams) {
 }
 
 func (d *Daemon) applyPluginReportedMetadata(params pluginReportMetadataParams) bool {
+	d.notePluginDriverReport(params.SessionID)
 	if !d.store.ApplyAgentDriverMetadata(params.SessionID, params.RunID, params.Seq, string(params.Metadata)) {
 		d.logf("plugin metadata report discarded: session=%s run=%s seq=%d", params.SessionID, params.RunID, params.Seq)
 		return false

@@ -6,6 +6,7 @@ import type {
   RelayDeliverMessageParams,
   RelayDeliverMessageResult,
   RelayHelloParams,
+  RelayHelloState,
   RelayHelloResult,
   RelayReportDenialParams,
   RelayReportStateParams,
@@ -43,9 +44,20 @@ type RunState = {
   seq: number;
   metadata: PiMetadata;
   connection?: RelayConnection;
+  /** Pending "nobody is declaring this session's state" alarm; see markUnbacked. */
+  unbacked?: ReturnType<typeof setTimeout>;
 };
 
 const deliverMessageTimeoutMs = 10_000;
+
+// How long a run may go without a suite connected before this driver withdraws
+// its declaration. A tripwire, not a deadline: a live pi re-dials within a
+// second of the socket appearing, and the suite's own reconnect backoff is
+// capped at 30s (suite/core.ts), so nothing healthy is anywhere near this. What
+// it catches is a pi that outlived its suite — the extension crashed, or a run
+// adopted from attn whose session is long gone from pi's side — where the
+// alternative is attn showing a state nobody has refreshed since.
+const unbackedRunGraceMs = 120_000;
 
 const defaultRunCommand: RunCommand = async (argv) => {
   const child = Bun.spawn(argv, { stdout: "pipe", stderr: "pipe" });
@@ -67,18 +79,23 @@ export class PiDriver {
   private readonly runsByToken = new Map<string, RunState>();
   private readonly runsBySessionID = new Map<string, RunState>();
 
+  /** The shipped tripwire, shortened by tests that would otherwise wait it out. */
+  private readonly unbackedGraceMs: number;
+
   constructor(options: {
     rpc: AttnRPCClient;
     relay: RelayServer;
     suitePath: string;
     runCommand?: RunCommand;
     executable?: string;
+    unbackedGraceMs?: number;
   }) {
     this.rpc = options.rpc;
     this.relay = options.relay;
     this.suitePath = options.suitePath;
     this.runCommand = options.runCommand ?? defaultRunCommand;
     this.executable = options.executable?.trim() || process.env.ATTN_PI_EXECUTABLE?.trim() || "pi";
+    this.unbackedGraceMs = options.unbackedGraceMs ?? unbackedRunGraceMs;
   }
 
   async initialize(): Promise<void> {
@@ -160,6 +177,7 @@ export class PiDriver {
   async sessionClosed(params: SessionClosedParams): Promise<{ ok: true }> {
     const run = this.runsBySessionID.get(params.session_id);
     if (run) {
+      this.markBacked(run);
       this.runsBySessionID.delete(params.session_id);
       this.runsByToken.delete(run.token);
     }
@@ -172,11 +190,49 @@ export class PiDriver {
     const params = parseRelayHello(rawParams);
     const run = this.requireRunByToken(params.token);
     run.connection = connection;
+    this.markBacked(run);
+    if (params.dropped_reports !== undefined) {
+      // The only place a swallowed report is ever heard from. The suite counts
+      // them while it cannot reach anyone and hands the count over here.
+      console.error(
+        `attn-pi: session ${run.sessionID} could not deliver ${params.dropped_reports} state report(s) while the relay was down`,
+      );
+    }
+    connection.onClose(() => {
+      if (run.connection !== connection) return; // already replaced by a newer dial
+      run.connection = undefined;
+      console.error(
+        `attn-pi: relay connection for session ${run.sessionID} closed; nothing declares its state until a suite dials back`,
+      );
+      this.markUnbacked(run, "the pi suite disconnected");
+    });
     // Keep model/thinking pins; the suite is only authoritative for pi's own
     // native session id and version, which change across resume/fork/new.
     run.metadata = { ...run.metadata, pi_session_id: params.pi_session_id, pi_version: params.pi_version };
     await this.reportMetadata(run);
+    if (params.pi_state !== undefined) await this.restateAfterUnknown(run, params.pi_state);
     return { ok: true };
+  }
+
+  /**
+   * Hands attn what pi says it is, for attn to use only if it currently says
+   * `unknown` — the daemon, or this driver, having admitted it could not tell.
+   * A hello is news about the channel, not about the agent: declaring it would
+   * restart the clock on a session that has been idle for hours and re-open a
+   * turn the user already settled.
+   */
+  private async restateAfterUnknown(run: RunState, state: RelayHelloState): Promise<void> {
+    try {
+      await this.rpc.request("session.report_state", {
+        session_id: run.sessionID,
+        run_id: run.runID,
+        seq: this.nextSeq(run),
+        state,
+        only_if_unknown: true,
+      });
+    } catch (error) {
+      console.error(`attn-pi: could not restate session ${run.sessionID} as ${state}: ${String(error)}`);
+    }
   }
 
   async suiteReportState(rawParams: unknown): Promise<void> {
@@ -186,7 +242,7 @@ export class PiDriver {
       session_id: run.sessionID,
       run_id: run.runID,
       seq: this.nextSeq(run),
-      state: "working",
+      state: params.state,
     });
   }
 
@@ -200,9 +256,12 @@ export class PiDriver {
     // up front, the daemon's strictly-increasing cursor discards the stale
     // verdict instead of letting it overwrite live activity.
     const seq = this.nextSeq(run);
-    // Empty text means the agent settled without saying anything: there is
-    // nothing to await a response to, so skip the (up to ~30s) classifier call.
-    const verdict = text === "" ? "idle" : await this.classifyStop(run, text);
+    // Two ways to know the answer without asking. Empty text means the agent
+    // settled without saying anything, so there is nothing to await a response
+    // to; `aborted` means the user took the turn back, and they are hardly
+    // waiting on the half-written paragraph they interrupted. Either way, skip
+    // the (up to ~30s) classifier call.
+    const verdict = text === "" || params.aborted ? "idle" : await this.classifyStop(run, text);
     await this.rpc.request("session.report_stop", {
       session_id: run.sessionID,
       run_id: run.runID,
@@ -259,6 +318,10 @@ export class PiDriver {
     const run: RunState = { token: runID, sessionID, runID, seq: 0, metadata };
     this.runsByToken.set(run.token, run);
     this.runsBySessionID.set(sessionID, run);
+    // Armed from the launch: a pi that starts without the suite loading — a
+    // staging bug, a pi that refused the extension — would otherwise sit in
+    // whatever state attn last recorded, forever.
+    this.markUnbacked(run, "the pi suite has not connected since this run was launched");
     return run;
   }
 
@@ -299,6 +362,48 @@ export class PiDriver {
       };
       this.runsByToken.set(state.token, state);
       this.runsBySessionID.set(state.sessionID, state);
+      this.markUnbacked(state, "adopted from attn, waiting for its pi suite to re-dial");
+    }
+  }
+
+  /**
+   * Starts the grace for a run nothing is declaring state for. When it expires
+   * the driver says `unknown` — the honest answer, and the one attn treats as
+   * wanting the user, rather than leaving a stale declaration standing.
+   */
+  private markUnbacked(run: RunState, why: string): void {
+    this.markBacked(run);
+    const timer = setTimeout(() => {
+      run.unbacked = undefined;
+      void this.declareUnbacked(run, why);
+    }, this.unbackedGraceMs);
+    // Never a reason for this process to stay alive: the runtime exits with its
+    // daemon connection, and a pending alarm must not hold that up.
+    timer.unref?.();
+    run.unbacked = timer;
+  }
+
+  private markBacked(run: RunState): void {
+    if (run.unbacked === undefined) return;
+    clearTimeout(run.unbacked);
+    run.unbacked = undefined;
+  }
+
+  private async declareUnbacked(run: RunState, why: string): Promise<void> {
+    console.error(
+      `attn-pi: no pi suite for session ${run.sessionID} for ${this.unbackedGraceMs}ms (${why}); reporting unknown so attn stops showing a state nobody is refreshing`,
+    );
+    try {
+      await this.rpc.request("session.report_state", {
+        session_id: run.sessionID,
+        run_id: run.runID,
+        seq: this.nextSeq(run),
+        state: "unknown",
+      });
+    } catch (error) {
+      // attn is unreachable too, which its own silence watch will notice. One
+      // line so the two halves read together in the log.
+      console.error(`attn-pi: could not report unknown for session ${run.sessionID}: ${String(error)}`);
     }
   }
 
@@ -405,7 +510,21 @@ function parseRelayHello(value: unknown): RelayHelloParams {
   if (typeof piSessionID !== "string" || piSessionID.trim() === "") throw new Error("suite.hello is missing pi_session_id");
   if (typeof piVersion !== "string" || piVersion.trim() === "") throw new Error("suite.hello is missing pi_version");
   if (typeof reason !== "string") throw new Error("suite.hello is missing reason");
-  return { token: token.trim(), pi_session_id: piSessionID.trim(), pi_version: piVersion.trim(), reason };
+  const dropped = record.dropped_reports;
+  const piState = record.pi_state;
+  if (piState !== undefined && piState !== "idle" && piState !== "working" && piState !== "pending_approval") {
+    throw new Error(`suite.hello has unsupported pi_state ${String(piState)}`);
+  }
+  return {
+    token: token.trim(),
+    pi_session_id: piSessionID.trim(),
+    pi_version: piVersion.trim(),
+    reason,
+    // A suite too old to send it says nothing, which is not the same as zero;
+    // both read as "no complaint" here, and only a positive count is reported.
+    dropped_reports: typeof dropped === "number" && Number.isFinite(dropped) && dropped > 0 ? dropped : undefined,
+    pi_state: piState,
+  };
 }
 
 function parseRelayReportState(value: unknown): RelayReportStateParams {
@@ -413,10 +532,12 @@ function parseRelayReportState(value: unknown): RelayReportStateParams {
   const record = value as Record<string, unknown>;
   const token = record.token;
   if (typeof token !== "string" || token.trim() === "") throw new Error("suite.report_state is missing token");
-  if (record.state !== "working") {
-    throw new Error(`suite.report_state state must be "working", got ${JSON.stringify(record.state)}`);
+  if (record.state !== "working" && record.state !== "pending_approval") {
+    throw new Error(
+      `suite.report_state state must be "working" or "pending_approval", got ${JSON.stringify(record.state)}`,
+    );
   }
-  return { token: token.trim(), state: "working" };
+  return { token: token.trim(), state: record.state };
 }
 
 function parseRelayReportStop(value: unknown): RelayReportStopParams {
@@ -426,7 +547,9 @@ function parseRelayReportStop(value: unknown): RelayReportStopParams {
   const assistantText = record.assistant_text;
   if (typeof token !== "string" || token.trim() === "") throw new Error("suite.report_stop is missing token");
   if (typeof assistantText !== "string") throw new Error("suite.report_stop is missing assistant_text");
-  return { token: token.trim(), assistant_text: assistantText };
+  const aborted = record.aborted;
+  if (aborted !== undefined && typeof aborted !== "boolean") throw new Error("suite.report_stop aborted must be a boolean");
+  return { token: token.trim(), assistant_text: assistantText, aborted: aborted === true };
 }
 
 function parseRelayReportDenial(value: unknown): RelayReportDenialParams {

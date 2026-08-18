@@ -30,6 +30,7 @@ const autoMode = autoModeSource
       config: autoModeSource.config,
       notice: autoModeSource.problem,
       onDenial: (denial) => suite.reportDenial(denial),
+      onWaitingForUser: (waiting) => suite.reportApprovalWindow(waiting),
     })
   : undefined;
 

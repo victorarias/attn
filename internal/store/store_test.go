@@ -203,6 +203,32 @@ func TestStore_ListAgentDriverRunsFiltersByOwnerAndIncludesMetadata(t *testing.T
 	}
 }
 
+func TestStore_ListActiveAgentDriverRunsNamesTheOwnerOfEveryRun(t *testing.T) {
+	s, err := NewWithDB(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("NewWithDB: %v", err)
+	}
+	defer s.Close()
+
+	for _, sessionID := range []string{"session-a", "other"} {
+		s.Add(&protocol.Session{ID: sessionID, Agent: "external"})
+	}
+	if !s.BeginAgentDriverRun("session-a", "attn-example", "run-a") ||
+		!s.BeginAgentDriverRun("other", "other-plugin", "run-other") {
+		t.Fatal("BeginAgentDriverRun failed")
+	}
+
+	// Across plugins and with the owner named: the caller is the daemon arming
+	// its silence alarms at startup, when nothing has registered yet and a run
+	// whose plugin is gone is exactly the one that needs one.
+	if got := s.ListActiveAgentDriverRuns(); !reflect.DeepEqual(got, []ActiveAgentDriverRun{
+		{SessionID: "other", RunID: "run-other", PluginName: "other-plugin"},
+		{SessionID: "session-a", RunID: "run-a", PluginName: "attn-example"},
+	}) {
+		t.Fatalf("ListActiveAgentDriverRuns()=%+v", got)
+	}
+}
+
 // The daemon runs on SQLite, and a replacement driver reads its inherited
 // cursor from this list — so the persisted branch has to carry it too.
 func TestStore_ListAgentDriverRunsCarriesThePersistedReportCursor(t *testing.T) {
