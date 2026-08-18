@@ -15,6 +15,7 @@ import {
   type AutoModeDenial,
   type AutoModeExtensionAPILike,
 } from "./index";
+import type { DenialLedgerLike } from "./ledger";
 import { ModelClassifier, type ModelRegistryLike } from "./model-classifier";
 import { autoModeStatusKey, autoModeStatusText } from "./ui";
 import { UsageLedger } from "./usage";
@@ -38,6 +39,8 @@ export type AutoModePiLike = AutoModeExtensionAPILike & {
 
 export type AutoModeSetup = {
   config: AutoModeConfig;
+  /** The durable local record every blocked call is written to. */
+  ledger?: DenialLedgerLike;
   /**
    * Reported for every blocked call. The seam attn's own surfaces hang off;
    * bare pi leaves it unset.
@@ -69,6 +72,7 @@ export class AutoMode {
       config: setup.config,
       classifier: { classify: (request) => this.judge().classify(request) },
       isEnabled: () => this.enabled(),
+      ledger: setup.ledger,
       onDenial: setup.onDenial,
       onWaitingForUser: setup.onWaitingForUser,
       usageLedger: this.usage,

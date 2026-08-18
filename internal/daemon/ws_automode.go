@@ -38,6 +38,7 @@ func (d *Daemon) handleAutoModeGet(client *wsClient, msg *protocol.AutoModeGetMe
 		d.sendToClient(client, result)
 		return
 	}
+	d.reconcileAutoModeDenialLedger()
 	denials, err := d.store.ListAutoModeDenials(automodeDenialsDefaultLimit)
 	if err != nil {
 		result.Error = protocol.Ptr(err.Error())

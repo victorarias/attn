@@ -10,6 +10,7 @@ import { autoModeSystemPromptAddendum } from "./addendum";
 import type { Classifier } from "./classifier";
 import type { AutoModeConfig } from "./config";
 import { denialToolResult } from "./denial";
+import type { DenialLedgerLike } from "./ledger";
 import { describeCall, type ToolCall } from "./policy";
 import { AutoModeSession, type SessionDecision } from "./session";
 import {
@@ -108,6 +109,13 @@ export type AutoModeOptions = {
    * the context it needs.
    */
   isEnabled?: () => boolean;
+  /**
+   * The durable local record, written before anything is told about the
+   * denial. Reporting to attn is a mirror — a bare pi has no relay and a dead
+   * relay drops what it is handed — so this is what makes a denial readable
+   * later at all. Unset only in tests that are not about the record.
+   */
+  ledger?: DenialLedgerLike;
   /** Called for every blocked call, for the surfaces that report denials. */
   onDenial?: (denial: AutoModeDenial) => void;
   /**
@@ -196,6 +204,14 @@ export function createAutoMode(options: AutoModeOptions): (pi: AutoModeExtension
         rule: decision.rule,
         at: new Date().toISOString(),
       };
+      // The record first, the report second: the relay is allowed to lose a
+      // denial, the file is not. Neither can turn a denial into something else
+      // by failing — the block below stands whatever either of them does.
+      try {
+        options.ledger?.record(denial);
+      } catch (error) {
+        recordFailure(ctx, error);
+      }
       try {
         options.onDenial?.(denial);
       } catch (error) {
@@ -316,6 +332,16 @@ function messageText(message: MessageLike): string {
 function reportFailure(ctx: AutoModeContextLike, error: unknown): void {
   const message = error instanceof Error ? error.message : String(error);
   uiOf(ctx)?.notify(`auto mode could not report this denial to attn: ${message}`, "warning");
+}
+
+/**
+ * The durable record failed. Said louder than a lost report is, because it is
+ * the leg nothing else backs up: this denial happened and no surface outside
+ * this screen will ever know it did.
+ */
+function recordFailure(ctx: AutoModeContextLike, error: unknown): void {
+  const message = error instanceof Error ? error.message : String(error);
+  uiOf(ctx)?.notify(`auto mode could not write this denial to its local record: ${message}`, "error");
 }
 
 function failureReason(error: unknown): string {

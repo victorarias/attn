@@ -11,6 +11,7 @@
 // lives in ./core, which has no pi import so it can run under `bun test`.
 import { VERSION } from "@earendil-works/pi-coding-agent";
 import { AutoMode, type AutoModePiLike } from "../automode/mode";
+import { denialLedgerFor } from "../automode/ledger";
 import { attnAutoModeSource } from "../automode/source";
 import { AttnPiSuite, type ExtensionAPILike } from "./core";
 
@@ -22,13 +23,16 @@ const suite = new AttnPiSuite({
 
 // Auto mode exists only when attn sent a config. A bare pi that loads this
 // suite registers no command, no flag and no handlers for it, and behaves
-// exactly as it does without the file. Every denial rides the same relay the
-// rest of the suite reports on, so attn can notify and list it.
+// exactly as it does without the file. Every denial is written to the local
+// ledger first and then rides the relay the rest of the suite reports on: the
+// relay is what lets attn notify and list it live, the ledger is what keeps it
+// when the relay is not there to carry it.
 const autoModeSource = attnAutoModeSource(process.env);
 const autoMode = autoModeSource
   ? new AutoMode({
       config: autoModeSource.config,
       notice: autoModeSource.problem,
+      ledger: denialLedgerFor(process.env),
       onDenial: (denial) => suite.reportDenial(denial),
       onWaitingForUser: (waiting) => suite.reportApprovalWindow(waiting),
     })

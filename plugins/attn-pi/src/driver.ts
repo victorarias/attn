@@ -143,7 +143,7 @@ export class PiDriver {
     return {
       argv: this.argvFor(availability.executable, metadata, params.initial_prompt, suitePath),
       cwd: params.cwd,
-      env: this.envFor(run.token, params.auto_mode),
+      env: this.envFor(run.token, params.auto_mode, run.sessionID),
     };
   }
 
@@ -170,7 +170,7 @@ export class PiDriver {
     return {
       argv: this.argvFor(availability.executable, metadata, undefined, suitePath),
       cwd: params.cwd,
-      env: this.envFor(run.token, params.auto_mode),
+      env: this.envFor(run.token, params.auto_mode, run.sessionID),
     };
   }
 
@@ -429,9 +429,18 @@ export class PiDriver {
   // entries are multi-line text, and argv is world-readable. The JSON is exactly
   // what automode/config.ts's loadAutoModeConfig parses, so the session side
   // reads it without translating. Absent when attn sent none.
-  private envFor(token: string, autoMode: unknown): Record<string, string> {
+  private envFor(token: string, autoMode: unknown, sessionID: string): Record<string, string> {
     const env: Record<string, string> = { ATTN_PI_SUITE_SOCKET: this.relay.socketPath, ATTN_PI_TOKEN: token };
-    if (autoMode !== undefined && autoMode !== null) env.ATTN_PI_AUTOMODE_CONFIG = JSON.stringify(autoMode);
+    if (autoMode !== undefined && autoMode !== null) {
+      env.ATTN_PI_AUTOMODE_CONFIG = JSON.stringify(autoMode);
+      // Where auto mode writes its durable denial record. The daemon names the
+      // file so it sits in the profile's own data dir, beside the daemon that
+      // reads it back — including on a remote host, where the driver runs next
+      // to the remote daemon rather than next to the user.
+      const ledger = process.env.ATTN_AUTOMODE_DENIAL_LOG?.trim();
+      if (ledger) env.ATTN_PI_AUTOMODE_DENIAL_LOG = ledger;
+      env.ATTN_PI_SESSION_ID = sessionID;
+    }
     return env;
   }
 

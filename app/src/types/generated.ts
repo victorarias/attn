@@ -1429,7 +1429,8 @@ export enum AutoModeDenialsMessageCmd {
 }
 
 export interface AutoModeDenialsResult {
-    denials: DenialElement[];
+    denials:      DenialElement[];
+    ledger_note?: string;
     [property: string]: any;
 }
 
@@ -5999,7 +6000,8 @@ export interface AppWatchResultObject {
 }
 
 export interface AutomodeDenialsResult {
-    denials: DenialElement[];
+    denials:      DenialElement[];
+    ledger_note?: string;
     [property: string]: any;
 }
 
@@ -14001,6 +14003,7 @@ const typeMap: any = {
     ], "any"),
     "AutoModeDenialsResult": o([
         { json: "denials", js: "denials", typ: a(r("DenialElement")) },
+        { json: "ledger_note", js: "ledger_note", typ: u(undefined, "") },
     ], "any"),
     "DenialElement": o([
         { json: "created_at", js: "created_at", typ: "" },
@@ -16773,6 +16776,7 @@ const typeMap: any = {
     ], "any"),
     "AutomodeDenialsResult": o([
         { json: "denials", js: "denials", typ: a(r("DenialElement")) },
+        { json: "ledger_note", js: "ledger_note", typ: u(undefined, "") },
     ], "any"),
     "AutomodeEnvResult": o([
         { json: "environment", js: "environment", typ: a("") },
