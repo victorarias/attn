@@ -64,6 +64,7 @@ func stopDaemonBackground(t *testing.T, d *Daemon) {
 		d.stopSnoozeTimers()
 		d.stopNotebookWatcher()
 		d.stopFsWatchers()
+		d.pluginDriverSilence().stop()
 	})
 }
 

@@ -162,7 +162,10 @@ func pluginDataDirForSocket(socketPath, pluginName string) string {
 //
 // Unlike profile clean, this daemon keeps its registry, so every record it just
 // acted on is retired. A process that survived SIGKILL keeps its record — that
-// one is still out there.
+// one is still out there. An unreadable record is retired too, though nothing
+// was acted on: it names no pid anyone can signal, so keeping it would only
+// re-report the same undecodable file at every startup for the life of the
+// profile — which is the growth this retirement exists to stop.
 func (d *Daemon) reapStrandedPluginRuntimes() {
 	results := plugins.ReapRuntimeProcesses(filepath.Dir(d.socketPath))
 	if len(results) == 0 {
@@ -196,6 +199,11 @@ func (d *Daemon) startInstalledPlugins() {
 	for _, issue := range issues {
 		d.logf("plugin manifest skipped: %v", issue)
 	}
+	// Before any start, and over the runs rather than the catalog: at this point
+	// every run in the store is spoken for by nobody, and the ones whose plugin
+	// is missing from the catalog entirely are the ones nothing else will ever
+	// arm — a removed plugin, or a manifest that stopped loading.
+	d.armPluginDriverSilenceWatchForEveryRun()
 	for _, item := range catalog {
 		if !item.Installed {
 			continue

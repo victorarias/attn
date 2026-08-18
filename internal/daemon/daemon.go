@@ -293,6 +293,13 @@ type Daemon struct {
 	// long enough to publish.
 	sessionDwellOnce sync.Once
 	sessionDwell     *dwellGate
+	// pluginDriverSilenceWatch holds the alarm per session whose driver has gone
+	// away, so a declaration nobody is refreshing becomes `unknown` instead of
+	// staying frozen. Empty while every driver is connected.
+	pluginDriverSilenceOnce  sync.Once
+	pluginDriverSilenceWatch *pluginDriverSilenceWatch
+	// Tests set this to a short grace; zero means the shipped tripwire.
+	pluginDriverSilenceGraceOverride time.Duration
 	// sessionStateReason is the resolver clause behind each session's current
 	// state, carried to clients beside the state itself.
 	sessionStateReasonOnce     sync.Once
@@ -1941,6 +1948,7 @@ func (d *Daemon) Stop() {
 	d.stopAppRuntime()
 	d.stopAllTranscriptWatchers()
 	d.stopNudgeCountdowns()
+	d.pluginDriverSilence().stop()
 	d.stopAutoSettleTimers()
 	d.stopSnoozeTimers()
 	if d.ptyBackend != nil {
@@ -2225,6 +2233,7 @@ func (d *Daemon) dropSessionRecord(sessionID string) {
 	d.clearAutoSettleState(sessionID)
 	d.clearSnoozeState(sessionID)
 	d.clearPTYWriteFence(sessionID)
+	d.forgetPluginDriverSilenceWatch(sessionID)
 	d.store.Remove(sessionID)
 	// After the row is gone, not before: recordStateObservation gates on the row,
 	// so forgetting first would leave a window where a concurrent observation
@@ -2256,7 +2265,8 @@ func (d *Daemon) handlePTYState(sessionID string, obs pty.Observation) {
 		d.traceStateVeto(sessionID, origin, state, "session_not_found")
 		return
 	}
-	if run := d.store.GetAgentDriverRun(sessionID); run.RunID != "" && d.pluginDriverReportsState(session.Agent) {
+	driverRun := d.store.GetAgentDriverRun(sessionID)
+	if driverRun.RunID != "" && d.pluginDriverReportsState(session.Agent) {
 		// External drivers own state through sequenced session.report_* calls.
 		d.traceStateVeto(sessionID, origin, state, "plugin_driver_owns_state")
 		return
@@ -2274,7 +2284,15 @@ func (d *Daemon) handlePTYState(sessionID string, obs pty.Observation) {
 		// A shell is the same story from the other end: it spawns `idle` and the
 		// resolver owns it from there on its foreground heartbeat, so no
 		// worker-info claim was ever wanted for one.
-		d.traceStateVeto(sessionID, origin, state, "resolver_owned")
+		reason := "resolver_owned"
+		if driverRun.RunID != "" {
+			// The run record outlives the driver process, so on a daemon restart
+			// this replay routinely beats driver.register by about a second. The
+			// claim is vetoed either way; naming the window keeps the trace from
+			// blaming the resolver for a race it did not lose.
+			reason = "plugin_driver_not_registered"
+		}
+		d.traceStateVeto(sessionID, origin, state, reason)
 		return
 	}
 	agent := session.Agent

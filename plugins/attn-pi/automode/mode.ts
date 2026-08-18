@@ -43,6 +43,11 @@ export type AutoModeSetup = {
    * bare pi leaves it unset.
    */
   onDenial?: (denial: AutoModeDenial) => void;
+  /**
+   * True while the breaker's question waits on the user, false once answered.
+   * attn's suite declares `pending_approval` from it; bare pi leaves it unset.
+   */
+  onWaitingForUser?: (waiting: boolean) => void;
   /** Said once, at the first session start that has a UI. A broken config is the caller. */
   notice?: string;
 };
@@ -65,6 +70,7 @@ export class AutoMode {
       classifier: { classify: (request) => this.judge().classify(request) },
       isEnabled: () => this.enabled(),
       onDenial: setup.onDenial,
+      onWaitingForUser: setup.onWaitingForUser,
       usageLedger: this.usage,
     });
   }

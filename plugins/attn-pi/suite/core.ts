@@ -9,6 +9,7 @@ import {
   relayMethods,
   type RelayDeliverMessageParams,
   type RelayDeliverMessageResult,
+  type RelayHelloState,
 } from "../src/relay-protocol";
 
 // ---------------------------------------------------------------------------
@@ -33,7 +34,10 @@ export type AgentSettledEvent = { type: "agent_settled" };
 // Narrowed from pi-ai's (TextContent | ThinkingContent | ToolCall)[]: only
 // the "type" discriminant and (for text blocks) "text" matter here.
 export type AgentMessageContentBlock = { type: string; text?: string };
-export type AgentMessageLike = { role: string; content: AgentMessageContentBlock[] };
+// stopReason is pi-ai's StopReason ("pending" | "stop" | "length" | "toolUse" |
+// "error" | "aborted"); only "aborted" is read here, and only from the last
+// assistant message.
+export type AgentMessageLike = { role: string; content: AgentMessageContentBlock[]; stopReason?: string };
 export type AgentEndEvent = { type: "agent_end"; messages: AgentMessageLike[] };
 
 export type SessionManagerLike = { getSessionId(): string };
@@ -99,6 +103,11 @@ export class RelaySuiteClient {
   // The newest state report the driver has not acknowledged, re-sent once the
   // channel is back. See report().
   private retained: RetainedReport | undefined;
+  // Reports this client could not hand over since the last hello. Nothing here
+  // can log — a stray write corrupts pi's TUI, and the one channel out is the
+  // one that just failed — so the count rides the next hello and the driver
+  // logs it. Without it a broken channel leaves no trace anywhere.
+  private dropped = 0;
 
   constructor(
     private readonly socketPath: string,
@@ -158,6 +167,7 @@ export class RelaySuiteClient {
     } catch {
       // Stays retained. The socket's close schedules a reconnect, and the
       // hello that follows flushes it.
+      this.dropped += 1;
     } finally {
       entry.inFlight = false;
     }
@@ -179,7 +189,9 @@ export class RelaySuiteClient {
       this.sayHello(socket);
       await this.request(socket, method, params);
     } catch {
-      // Swallowed by design; see the doc comment above.
+      // Swallowed by design; see the doc comment above. Counted, though: the
+      // next hello carries how many went nowhere.
+      this.dropped += 1;
     }
   }
 
@@ -279,7 +291,15 @@ export class RelaySuiteClient {
    */
   private writeHello(socket: Socket, params: unknown): void {
     this.announced = true;
-    this.request(socket, relayMethods.hello, params).catch(() => {});
+    const dropped = this.dropped;
+    this.dropped = 0;
+    // Only when there is something to say: a zero on every hello is a field the
+    // driver has to read to learn nothing.
+    const withCount =
+      dropped > 0 && params !== null && typeof params === "object"
+        ? { ...(params as Record<string, unknown>), dropped_reports: dropped }
+        : params;
+    this.request(socket, relayMethods.hello, withCount).catch(() => {});
   }
 
   private request(socket: Socket, method: string, params: unknown): Promise<unknown> {
@@ -396,6 +416,13 @@ export class AttnPiSuite {
   // agent_end caches the last assistant message's text; agent_settled has no
   // payload of its own, so this is the only way to get text to suite.report_stop.
   private cachedAssistantText = "";
+  // ...and whether that message ended because the user took the turn back. pi
+  // knows; without carrying it, attn pays a classifier to guess at a paragraph
+  // the user interrupted mid-sentence.
+  private cachedAborted = false;
+  // Whether this session is currently blocked on a question for the user, so
+  // the pair of reports around one window is never sent twice.
+  private approvalOpen = false;
 
   constructor(env: SuiteEnv) {
     this.piVersion = env.piVersion;
@@ -424,7 +451,18 @@ export class AttnPiSuite {
       pi_session_id: ctx.sessionManager.getSessionId(),
       pi_version: this.piVersion,
       reason,
+      pi_state: this.currentState(ctx),
     };
+  }
+
+  /**
+   * What pi is right now, for the hello to carry. attn uses it only when it has
+   * nothing — the recovery path out of `unknown` — so this answers "what is
+   * true here", not "something happened".
+   */
+  private currentState(ctx: ExtensionContextLike): RelayHelloState {
+    if (this.approvalOpen) return "pending_approval";
+    return ctx.isIdle() ? "idle" : "working";
   }
 
   /**
@@ -456,14 +494,43 @@ export class AttnPiSuite {
 
     pi.on("agent_end", (event, ctx) => {
       this.currentContext = ctx;
-      this.cachedAssistantText = lastAssistantText(event.messages);
+      const last = lastAssistantMessage(event.messages);
+      this.cachedAssistantText = last ? assistantText(last) : "";
+      this.cachedAborted = last?.stopReason === "aborted";
     });
 
     pi.on("agent_settled", (_event, ctx) => {
       this.currentContext = ctx;
-      const assistantText = this.cachedAssistantText;
+      const text = this.cachedAssistantText;
+      const aborted = this.cachedAborted;
       this.cachedAssistantText = "";
-      relay.client.report(relayMethods.reportStop, { token: relay.token, assistant_text: assistantText });
+      this.cachedAborted = false;
+      // The approval window cannot outlive the run that opened it: pi resolves
+      // a pending confirm before it settles, and a session left declaring
+      // `pending_approval` after settling would wait for an answer to a
+      // question nobody can see any more.
+      this.approvalOpen = false;
+      relay.client.report(relayMethods.reportStop, { token: relay.token, assistant_text: text, aborted });
+    });
+  }
+
+  /**
+   * Declares the session blocked on the user, and working again when it is not.
+   * Auto mode's breaker is the one window today: it asks through pi's own
+   * confirm dialog, and until this the session went on reporting `working` — so
+   * no turn opened, no nudge fired, and a question with nobody looking at the
+   * pane simply waited.
+   *
+   * Idempotent by design: the breaker asks once per episode, but nothing here
+   * should depend on that.
+   */
+  reportApprovalWindow(open: boolean): void {
+    const relay = this.relay;
+    if (!relay || this.approvalOpen === open) return;
+    this.approvalOpen = open;
+    relay.client.report(relayMethods.reportState, {
+      token: relay.token,
+      state: open ? "pending_approval" : "working",
     });
   }
 
@@ -509,14 +576,17 @@ export class AttnPiSuite {
   };
 }
 
-function lastAssistantText(messages: AgentMessageLike[]): string {
+function lastAssistantMessage(messages: AgentMessageLike[]): AgentMessageLike | undefined {
   for (let i = messages.length - 1; i >= 0; i--) {
     const message = messages[i];
-    if (message?.role !== "assistant") continue;
-    return message.content
-      .filter((block) => block.type === "text" && typeof block.text === "string")
-      .map((block) => block.text)
-      .join("\n");
+    if (message?.role === "assistant") return message;
   }
-  return "";
+  return undefined;
+}
+
+function assistantText(message: AgentMessageLike): string {
+  return message.content
+    .filter((block) => block.type === "text" && typeof block.text === "string")
+    .map((block) => block.text)
+    .join("\n");
 }

@@ -42,7 +42,15 @@ type startupRecovery struct{}
 // now and its whole picture of "can I type here?" comes off the state.
 type hostExitRecovery struct{}
 
+// pluginDriverSilent is the daemon withdrawing a declaration whose driver has
+// stopped speaking for it. It commits through UpdateState rather than the run
+// cursor on purpose: the daemon is not reporting on the driver's behalf, and
+// advancing the cursor would make the driver's own next report — at its N+1 —
+// the one that gets discarded.
+type pluginDriverSilent struct{}
+
 func (liveSignal) isSessionStateCause()          {}
+func (pluginDriverSilent) isSessionStateCause()  {}
 func (resolverObservation) isSessionStateCause() {}
 func (pluginReport) isSessionStateCause()        {}
 func (startupRecovery) isSessionStateCause()     {}
@@ -85,6 +93,9 @@ func stateEffectProfileFor(cause sessionStateCause) (stateEffectProfile, bool) {
 		return stateEffectProfile{}, true
 	case hostExitRecovery:
 		return stateEffectProfile{syncNudge: true, broadcast: true}, true
+	case pluginDriverSilent:
+		// No touch: nothing was seen from the session, which is the whole point.
+		return stateEffectProfile{syncNudge: true, broadcast: true}, true
 	default:
 		return stateEffectProfile{}, false
 	}
@@ -102,6 +113,8 @@ func sessionStateCauseName(cause sessionStateCause) string {
 		return "startup_recovery"
 	case hostExitRecovery:
 		return "host_exit_recovery"
+	case pluginDriverSilent:
+		return "plugin_driver_silent"
 	default:
 		return "unknown"
 	}
@@ -182,7 +195,7 @@ func (d *Daemon) applyState(change sessionStateChange) bool {
 
 func (d *Daemon) commitSessionState(change sessionStateChange) bool {
 	switch cause := change.cause.(type) {
-	case liveSignal, startupRecovery, resolverObservation, hostExitRecovery:
+	case liveSignal, startupRecovery, resolverObservation, hostExitRecovery, pluginDriverSilent:
 		return d.store.UpdateState(change.sessionID, change.state)
 	case pluginReport:
 		return d.store.ApplyAgentDriverState(change.sessionID, cause.runID, cause.seq, change.state)
