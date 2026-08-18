@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/victorarias/attn/internal/automode"
 	"github.com/victorarias/attn/internal/plugins"
 	"github.com/victorarias/attn/internal/procreap"
 	"github.com/victorarias/attn/internal/store"
@@ -298,6 +299,10 @@ func (d *Daemon) startInstalledPlugin(manifest pluginManifest) error {
 func (d *Daemon) pluginCommandEnv(extra ...string) []string {
 	env := append([]string(nil), os.Environ()...)
 	env = mergePluginEnvironment(env, d.cachedLoginShellEnv())
+	// Where a driver's agent writes its durable auto-mode denial record. The
+	// daemon names it because only the daemon knows which profile's data dir it
+	// is serving, and it is the same file reconcileAutoModeDenialLedger reads.
+	env = mergePluginEnvironment(env, []string{automode.DenialLedgerEnvVar + "=" + autoModeDenialLedgerPath()})
 	env = mergePluginEnvironment(env, extra)
 	return env
 }

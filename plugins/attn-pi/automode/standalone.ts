@@ -9,11 +9,18 @@
 // the user's `/auto` survives every session transition in this process, and
 // `register` re-binds it to each factory run.
 import { readFileSync } from "node:fs";
+import { denialLedgerFor } from "./ledger";
 import { AutoMode, type AutoModePiLike } from "./mode";
 import { standaloneAutoModeSource } from "./source";
 
 const source = standaloneAutoModeSource(process.env, readConfigFile);
-const autoMode = new AutoMode({ config: source.config, notice: source.problem });
+const autoMode = new AutoMode({
+  config: source.config,
+  notice: source.problem,
+  // Bare pi has no relay to report a denial over, so the ledger is the only
+  // record one leaves at all.
+  ledger: denialLedgerFor(process.env),
+});
 
 export default function attnAutoMode(pi: AutoModePiLike): void {
   autoMode.register(pi);

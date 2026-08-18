@@ -5263,6 +5263,11 @@ model AutoModeDenialsMessage {
 
 model AutoModeDenialsResult {
   "denials": AutoModeDenialInfo[];
+  // What the session-side denial ledger says it lost — records dropped when it
+  // rotated, lines it could not read. Empty when it lost nothing, which is the
+  // ordinary case. A feed that clipped and did not say so reads as a whole
+  // episode.
+  "ledger_note"?: string;
 }
 
 // The app's read: config plus the pending proposals its settings section

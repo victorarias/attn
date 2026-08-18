@@ -19,7 +19,11 @@ export const protectedDirectories: readonly string[] = [
   ".aws",
 ];
 
-/** File names that are protected wherever they appear. */
+/**
+ * File names that are protected wherever they appear. Last-segment names
+ * beginning `attn-automode` are protected by the same rule (see
+ * protectedSegment): auto mode's config and its denial ledger.
+ */
 export const protectedFiles: readonly string[] = [
   ".bashrc",
   ".bash_profile",
@@ -65,6 +69,11 @@ function protectedSegment(resolved: string): string | undefined {
     if (protectedDirectories.includes(name)) return segment;
     if (last && protectedFiles.includes(name)) return segment;
     if (last && name.startsWith(".env")) return segment;
+    // Auto mode's own files — its config and its denial ledger, wherever the
+    // pi agent dir or attn's data dir puts them. A session that can edit its
+    // permission system does not have one, and a session that can edit the
+    // record of what it was refused leaves no record.
+    if (last && name.startsWith("attn-automode")) return segment;
   }
   return undefined;
 }

@@ -124,6 +124,26 @@ describe("PiDriver", () => {
     expect(JSON.parse(withConfig.env?.ATTN_PI_AUTOMODE_CONFIG ?? "null")).toEqual(config);
   });
 
+  test("a session under auto mode is told where to write its denial record, and which session it is", async () => {
+    const rpc = new FakeRPC();
+    const driver = newDriver({ rpc, runCommand: fakeRunCommand(), executable: "pi" });
+    const previous = process.env.ATTN_AUTOMODE_DENIAL_LOG;
+    process.env.ATTN_AUTOMODE_DENIAL_LOG = "/data/attn-dev/attn-automode-denials.jsonl";
+    try {
+      const withConfig = await driver.spawn(params({ auto_mode: { enabled_default: true } }));
+      expect(withConfig.env?.ATTN_PI_AUTOMODE_DENIAL_LOG).toBe("/data/attn-dev/attn-automode-denials.jsonl");
+      expect(withConfig.env?.ATTN_PI_SESSION_ID).toBe("session-1");
+
+      // No auto mode, nothing to record: the session is told neither.
+      const bare = await driver.spawn(params({ session_id: "session-3", run_id: "run-3" }));
+      expect(bare.env?.ATTN_PI_AUTOMODE_DENIAL_LOG).toBeUndefined();
+      expect(bare.env?.ATTN_PI_SESSION_ID).toBeUndefined();
+    } finally {
+      if (previous === undefined) delete process.env.ATTN_AUTOMODE_DENIAL_LOG;
+      else process.env.ATTN_AUTOMODE_DENIAL_LOG = previous;
+    }
+  });
+
   test("spawn returns a fresh session id, passes cwd through, and reports metadata", async () => {
     const rpc = new FakeRPC();
     const driver = newDriver({ rpc, runCommand: fakeRunCommand(), executable: "pi" });

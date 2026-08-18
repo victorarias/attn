@@ -979,6 +979,9 @@ type AutoModeDenialsMessage struct {
 type AutoModeDenialsResult struct {
 	// Denials corresponds to the JSON schema field "denials".
 	Denials []AutoModeDenialInfo `json:"denials"`
+
+	// LedgerNote corresponds to the JSON schema field "ledger_note".
+	LedgerNote *string `json:"ledger_note,omitempty,omitzero"`
 }
 
 type AutoModeDiscardMessage struct {

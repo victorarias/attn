@@ -412,10 +412,27 @@ rather than through dialogs. Design and slices:
   session was refused N times. The breaker's own block inherits the episode's
   kind, so reporting the trip does not turn a pure-outage run into a mixed
   one.
-- Denials are reported through `AutoMode`'s `onDenial` seam. `suite/index.ts`
-  sets it to one `suite.report_denial` over the relay, which the driver
-  forwards to the daemon as `session.report_automode_denial`; the standalone
-  bundle leaves it unset, so a bare pi reports nowhere. It is fire-and-forget
+- **A denial is written before it is reported, and the write is the durable
+  half.** `ledger.ts` appends one JSON line per blocked call to
+  `ATTN_PI_AUTOMODE_DENIAL_LOG` (the pi driver forwards what the daemon names,
+  so an attn session's file sits in that profile's data dir) or, for a bare pi,
+  to `attn-automode-denials.jsonl` under pi's config dir. Both entrypoints wire
+  it, standalone included. The daemon reads it back on the denials read path
+  (`internal/daemon/automode_ledger.go`) and imports what the log is missing.
+  A failed write is said out loud as an error, because it is the only leg with
+  nothing behind it. Design:
+  [docs/plans/2026-08-18-automode-denial-ledger.md](../../docs/plans/2026-08-18-automode-denial-ledger.md).
+- The ledger keeps an active file and one rotated generation, and every
+  rotation past that writes a marker naming how many records were dropped, so
+  the reader is told rather than shown a partial episode. `paths.ts` protects
+  any last path segment beginning `attn-automode`: a session that can edit the
+  record of what it was refused leaves no record.
+- Denials are also reported through `AutoMode`'s `onDenial` seam, which is the
+  live surface — a notification, a fact, a row that appears while the user is
+  watching. `suite/index.ts` sets it to one `suite.report_denial` over the
+  relay, which the driver forwards to the daemon as
+  `session.report_automode_denial`; the standalone bundle leaves it unset, so a
+  bare pi reports nowhere and relies on the ledger alone. It is fire-and-forget
   like every other suite report — a reporter that throws is caught, because
   nothing outside auto mode may turn a denial into something else. The report
   carries no seq: it is an append, not a claim about the session's state.

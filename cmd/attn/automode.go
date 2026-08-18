@@ -315,22 +315,27 @@ func runAutoModeDenials(args []string) {
 		writeJSON(result)
 		return
 	}
-	writeAutoModeDenials(os.Stdout, result.Denials)
+	writeAutoModeDenials(os.Stdout, result.Denials, protocol.Deref(result.LedgerNote))
 }
 
 // writeAutoModeDenials prints the feed newest first, one row per denial: when,
-// which session, who decided, what was blocked, and why.
-func writeAutoModeDenials(out io.Writer, denials []protocol.AutoModeDenialInfo) {
+// which session, who decided, what was blocked, and why. A note names what the
+// session-side ledger admits it lost, so a clipped feed never reads as a whole
+// episode.
+func writeAutoModeDenials(out io.Writer, denials []protocol.AutoModeDenialInfo, ledgerNote string) {
 	if len(denials) == 0 {
 		fmt.Fprintln(out, "no denials recorded")
-		return
+	} else {
+		w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
+		for _, denial := range denials {
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
+				denial.CreatedAt, denial.SessionID, denial.Rule, denial.Signature, denial.Reason)
+		}
+		w.Flush()
 	}
-	w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-	for _, denial := range denials {
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
-			denial.CreatedAt, denial.SessionID, denial.Rule, denial.Signature, denial.Reason)
+	if ledgerNote != "" {
+		fmt.Fprintf(out, "note: %s\n", ledgerNote)
 	}
-	w.Flush()
 }
 
 // stripFlags drops every --flag and its value from a positional argument list.

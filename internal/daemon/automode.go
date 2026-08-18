@@ -151,6 +151,9 @@ func (d *Daemon) handleAutoModeDenials(conn net.Conn, msg *protocol.AutoModeDeni
 	if msg.Limit != nil && *msg.Limit > 0 {
 		limit = *msg.Limit
 	}
+	// The log is not the whole record until the ledger has been folded in: a
+	// denial whose relay report was lost lives only in the file.
+	reconcile := d.reconcileAutoModeDenialLedger()
 	denials, err := d.store.ListAutoModeDenials(limit)
 	if err != nil {
 		d.sendError(conn, err.Error())
@@ -159,7 +162,8 @@ func (d *Daemon) handleAutoModeDenials(conn net.Conn, msg *protocol.AutoModeDeni
 	d.sendAutoModeResponse(conn, protocol.Response{
 		Ok: true,
 		AutomodeDenialsResult: &protocol.AutoModeDenialsResult{
-			Denials: autoModeDenialInfos(denials),
+			Denials:    autoModeDenialInfos(denials),
+			LedgerNote: protocol.Ptr(autoModeLedgerNote(reconcile)),
 		},
 	})
 }

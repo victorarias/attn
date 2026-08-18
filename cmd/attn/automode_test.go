@@ -64,7 +64,7 @@ func TestAutoModeDenialsRenderEveryColumn(t *testing.T) {
 		Reason:    "the user never asked to reach that host",
 		Rule:      "classifier-2a",
 		CreatedAt: "2026-08-17T10:00:00Z",
-	}})
+	}}, "")
 	rendered := out.String()
 	for _, want := range []string{
 		"2026-08-17T10:00:00Z", "pi-1", "classifier-2a",
@@ -78,8 +78,22 @@ func TestAutoModeDenialsRenderEveryColumn(t *testing.T) {
 
 func TestAutoModeDenialsSayWhenThereAreNone(t *testing.T) {
 	var out bytes.Buffer
-	writeAutoModeDenials(&out, nil)
+	writeAutoModeDenials(&out, nil, "")
 	if !strings.Contains(out.String(), "no denials recorded") {
 		t.Errorf("empty feed rendered as %q", out.String())
+	}
+}
+
+// A feed that clipped and did not say so reads as a whole episode, which is the
+// failure the ledger exists to end.
+func TestAutoModeDenialsNameWhatTheLedgerLost(t *testing.T) {
+	var out bytes.Buffer
+	writeAutoModeDenials(&out, nil, "3 older denials were dropped when the local ledger rotated")
+	rendered := out.String()
+	if !strings.Contains(rendered, "no denials recorded") {
+		t.Errorf("the feed itself went missing: %q", rendered)
+	}
+	if !strings.Contains(rendered, "note: 3 older denials were dropped") {
+		t.Errorf("the note is missing: %q", rendered)
 	}
 }
