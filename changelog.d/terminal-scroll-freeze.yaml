@@ -1,0 +1,14 @@
+kind: fixed
+area: terminal
+change: >
+  Scrolling up through a lot of terminal output no longer freezes the
+  window. Every wheel event painted the pane synchronously, and each of
+  those paints reassembled every visible cell up to seven times over —
+  once for the paint and once per row the hover-link detector joined —
+  so a trackpad flick queued far more work than the frame could drain
+  and the window stopped answering until the momentum tail ended. The
+  paint now happens once per frame no matter how many events arrive,
+  and reading one visible row reads that row instead of the whole
+  viewport: 18.5 ms of model reads per wheel step at 200x50 with the
+  viewport 100 rows up, down to 2.8 ms; 7.8 ms down to 1.2 ms three
+  rows up.
