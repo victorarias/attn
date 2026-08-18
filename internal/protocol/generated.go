@@ -106,6 +106,9 @@ type AgentMsgMessage struct {
 	// SourceSessionID corresponds to the JSON schema field "source_session_id".
 	SourceSessionID string `json:"source_session_id"`
 
+	// TargetSeedID corresponds to the JSON schema field "target_seed_id".
+	TargetSeedID *string `json:"target_seed_id,omitempty,omitzero"`
+
 	// TargetSessionID corresponds to the JSON schema field "target_session_id".
 	TargetSessionID string `json:"target_session_id"`
 }
@@ -6109,6 +6112,9 @@ type SeedArtifactReference struct {
 }
 
 type SeedDocument struct {
+	// Artifacts corresponds to the JSON schema field "artifacts".
+	Artifacts []SeedArtifactReference `json:"artifacts"`
+
 	// Children corresponds to the JSON schema field "children".
 	Children []Seed `json:"children"`
 
@@ -6254,6 +6260,9 @@ type SeedNote struct {
 }
 
 type SeedNoteMessage struct {
+	// Artifact corresponds to the JSON schema field "artifact".
+	Artifact *SeedArtifactReference `json:"artifact,omitempty,omitzero"`
+
 	// Body corresponds to the JSON schema field "body".
 	Body string `json:"body"`
 
@@ -6438,6 +6447,9 @@ type SeedShowMessage struct {
 }
 
 type SeedShowResult struct {
+	// Artifacts corresponds to the JSON schema field "artifacts".
+	Artifacts []SeedArtifactReference `json:"artifacts"`
+
 	// Handoff corresponds to the JSON schema field "handoff".
 	Handoff *SeedNote `json:"handoff,omitempty,omitzero"`
 

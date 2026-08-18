@@ -696,7 +696,7 @@ commands:
   presence                          check whether the current shell runs inside attn
   agent list                        name every session running here
   agent peek <id>                   read a session without interrupting it
-  agent msg <session-or-member> "text"  message a live session or durable crew member
+  agent msg <target> "text"            message a live session, crew member or seed's tender
 	  session <command>                 inspect a session's conversation
   state explain <id>                replay why a session's state is what it is
   delegate --brief-file <path>      start another agent with a delegated brief

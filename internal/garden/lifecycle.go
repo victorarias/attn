@@ -277,26 +277,41 @@ func refuseState(seed Seed, verb Verb, rule move) error {
 type Note struct {
 	ID   string `json:"id"`
 	Seed string `json:"seed"`
-	// Kind is `note` or `handoff`; the notes collection indexes it, which is what
-	// makes "the freshest handoff on this seed" one query.
+	// Kind is `note`, `handoff`, `attach` or `detach`; the notes collection
+	// indexes it, which is what makes "the freshest handoff on this seed" one
+	// query.
 	Kind          string `json:"kind"`
 	Body          string `json:"body"`
 	AuthorSession string `json:"author_session"`
 	AuthorMember  string `json:"author_member"`
+	// Artifact is the typed association an `attach` or `detach` carries, and is
+	// nil on every other kind. The current set is projected from these entries;
+	// see artifact.go.
+	Artifact *ArtifactReference `json:"artifact,omitempty"`
 }
 
 // The kinds a note may carry. A plain note is the seed's memory of itself; a
 // handoff is written to whoever tends the seed next, which is why `show` and
 // `tend` put the freshest one in front of them instead of leaving it in the
-// log to be scrolled past.
+// log to be scrolled past. `attach` and `detach` associate a document with the
+// seed and take it back; they are the only kinds that carry a reference.
 const (
 	NoteKindNote    = "note"
 	NoteKindHandoff = "handoff"
+	NoteKindAttach  = "attach"
+	NoteKindDetach  = "detach"
 )
 
 // NoteKinds is every kind, in the order they are offered to a caller that named
 // one that is not a kind.
-var NoteKinds = []string{NoteKindNote, NoteKindHandoff}
+var NoteKinds = []string{NoteKindNote, NoteKindHandoff, NoteKindAttach, NoteKindDetach}
+
+// CarriesArtifact reports whether a kind is one of the two that associate a
+// document. It is what refuses a reference on a plain note and a bare attach —
+// both would store something no surface can act on.
+func CarriesArtifact(kind string) bool {
+	return kind == NoteKindAttach || kind == NoteKindDetach
+}
 
 // ParseNoteKind reads a wire kind, naming the whole set when it is not one. An
 // empty kind is the plain log entry: a caller that never heard of kinds writes

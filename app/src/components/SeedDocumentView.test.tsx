@@ -5,7 +5,7 @@ import {
   SeedDocumentView,
   type SeedDocument,
 } from './SeedDocumentView';
-import { currentSeedArtifacts, type SeedDocumentNote } from './seedArtifacts';
+import type { SeedDocumentNote } from './seedArtifacts';
 
 function seed(overrides: Partial<Seed> = {}): Seed {
   return {
@@ -49,6 +49,7 @@ function document(overrides: Partial<SeedDocument> = {}): SeedDocument {
     children: [],
     notes: [],
     notes_total: 0,
+    artifacts: [],
     ...overrides,
   };
 }
@@ -79,33 +80,46 @@ describe('SeedDocumentView', () => {
     expect(container.querySelector('.md-reader--annotating')).not.toBeInTheDocument();
   });
 
-  it('projects attach minus detach in chronological order and opens a current markdown artifact', () => {
-    const old = { kind: 'markdown_file' as const, path: '/repo/old.md' };
+  it('renders the daemon’s artifact set and opens a current markdown artifact', () => {
     const current = { kind: 'markdown_file' as const, path: '/repo/current.md' };
-    // Wire order is newest first. The detach must be applied after the older
-    // attach, not before it, or old.md incorrectly survives the projection.
+    // The detached one is still on the log; the set the daemon projected is
+    // what the reader renders, so it must not reappear from the timeline.
     const notes = [
-      note({ id: 'n-detach', kind: 'detach', artifact: old }),
+      note({ id: 'n-detach', kind: 'detach', artifact: { kind: 'markdown_file', path: '/repo/old.md' } }),
       note({ id: 'n-current', kind: 'attach', artifact: current }),
-      note({ id: 'n-old111', kind: 'attach', artifact: old }),
     ];
-
-    expect(currentSeedArtifacts(notes)).toEqual([current]);
 
     const onOpenMarkdownArtifact = vi.fn();
     render(
       <SeedDocumentView
-        document={document({ notes, notes_total: notes.length })}
+        document={document({ notes, notes_total: notes.length, artifacts: [current] })}
         onOpenMarkdownArtifact={onOpenMarkdownArtifact}
       />,
     );
 
-    expect(screen.queryByText('/repo/old.md')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '/repo/old.md' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '/repo/current.md' }));
     expect(onOpenMarkdownArtifact).toHaveBeenCalledWith('/repo/current.md');
   });
 
-  it('renders no artifact section for today’s note-only log', () => {
+  it('renders a notebook artifact and a url artifact from the same set', () => {
+    render(
+      <SeedDocumentView
+        document={document({
+          artifacts: [
+            { kind: 'notebook', notebook_document_id: 'nb-plan-7' },
+            { kind: 'url', url: 'https://example.test/pr/1' },
+          ],
+        })}
+      />,
+    );
+
+    expect(screen.getByText('nb-plan-7')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'https://example.test/pr/1' }))
+      .toHaveAttribute('href', 'https://example.test/pr/1');
+  });
+
+  it('renders no artifact section for an empty set', () => {
     render(
       <SeedDocumentView
         document={document({

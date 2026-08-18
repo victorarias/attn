@@ -23,6 +23,7 @@ import type {
   TicketRow as GeneratedTicketRow,
   Seed as GeneratedSeed,
   SeedNote as GeneratedSeedNote,
+  SeedArtifactReference as GeneratedSeedArtifactReference,
   CrewMember as GeneratedCrewMember,
   MarkdownAnnotation,
   Presentation,
@@ -143,6 +144,8 @@ export interface SeedDocument {
   children: Seed[];
   notes: GeneratedSeedNote[];
   notes_total: number;
+  // Attach minus detach over the seed's whole log, projected by the daemon.
+  artifacts: GeneratedSeedArtifactReference[];
 }
 // A crew member as the roster pushes it. Every member is here, awake or asleep:
 // an awake one names the session living its day (binding_session), and that
@@ -273,7 +276,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-export const PROTOCOL_VERSION = '259';
+export const PROTOCOL_VERSION = '260';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 // Identifies this app process to the daemon across its own reconnects, so a

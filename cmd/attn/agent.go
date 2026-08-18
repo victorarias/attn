@@ -298,7 +298,7 @@ type agentMsgArgs struct {
 }
 
 func parseAgentMsgArgs(args []string, envSessionID string) (agentMsgArgs, error) {
-	const usage = "usage: attn agent msg <session-or-member> \"text\" [--source-session <id>]"
+	const usage = "usage: attn agent msg <session-or-member-or-seed> \"text\" [--source-session <id>]"
 	literal := len(args) > 0 && args[0] == "--"
 	if literal {
 		args = args[1:]
@@ -412,13 +412,14 @@ commands:
         observe a session without interrupting it: state, todos, last
         assistant message, and the rendered screen. Passive — the observed
         agent never notices. <id> is a full session id or a unique prefix.
-  msg <session-or-member> "text" [--source-session <id>] [--json]
+  msg <session-or-member-or-seed> "text" [--source-session <id>] [--json]
         send a session or crew member a message. It lands in the live session,
         or wakes a sleeping member and becomes its first prompt after priming.
         It is attributed to you and carries the command to reply with. A target that
         cannot take input right now has it queued and delivered when it can;
         the result always says which. The sender defaults to this session
         (ATTN_SESSION_ID); pass --source-session when running outside one.
-        A message that starts with - goes after --, as: agent msg -- <session-or-member> "-text"
+        A seed id reaches whoever is tending it.
+        A message that starts with - goes after --, as: agent msg -- <target> "-text"
 `)
 }

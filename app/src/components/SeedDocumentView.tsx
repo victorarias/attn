@@ -6,7 +6,7 @@ import type {
 import { Markdown } from './Markdown';
 import { MarkdownReader, type MarkdownAnnotationsSendHandle } from './MarkdownReader';
 import { seedMarkdownSource } from './MarkdownReader/documentSource';
-import { currentSeedArtifacts, type SeedDocumentNote } from './seedArtifacts';
+import { artifactKey, artifactLabel, type SeedDocumentNote } from './seedArtifacts';
 import './SeedDocumentView.css';
 
 /** The one read model shared by the panel drill and the docked seed tile. */
@@ -17,6 +17,8 @@ export interface SeedDocument {
   /** Newest first, matching the garden log's wire order. */
   notes: SeedDocumentNote[];
   notes_total: number;
+  /** Attach minus detach, projected by the daemon over the seed's whole log. */
+  artifacts: SeedArtifactReference[];
 }
 
 export interface SeedDocumentViewProps {
@@ -28,39 +30,20 @@ export interface SeedDocumentViewProps {
   onOpenMarkdownArtifact?: (path: string) => void;
 }
 
-function artifactKey(artifact: SeedArtifactReference): string {
-  return [
-    artifact.kind,
-    artifact.path ?? '',
-    artifact.notebook_document_id ?? '',
-    artifact.repository ?? '',
-    artifact.url ?? '',
-  ].join('\0');
-}
-
 function formatTimestamp(iso: string): string {
   const date = new Date(iso);
   return Number.isNaN(date.getTime()) ? iso : date.toLocaleString();
 }
 
-function artifactLabel(artifact: SeedArtifactReference): string {
-  return artifact.path
-    || artifact.notebook_document_id
-    || artifact.url
-    || artifact.repository
-    || artifact.kind;
-}
-
 function SeedArtifacts({
-  notes,
+  artifacts,
   onOpenMarkdownArtifact,
   headingId,
 }: {
-  notes: readonly SeedDocumentNote[];
+  artifacts: readonly SeedArtifactReference[];
   onOpenMarkdownArtifact?: (path: string) => void;
   headingId: string;
 }) {
-  const artifacts = currentSeedArtifacts(notes);
   if (artifacts.length === 0) return null;
 
   return (
@@ -98,7 +81,7 @@ export function SeedDocumentView({
   annotationsSendRef,
   onOpenMarkdownArtifact,
 }: SeedDocumentViewProps) {
-  const { seed, children, notes, notes_total: notesTotal } = document;
+  const { seed, children, notes, notes_total: notesTotal, artifacts } = document;
   const withheld = Math.max(0, notesTotal - notes.length);
   const artifactsHeadingId = useId();
   const ledgerHeadingId = useId();
@@ -119,7 +102,7 @@ export function SeedDocumentView({
       )}
 
       <SeedArtifacts
-        notes={notes}
+        artifacts={artifacts}
         onOpenMarkdownArtifact={onOpenMarkdownArtifact}
         headingId={artifactsHeadingId}
       />

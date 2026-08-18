@@ -701,8 +701,31 @@ func (d *Daemon) handleSeedShow(conn net.Conn, msg *protocol.SeedShowMessage) {
 			NotesTotal: total,
 			Relations:  gardenRelations(read, seed.ID),
 			Handoff:    d.gardenHandoff(seed.ID),
+			Artifacts:  d.seedArtifacts(seed.ID),
 		},
 	})
+}
+
+// seedArtifacts projects a seed's current set from its whole log — attach minus
+// detach — for every surface that renders it. It reads the log again rather
+// than reusing a bounded one a caller already has: the attach that matters is
+// often older than the newest few entries, and a set that quietly shrinks as a
+// log gets busy is worse than none.
+//
+// A read failure is an empty set and a log line, never a refusal: the caller is
+// reading a seed, and losing the artifact list is not worth failing that.
+func (d *Daemon) seedArtifacts(seedID string) []protocol.SeedArtifactReference {
+	notes, err := d.readNotesDomain(seedID)
+	if err != nil {
+		d.logf("garden: reading the artifacts of %s: %v", seedID, err)
+		return []protocol.SeedArtifactReference{}
+	}
+	current := garden.CurrentArtifacts(notes)
+	out := make([]protocol.SeedArtifactReference, 0, len(current))
+	for _, artifact := range current {
+		out = append(out, *artifactToProtocol(artifact))
+	}
+	return out
 }
 
 func (d *Daemon) handleSeedEdit(conn net.Conn, msg *protocol.SeedEditMessage) {
@@ -803,6 +826,7 @@ func (d *Daemon) handleSeedDocumentGet(client *wsClient, msg *protocol.SeedDocum
 		Children:    read.wire(children),
 		Notes:       notes,
 		NotesTotal:  notesTotal,
+		Artifacts:   d.seedArtifacts(seed.ID),
 	}
 	result.Success = true
 	d.sendToClient(client, result)
@@ -1235,6 +1259,7 @@ func (d *Daemon) handleSeedNote(conn net.Conn, msg *protocol.SeedNoteMessage) {
 		authorSession,
 		protocol.Deref(msg.Member),
 		protocol.Deref(msg.Kind),
+		artifactFromProtocol(msg.Artifact),
 	)
 	if err != nil {
 		d.sendGardenError(conn, "note", err)
@@ -1246,15 +1271,49 @@ func (d *Daemon) handleSeedNote(conn net.Conn, msg *protocol.SeedNoteMessage) {
 	})
 }
 
+// resolveNoteArtifact pairs a kind with its reference and hands back both as
+// they should be stored. The two attach kinds require one and every other kind
+// refuses one: a reference on a plain note is invisible to the projection, and
+// an attach without one associates nothing — both would store something no
+// surface can act on.
+//
+// An attach or detach with no words of its own gets a body rendered from the
+// typed reference, so the log reads as prose either way.
+func resolveNoteArtifact(kind string, artifact *garden.ArtifactReference, body string) (*garden.ArtifactReference, string, error) {
+	if !garden.CarriesArtifact(kind) {
+		if artifact != nil {
+			return nil, "", fmt.Errorf(
+				"a %s note carries no artifact; `attn seed attach` and `attn seed detach` are what associate a document", kind)
+		}
+		return nil, body, nil
+	}
+	if artifact == nil {
+		return nil, "", fmt.Errorf("a %s note needs the artifact it %ses; the kinds are %s",
+			kind, kind, strings.Join(garden.ArtifactKinds, ", "))
+	}
+	validated, err := garden.ValidateArtifact(*artifact)
+	if err != nil {
+		return nil, "", err
+	}
+	if strings.TrimSpace(body) == "" {
+		body = garden.DefaultNoteBody(kind, validated)
+	}
+	return &validated, body, nil
+}
+
 // appendSeedNote is the one log-write path shared by the CLI and the seed
 // annotation destination. It validates the typed seed before minting so no
 // note can land in a log nobody can read.
-func (d *Daemon) appendSeedNote(seedID, body, authorSession, member, kindName string) (protocol.SeedNote, error) {
-	if err := garden.ValidateNote(body); err != nil {
-		return protocol.SeedNote{}, err
-	}
+func (d *Daemon) appendSeedNote(seedID, body, authorSession, member, kindName string, artifact *garden.ArtifactReference) (protocol.SeedNote, error) {
 	kind, err := garden.ParseNoteKind(kindName)
 	if err != nil {
+		return protocol.SeedNote{}, err
+	}
+	artifact, body, err = resolveNoteArtifact(kind, artifact, body)
+	if err != nil {
+		return protocol.SeedNote{}, err
+	}
+	if err := garden.ValidateNote(body); err != nil {
 		return protocol.SeedNote{}, err
 	}
 	seed, _, err := d.readSeed(seedID)
@@ -1272,6 +1331,7 @@ func (d *Daemon) appendSeedNote(seedID, body, authorSession, member, kindName st
 		Body:          body,
 		AuthorSession: authorSession,
 		AuthorMember:  d.resolveTenderMember(member, authorSession),
+		Artifact:      artifact,
 	}
 	written, doc, err := d.mintAndWriteNote(*schema, note)
 	if err != nil {
@@ -1392,6 +1452,35 @@ func (d *Daemon) readNotes(seedID string, limit int) ([]protocol.SeedNote, int, 
 	return notes, total, nil
 }
 
+// readNotesDomain reads a seed's whole log as domain notes. The artifact
+// projection needs the typed reference, which the wire shape carries as
+// pointers; decoding once here keeps that conversion out of it.
+func (d *Daemon) readNotesDomain(seedID string) ([]garden.Note, error) {
+	if d.store == nil {
+		return nil, errors.New("no database")
+	}
+	read, _, err := d.runDocQuery(docstore.Query{
+		Namespace:  garden.Namespace,
+		Collection: garden.CollectionNotes,
+		Filters:    []docstore.Filter{{Field: "seed", Op: docstore.OpEq, Value: seedID}},
+		Sort:       &docstore.Sort{Field: docstore.FieldCreatedAt, Desc: true},
+		Limit:      docstore.MaxLimit,
+	})
+	if err != nil {
+		return nil, err
+	}
+	notes := make([]garden.Note, 0, len(read.Documents))
+	for _, doc := range read.Documents {
+		note, err := garden.DecodeNote(doc.Body)
+		if err != nil {
+			d.logf("garden: note %s has an unreadable body: %v", doc.ID, err)
+			continue
+		}
+		notes = append(notes, note)
+	}
+	return notes, nil
+}
+
 // freshestHandoff reads the one handoff a tender must see: the newest note of
 // kind `handoff` on this seed. It is its own query rather than a scan of the
 // notes `show` already read, because a handoff older than the newest few log
@@ -1442,7 +1531,7 @@ func (d *Daemon) gardenHandoff(seedID string) *protocol.SeedNote {
 }
 
 func noteToProtocol(note garden.Note, doc docstore.Document) protocol.SeedNote {
-	return protocol.SeedNote{
+	wire := protocol.SeedNote{
 		ID:            note.ID,
 		SeedID:        note.Seed,
 		Kind:          note.Kind,
@@ -1450,6 +1539,43 @@ func noteToProtocol(note garden.Note, doc docstore.Document) protocol.SeedNote {
 		AuthorSession: note.AuthorSession,
 		AuthorMember:  note.AuthorMember,
 		CreatedAt:     doc.CreatedAt.UTC().Format(time.RFC3339),
+	}
+	if note.Artifact != nil {
+		wire.Artifact = artifactToProtocol(*note.Artifact)
+	}
+	return wire
+}
+
+func artifactToProtocol(a garden.ArtifactReference) *protocol.SeedArtifactReference {
+	wire := &protocol.SeedArtifactReference{Kind: a.Kind}
+	if a.NotebookDocumentID != "" {
+		wire.NotebookDocumentID = protocol.Ptr(a.NotebookDocumentID)
+	}
+	if a.Repository != "" {
+		wire.Repository = protocol.Ptr(a.Repository)
+	}
+	if a.Path != "" {
+		wire.Path = protocol.Ptr(a.Path)
+	}
+	if a.URL != "" {
+		wire.URL = protocol.Ptr(a.URL)
+	}
+	return wire
+}
+
+// artifactFromProtocol reads a wire reference. It trims and validates nothing —
+// garden.ValidateArtifact does both, in one place, so the CLI and the app are
+// refused in the same words.
+func artifactFromProtocol(wire *protocol.SeedArtifactReference) *garden.ArtifactReference {
+	if wire == nil {
+		return nil
+	}
+	return &garden.ArtifactReference{
+		Kind:               wire.Kind,
+		NotebookDocumentID: protocol.Deref(wire.NotebookDocumentID),
+		Repository:         protocol.Deref(wire.Repository),
+		Path:               protocol.Deref(wire.Path),
+		URL:                protocol.Deref(wire.URL),
 	}
 }
 
