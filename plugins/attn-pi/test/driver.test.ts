@@ -136,7 +136,9 @@ describe("PiDriver", () => {
     expect(sessionID).toMatch(uuidPattern);
     expect(result.argv).toEqual(["pi", "--session-id", sessionID, "-e", suitePath]);
     expect(result.cwd).toBe("/tmp/work");
-    expect(result.env?.ATTN_PI_TOKEN).toMatch(uuidPattern);
+    // The token is the run id, so a driver that restarted can rebuild the map
+    // from what attn hands back at driver.register.
+    expect(result.env?.ATTN_PI_TOKEN).toBe("run-1");
     expect(result.env?.ATTN_PI_SUITE_SOCKET).toBeTruthy();
 
     const report = rpc.requests.find((call) => call.method === "session.report_metadata");
@@ -163,7 +165,7 @@ describe("PiDriver", () => {
     expect(first.argv[2]).not.toBe(second.argv[2]);
   });
 
-  test("spawn wires the suite into argv and env, and mints a distinct token per run", async () => {
+  test("spawn wires the suite into argv and env, and tokens each run by its run id", async () => {
     const rpc = new FakeRPC();
     const driver = newDriver({ rpc, runCommand: fakeRunCommand(), executable: "pi" });
 
@@ -176,9 +178,8 @@ describe("PiDriver", () => {
     expect(first.argv.indexOf("go")).toBeGreaterThan(suiteIndex + 1);
 
     expect(first.env?.ATTN_PI_SUITE_SOCKET).toBeTruthy();
-    expect(first.env?.ATTN_PI_TOKEN).toMatch(uuidPattern);
-    expect(second.env?.ATTN_PI_TOKEN).toMatch(uuidPattern);
-    expect(first.env?.ATTN_PI_TOKEN).not.toBe(second.env?.ATTN_PI_TOKEN);
+    expect(first.env?.ATTN_PI_TOKEN).toBe("run-1");
+    expect(second.env?.ATTN_PI_TOKEN).toBe("run-2");
   });
 
   test("spawn throws when the suite entrypoint is missing", async () => {
@@ -374,6 +375,100 @@ describe("PiDriver", () => {
     expect(stateReport).toBeDefined();
     expect(stopReport?.params.seq).toBeLessThan(stateReport?.params.seq);
     expect(stopReport?.params.verdict).toBe("idle");
+  });
+
+  // A pi session outlives the driver process that launched it: its pi keeps
+  // running in a daemon-owned PTY and keeps reporting over the relay. These
+  // cover the recovery that gives those reports somewhere to land.
+  describe("adopting the runs attn reports still live", () => {
+    function registerWith(activeRuns: unknown[]) {
+      const requests: Array<{ method: string; params: any }> = [];
+      const rpc = {
+        async request(method: string, params: any): Promise<any> {
+          requests.push({ method, params });
+          if (method === "driver.register") return { ok: true, active_runs: activeRuns };
+          if (method === "attn.classify_stop") return { verdict: "idle" };
+          return { ok: true };
+        },
+        handle(_method: string, _handler: unknown): void {},
+      };
+      return { rpc, requests };
+    }
+
+    const piMetadata = { schema: 1, pi_session_id: "native-1", pi_version: "0.80.10", model: "glm-5.3" };
+
+    test("a report from an inherited run lands, addressed to the run and continuing its cursor", async () => {
+      const { rpc, requests } = registerWith([
+        { session_id: "session-1", run_id: "run-1", metadata: piMetadata, seq: 5 },
+      ]);
+      const driver = newDriver({ rpc });
+      await driver.initialize();
+
+      await driver.suiteReportState({ token: "run-1", state: "working" });
+
+      const report = requests.find((call) => call.method === "session.report_state");
+      expect(report?.params).toEqual({ session_id: "session-1", run_id: "run-1", seq: 6, state: "working" });
+    });
+
+    test("the inherited run keeps its metadata, so a hello only replaces pi's own identity", async () => {
+      const { rpc, requests } = registerWith([
+        { session_id: "session-1", run_id: "run-1", metadata: piMetadata, seq: 2 },
+      ]);
+      const driver = newDriver({ rpc });
+      await driver.initialize();
+
+      await driver.suiteHello({} as any, {
+        token: "run-1",
+        pi_session_id: "native-2",
+        pi_version: "0.84.2",
+        reason: "reconnect",
+      });
+
+      const report = requests.filter((call) => call.method === "session.report_metadata").at(-1);
+      expect(report?.params).toEqual({
+        session_id: "session-1",
+        run_id: "run-1",
+        seq: 3,
+        metadata: { schema: 1, pi_session_id: "native-2", pi_version: "0.84.2", model: "glm-5.3" },
+      });
+    });
+
+    test("a run without a report cursor is declined rather than reported into a void", async () => {
+      const { rpc } = registerWith([{ session_id: "session-1", run_id: "run-1", metadata: piMetadata }]);
+      const driver = newDriver({ rpc });
+      await driver.initialize();
+
+      await expect(driver.suiteReportState({ token: "run-1", state: "working" })).rejects.toThrow(
+        /unknown pi suite token/,
+      );
+    });
+
+    test("runs belonging to the other agent this plugin registers are left alone", async () => {
+      const { rpc } = registerWith([{ session_id: "nisse-1", run_id: "run-9", seq: 4 }]);
+      const driver = newDriver({ rpc });
+      await driver.initialize();
+
+      await expect(driver.suiteReportState({ token: "run-9", state: "working" })).rejects.toThrow(
+        /unknown pi suite token/,
+      );
+    });
+
+    test("a relaunch of an inherited session supersedes it rather than stacking on it", async () => {
+      const { rpc, requests } = registerWith([
+        { session_id: "session-1", run_id: "run-1", metadata: piMetadata, seq: 5 },
+      ]);
+      const driver = newDriver({ rpc });
+      await driver.initialize();
+
+      await driver.spawn(params({ session_id: "session-1", run_id: "run-2" }));
+
+      await expect(driver.suiteReportState({ token: "run-1", state: "working" })).rejects.toThrow(
+        /unknown pi suite token/,
+      );
+      await driver.suiteReportState({ token: "run-2", state: "working" });
+      const report = requests.find((call) => call.method === "session.report_state");
+      expect(report?.params.run_id).toBe("run-2");
+    });
   });
 
   test("a reported denial reaches the daemon addressed to the run that raised it", async () => {

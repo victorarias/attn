@@ -1,5 +1,5 @@
+import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { AttnRPCClient } from "./attn-rpc";
 import { PiDriver } from "./driver";
 import { nisseAgentName, NisseDriver } from "./nisse-driver";
@@ -14,7 +14,23 @@ async function runPlugin(): Promise<void> {
   const socketPath = requiredEnvironment("ATTN_SOCKET_PATH");
   const pluginName = requiredEnvironment("ATTN_PLUGIN_NAME");
   const pluginGeneration = requiredGeneration();
-  const rpc = new AttnRPCClient({ socketPath, name: pluginName, version: pluginVersion, generation: pluginGeneration });
+  const rpc = new AttnRPCClient({
+    socketPath,
+    name: pluginName,
+    version: pluginVersion,
+    generation: pluginGeneration,
+    // A runtime whose daemon connection closed can forward nothing: every
+    // report a live pi session sends over the relay would be accepted here and
+    // then dropped, which is indistinguishable from attn deciding the session
+    // is idle. Exiting is also what lets the session's suite notice — its relay
+    // socket closes, so it re-dials and finds the replacement runtime on the
+    // stable path. Nothing of pi's dies with us: a pi process is a child of its
+    // pty-worker, not of this one.
+    onDaemonDisconnect: () => {
+      console.error("attn-pi: attn closed the plugin connection; exiting so the next runtime owns the relay");
+      process.exit(0);
+    },
+  });
 
   // `driver` is assigned below; the relay's delegate closes over this
   // binding rather than an instance, since RelayServer and PiDriver each
@@ -83,8 +99,18 @@ function suitePath(): string {
   return join(import.meta.dir, "..", "suite", "index.ts");
 }
 
+// The relay socket lives in this plugin's own data directory, one path per
+// profile, and deliberately not one per process: a pi session is spawned with
+// this path baked into its environment for the life of the process, so a
+// pid-scoped path meant that a runtime restart left every live session dialing
+// a socket only the dead runtime ever had. `listen()` unlinks and rebinds, so
+// the newest runtime owns it.
 function relaySocketPath(): string {
-  return process.env.ATTN_PI_RELAY_SOCKET?.trim() || join(tmpdir(), `attn-pi-relay-${process.pid}.sock`);
+  const override = process.env.ATTN_PI_RELAY_SOCKET?.trim();
+  if (override) return override;
+  const dataRoot = requiredEnvironment("ATTN_PLUGIN_DATA_ROOT");
+  mkdirSync(dataRoot, { recursive: true, mode: 0o700 });
+  return join(dataRoot, "relay.sock");
 }
 
 function requiredEnvironment(name: string): string {

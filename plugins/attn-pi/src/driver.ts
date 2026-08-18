@@ -16,6 +16,7 @@ import {
   evaluatePiVersion,
   parseStableVersion,
   piThinkingLevels,
+  type ActivePluginRun,
   type DriverRegisterResult,
   type DriverSpawnParams,
   type DriverSpawnResult,
@@ -30,9 +31,11 @@ type Availability =
   | { ok: true; executable: string; version: string }
   | { ok: false; message: string };
 
-// One run = one live pi process launched by this driver. `token` is the
-// bearer credential handed to the pi-side suite via env; `seq` is the
-// per-run monotonic cursor for session.report_* calls, owned entirely here.
+// One run = one live pi process launched by this driver. `token` is what the
+// pi-side suite presents to name its run, handed over via env; it IS the run id,
+// so a replacement driver process can rebuild this map from what attn hands back
+// at driver.register. `seq` is the per-run monotonic cursor for session.report_*
+// calls, adopted from attn on recovery and advanced here from then on.
 type RunState = {
   token: string;
   sessionID: string;
@@ -81,7 +84,6 @@ export class PiDriver {
   async initialize(): Promise<void> {
     await this.refreshAvailability();
     if (!this.availability.ok) return;
-    await this.relay.listen();
     const result = await this.rpc.request<DriverRegisterResult>("driver.register", {
       agent: "pi",
       capabilities: {
@@ -95,9 +97,12 @@ export class PiDriver {
       },
     });
     if (!result.ok) throw new Error("attn rejected pi driver registration");
-    // No recovery work: this driver keeps no cross-restart run state. Active
-    // runs keep living in their daemon-owned PTYs; resume metadata is
-    // persisted daemon-side.
+    // Runs outlive this process: their pi lives in a daemon-owned PTY and keeps
+    // reporting over the relay. Adopting before listen() means the socket only
+    // opens once every inherited token is known, so a suite that re-dials the
+    // instant the path appears is never told its token is unknown.
+    this.adoptActiveRuns(result.active_runs ?? []);
+    await this.relay.listen();
   }
 
   health(): { ok: boolean; message: string } {
@@ -251,10 +256,50 @@ export class PiDriver {
   private createRun(sessionID: string, runID: string, metadata: PiMetadata): RunState {
     const previous = this.runsBySessionID.get(sessionID);
     if (previous) this.runsByToken.delete(previous.token);
-    const run: RunState = { token: randomUUID(), sessionID, runID, seq: 0, metadata };
+    const run: RunState = { token: runID, sessionID, runID, seq: 0, metadata };
     this.runsByToken.set(run.token, run);
     this.runsBySessionID.set(sessionID, run);
     return run;
+  }
+
+  /**
+   * Rebuilds this driver's run state from the runs attn reports still live.
+   * Called once per registration, which is once per runtime process.
+   *
+   * This plugin registers two agents and attn scopes active runs to the plugin,
+   * so nisse's runs arrive here too. pi metadata is the discriminator, and it is
+   * the same value this driver needs anyway: a run whose metadata is not pi's is
+   * not this driver's to adopt.
+   */
+  private adoptActiveRuns(runs: ActivePluginRun[]): void {
+    for (const run of runs) {
+      let metadata: PiMetadata;
+      try {
+        metadata = parsePiMetadata(run.metadata);
+      } catch {
+        continue;
+      }
+      const seq = run.seq;
+      if (typeof seq !== "number" || !Number.isSafeInteger(seq) || seq < 0) {
+        // Nothing this driver could report would survive: attn discards a report
+        // that does not advance the run's cursor, and without the cursor every
+        // seq this process picks is a guess. Declining loudly beats reporting
+        // into a void, which is the failure this recovery path exists to end.
+        console.error(
+          `attn-pi: not adopting run ${run.run_id} for session ${run.session_id}: driver.register carried no report cursor, so this session's state will not move until it is relaunched`,
+        );
+        continue;
+      }
+      const state: RunState = {
+        token: run.run_id,
+        sessionID: run.session_id,
+        runID: run.run_id,
+        seq,
+        metadata,
+      };
+      this.runsByToken.set(state.token, state);
+      this.runsBySessionID.set(state.sessionID, state);
+    }
   }
 
   private requireRunByToken(token: string): RunState {

@@ -1,0 +1,22 @@
+kind: fixed
+area: plugins
+change: >
+  A pi session now keeps reporting its state after attn's daemon restarts.
+  Until now a restart quietly ended state reporting for every pi session that
+  was already running: the session went on working while attn showed it idle,
+  and nothing short of relaunching it brought the two back together. Three
+  things were wrong and each one alone was enough. The plugin runtime listened
+  on a socket path that carried its own process id, so a running pi could only
+  ever reach the runtime that launched it; the old runtime stayed alive holding
+  that socket open, forwarding reports to a daemon it was no longer connected
+  to; and a fresh runtime threw away the list of live sessions attn hands it at
+  startup, so it would not have recognised them anyway. The socket path is now
+  stable per profile, a runtime that loses its daemon connection exits so the
+  next one takes over, a live pi re-dials and announces itself again, and the
+  replacement runtime adopts the sessions attn reports as still running --
+  continuing each one's report ordering rather than starting a counter of its
+  own. A daemon that starts up also shuts down any plugin runtime a previous
+  one left behind, instead of leaving it running forever.
+symptom: >
+  A pi session showed as idle in attn while it was visibly working, usually
+  after an attn update, an app restart, or any other daemon restart.

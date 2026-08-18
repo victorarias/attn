@@ -345,6 +345,81 @@ describe("AttnPiSuite: auto mode denials -> suite.report_denial", () => {
   });
 });
 
+// The driver process is replaced whenever attn's daemon restarts, and the pi it
+// launched keeps running. The relay path is stable per profile precisely so the
+// suite can find the replacement; these cover it finding one.
+describe("AttnPiSuite: the driver was replaced under a live session", () => {
+  test("re-dials the stable path, names its run again, and reports land on the new driver", async () => {
+    const socketPath = nextSocketPath();
+    const first = new RelayServer({ socketPath, delegate: new RecordingDelegate() });
+    await first.listen();
+
+    const suite = new AttnPiSuite({ socketPath, token: "tok-r", piVersion: "0.80.10" });
+    const pi = new FakePi();
+    suite.register(pi);
+    const ctx = new FakeContext("native-r");
+    pi.fire("session_start", { type: "session_start", reason: "startup" }, ctx);
+    pi.fire("agent_start", { type: "agent_start" }, ctx);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    // The replacement driver: same path, new listener, and no memory of the
+    // connection the first one held.
+    first.close();
+    const replacement = new RecordingDelegate();
+    const second = new RelayServer({ socketPath, delegate: replacement });
+    await second.listen();
+
+    pi.fire("agent_start", { type: "agent_start" }, ctx);
+
+    await waitFor(() => helloCalls(replacement).length >= 1);
+    await waitFor(() => replacement.calls.some((call) => call.method === relayMethods.reportState));
+
+    // The hello comes first: a report that overtook it would be answered
+    // "unknown pi suite token" and dropped.
+    expect(replacement.calls[0]?.method).toBe(relayMethods.hello);
+    expect(helloCalls(replacement)[0]).toEqual({
+      token: "tok-r",
+      pi_session_id: "native-r",
+      pi_version: "0.80.10",
+      reason: "reconnect",
+    });
+
+    suite.close();
+    second.close();
+  });
+
+  test("reconnects without a report to send, so attn can deliver a message to a quiet session", async () => {
+    const socketPath = nextSocketPath();
+    const first = new RelayServer({ socketPath, delegate: new RecordingDelegate() });
+    await first.listen();
+
+    const suite = new AttnPiSuite({ socketPath, token: "tok-q", piVersion: "0.80.10" });
+    const pi = new FakePi();
+    suite.register(pi);
+    const ctx = new FakeContext("native-q");
+    pi.fire("session_start", { type: "session_start", reason: "startup" }, ctx);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    first.close();
+    const replacement = new RecordingDelegate();
+    const second = new RelayServer({ socketPath, delegate: replacement });
+    await second.listen();
+
+    // Nothing fires on pi's side: the session is sitting at its prompt. The
+    // reconnect is what gives the replacement driver a connection at all.
+    await waitFor(() => helloCalls(replacement).length >= 1, 5_000);
+    expect(helloCalls(replacement)[0]).toEqual({
+      token: "tok-q",
+      pi_session_id: "native-q",
+      pi_version: "0.80.10",
+      reason: "reconnect",
+    });
+
+    suite.close();
+    second.close();
+  });
+});
+
 describe("AttnPiSuite: running outside attn or without a live relay", () => {
   test("missing env registers nothing and makes no connection attempt", () => {
     const suite = new AttnPiSuite({ socketPath: undefined, token: undefined, piVersion: "0.80.10" });

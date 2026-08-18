@@ -56,10 +56,15 @@ type AgentDriverReportCursor struct {
 	Seq        uint64
 }
 
+// ActiveAgentDriverRun is one live external-driver run, as handed back to a
+// driver that reconnects. Seq is the run's report cursor: a replacement driver
+// process has to continue from it, because applyState discards anything that
+// does not advance it.
 type ActiveAgentDriverRun struct {
 	SessionID string
 	RunID     string
 	Metadata  string
+	Seq       uint64
 }
 
 // LaunchIntent captures the per-spawn parameters the daemon needs to
@@ -883,6 +888,7 @@ func (s *Store) ListAgentDriverRuns(pluginName string) []ActiveAgentDriverRun {
 				SessionID: sessionID,
 				RunID:     strings.TrimSpace(cursor.RunID),
 				Metadata:  strings.TrimSpace(s.agentMetadata[sessionID]),
+				Seq:       cursor.Seq,
 			})
 		}
 		sort.Slice(runs, func(i, j int) bool { return runs[i].SessionID < runs[j].SessionID })
@@ -890,7 +896,7 @@ func (s *Store) ListAgentDriverRuns(pluginName string) []ActiveAgentDriverRun {
 	}
 
 	rows, err := s.db.Query(`
-		SELECT id, agent_driver_run_id, agent_metadata
+		SELECT id, agent_driver_run_id, agent_metadata, agent_driver_report_seq
 		FROM sessions
 		WHERE agent_driver_plugin_name = ? AND agent_driver_run_id <> ''
 		ORDER BY id`, pluginName)
@@ -901,7 +907,7 @@ func (s *Store) ListAgentDriverRuns(pluginName string) []ActiveAgentDriverRun {
 	var runs []ActiveAgentDriverRun
 	for rows.Next() {
 		var run ActiveAgentDriverRun
-		if err := rows.Scan(&run.SessionID, &run.RunID, &run.Metadata); err != nil {
+		if err := rows.Scan(&run.SessionID, &run.RunID, &run.Metadata, &run.Seq); err != nil {
 			return nil
 		}
 		run.RunID = strings.TrimSpace(run.RunID)

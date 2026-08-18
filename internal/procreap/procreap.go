@@ -152,6 +152,10 @@ type ReapResult struct {
 	ID      string
 	PID     int
 	Outcome ReapOutcome
+	// Path is the record this result came from, so a caller that reaps a
+	// registry it intends to keep can retire the record it just acted on.
+	// Empty for results not produced by ReapDir.
+	Path string
 	// Err carries why an entry could not be identified or would not die. It is
 	// context for a degraded outcome, not necessarily a failure of the reap.
 	Err error
@@ -180,11 +184,14 @@ func ReapDir(dir string, grace time.Duration) []ReapResult {
 			results = append(results, ReapResult{
 				ID:      filepath.Base(path),
 				Outcome: ReapUnreadable,
+				Path:    path,
 				Err:     err,
 			})
 			continue
 		}
-		results = append(results, reapEntry(entry, grace))
+		result := reapEntry(entry, grace)
+		result.Path = path
+		results = append(results, result)
 	}
 	return results
 }

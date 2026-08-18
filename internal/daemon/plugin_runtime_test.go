@@ -3,12 +3,16 @@ package daemon
 import (
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
+	"github.com/victorarias/attn/internal/plugins"
+	"github.com/victorarias/attn/internal/procreap"
 	"github.com/victorarias/attn/internal/supervise"
 )
 
@@ -323,4 +327,63 @@ func dialPluginHelper(socketPath string, timeout time.Duration) (net.Conn, error
 		time.Sleep(10 * time.Millisecond)
 	}
 	return nil, os.ErrDeadlineExceeded
+}
+
+// A daemon that was SIGKILLed leaves its plugin runtimes running, and a live pi
+// session keeps talking to one of them over the relay socket it still holds. The
+// replacement daemon reaps them before starting any plugin, and — unlike profile
+// clean, which deletes the whole data dir — retires the records it acted on so
+// the registry does not grow one file per crash forever.
+func TestReapStrandedPluginRuntimesKillsThemAndRetiresTheirRecords(t *testing.T) {
+	dataDir := t.TempDir()
+	registryDir := plugins.RuntimeRegistryDir(dataDir)
+
+	script := filepath.Join(dataDir, "stranded.sh")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nwhile true; do sleep 0.05; done\n"), 0o755); err != nil {
+		t.Fatalf("write stranded runtime: %v", err)
+	}
+	cmd := exec.Command(script)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start stranded runtime: %v", err)
+	}
+	pid := cmd.Process.Pid
+	// A stranded runtime is init's child, not ours. Waiting here keeps the test
+	// process from holding it as a zombie, which answers signal 0 and would make
+	// the reap report a process that survived SIGKILL.
+	exited := make(chan struct{})
+	go func() {
+		_ = cmd.Wait()
+		close(exited)
+	}()
+	t.Cleanup(func() {
+		_ = syscall.Kill(-pid, syscall.SIGKILL)
+		<-exited
+	})
+
+	livePath := filepath.Join(registryDir, "attn-pi-live.json")
+	if err := procreap.WriteEntry(livePath, procreap.NewEntry("attn-pi", pid, pid, cmd.Args)); err != nil {
+		t.Fatalf("write live record: %v", err)
+	}
+	gonePath := filepath.Join(registryDir, "attn-pi-gone.json")
+	goneEntry := procreap.NewEntry("attn-pi", pid, pid, cmd.Args)
+	goneEntry.PID = 0
+	goneEntry.PGID = 0
+	if err := procreap.WriteEntry(gonePath, goneEntry); err != nil {
+		t.Fatalf("write stale record: %v", err)
+	}
+
+	d := NewForTesting(filepath.Join(dataDir, "test.sock"))
+	d.reapStrandedPluginRuntimes()
+
+	select {
+	case <-exited:
+	case <-time.After(5 * time.Second):
+		t.Fatalf("stranded runtime %d survived the reap", pid)
+	}
+	for _, path := range []string{livePath, gonePath} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("registry record %s survived the reap: %v", filepath.Base(path), err)
+		}
+	}
 }
