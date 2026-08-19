@@ -20,7 +20,26 @@ PR GET remains the authority before claim, so pushes that race or bunch together
 collapse to the newest provider snapshot.
 
 This detects a push on the next normal list poll after detail refresh has learned
-the SHA. It deliberately adds no faster timer or provider call.
+the SHA. It deliberately adds no faster timer or provider call. The normal poll
+runs every 90 seconds, so it already acts as the coarse sampling boundary.
+
+Do not add another throttle. Separated pushes that cross separate focused GETs
+remain distinct, immutable occurrences, but the existing ticket delivery path
+already throttles reviewer interruptions:
+
+- [`armNudgeCountdownAt`](../../internal/daemon/nudge_countdown.go#L41) keeps the
+  earliest 30-second doorbell deadline, so more activity cannot slide or multiply
+  the first wake-up.
+- Once a doorbell fires, [`ticketDeadline`](../../internal/daemon/ticket_notify.go#L56)
+  bundles later unread activity until the existing 10-minute bundle deadline.
+- Every accepted occurrence gets a durable ticket event. The doorbell records the
+  newest event sequence it covered, and the reviewer consumes all unread events
+  through `attn ticket inbox`, newest included.
+
+That is the useful boundary here: preserve idempotency and evidence per accepted
+commit, while coalescing the interruption that asks the reviewer to catch up.
+There is no existing commit/run throttle to reuse because changed heads are
+currently rejected; the reusable throttle is specifically the inbox doorbell.
 
 Keep the existing worktree ownership rule: once the reviewer owns a worktree,
 attn fetches the new exact SHA but does not change its checkout. The reviewer may
@@ -53,7 +72,8 @@ doPRPoll
       EnsurePullRequestRevision          fetches the exact commit
       EnsureAutomationSessionWorktree    preserves the owned checkout
       EnsureAutomationContinuationTicket records the immutable input path
-      notifyTicketObservers              wakes the same reviewer
+      notifyTicketObservers              queues the same reviewer's inbox
+        30s countdown / 10m bundle       throttles reviewer wake-ups
 ```
 
 Current-code receipts:
@@ -63,7 +83,8 @@ Current-code receipts:
   preserves the detail-refreshed `HeadSHA` on those PR objects.
 - [`observeGitHubReviewRequests`](../../internal/daemon/automations_github.go#L96)
   consumes that snapshot, then performs one focused `FetchPullRequestSnapshot`
-  only for a candidate.
+  only for a candidate. Its per-definition/subject/cycle observation lock and the
+  daemon's `automationMu` serialize overlapping observations and deliveries.
 - [`ReconcileAutomationReviewRequests`](../../internal/store/automations.go#L743)
   owns durable edge/cycle state; [`ClaimGitHubReviewAutomationRun`](../../internal/store/automations.go#L965)
   currently keys the occurrence only by subject and request cycle.
@@ -77,6 +98,13 @@ Current-code receipts:
   appends one durable event with the occurrence input path;
   [`notifyTicketObservers`](../../internal/daemon/ticket_notify.go#L85) wakes the
   existing reviewer through the ordinary inbox/doorbell path.
+- [`pollPRs`](../../internal/daemon/daemon.go#L3725) samples provider demand every
+  90 seconds. [`armNudgeCountdownAt`](../../internal/daemon/nudge_countdown.go#L41)
+  uses a non-sliding 30-second countdown, while
+  [`defaultTicketBundleWindow`](../../internal/daemon/ticket_notify.go#L19) delays
+  repeat doorbells for 10 minutes without dropping unread events. The generic
+  burst behavior is already pinned by
+  [`TestTicketBurstBundlesIntoOneFollowupNudge`](../../internal/daemon/ticket_buffer_test.go#L27).
 
 The ownership change is narrow: observation recognizes a new relevant head, the
 store owns its durable identity, and delivery makes the exact commit available.
@@ -93,6 +121,7 @@ store transaction provide the idempotency fence.
 |---|---|
 | Same head observed repeatedly | No new run. |
 | Several pushes before the focused GET | One occurrence for the newest GET result. |
+| Several pushes cross separate focused GETs | One durable occurrence per accepted SHA, delivered serially to the same ticket. Pushes before the first 30-second countdown fires share at most one doorbell; later pushes inside the 10-minute bundle stay unread and cannot interrupt again before the bundle deadline. |
 | Older run is still pending | Retry that immutable run first; a later refresh catches up once, to the then-latest head. No overtaking. |
 | Reviewer session is live | Append ticket activity and nudge it; never spawn a second session. |
 | Reviewer session stopped with a valid transcript | Existing resume safety restarts the same logical session. |
@@ -104,8 +133,9 @@ store transaction provide the idempotency fence.
 
 The pending-run choice is deliberate. Superseding an incompletely materialized run
 would need a new cancellation state plus artifact/session cleanup semantics. Retrying
-the immutable predecessor preserves today's recovery contract; `latest` still
-coalesces all heads that arrive before the next accepted focused snapshot.
+the immutable predecessor preserves today's recovery contract. Provider sampling and
+the focused GET coalesce heads before claim; ticket delivery coalesces wake-ups after
+claim. Distinct heads accepted between those boundaries remain visible evidence.
 
 ## Implementation
 
@@ -129,10 +159,14 @@ coalesces all heads that arrive before the next accepted focused snapshot.
   legacy occurrence keys do not replay.
 - Observer: refreshed `HeadSHA` triggers one focused GET and one continuation;
   same-head polls do neither; a newer focused snapshot wins over a stale observed
-  SHA; approved/withdrawn/draft/closed inputs do not continue.
+  SHA; two changed heads crossing separate observations produce ordered occurrences
+  on the same binding; approved/withdrawn/draft/closed inputs do not continue.
 - Delivery/git: changed-head continuation passes the contract gate, reuses stable
   IDs, fetches the exact commit, leaves dirty files/branch/HEAD untouched, records
   the new occurrence path, and nudges or resumes the existing reviewer safely.
+  Reuse the existing ticket burst test for the 30-second/10-minute throttle, and add
+  one automation-path assertion that two continuation events reach that same inbox
+  without spawning a second reviewer.
 - Recovery: restart with a pending GitHub run retries the immutable occurrence;
   the next provider observation catches up to only the latest head.
 
