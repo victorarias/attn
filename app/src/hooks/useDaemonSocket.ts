@@ -1239,8 +1239,14 @@ export function useDaemonSocket({
       case 'delete_branch':
         rejectPendingByPredicate((key) => key.startsWith('delete_branch_'), error);
         return;
+      // Keyed requests park under `<cmd>:<id>` (reload_session, rename_session,
+      // unregister, ...). Matching the bare command alone left those waiting out
+      // their timeout on an error the daemon had already named — which is how a
+      // parked endpoint's refusal reached the user as "timed out". Like
+      // register_workspace above, this over-rejects when two are in flight for
+      // one command; that beats swallowing the reason.
       default:
-        rejectPendingByPredicate((key) => key === cmd, error);
+        rejectPendingByPredicate((key) => key === cmd || key.startsWith(`${cmd}:`), error);
     }
   }, [rejectPendingByPredicate]);
 
