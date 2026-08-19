@@ -2,14 +2,13 @@
  * Pane focus treatment test harness
  *
  * Reproduces the exact DOM shape SessionTerminalWorkspace renders for a
- * multi-leaf workspace with a bound ticket open. The selected leaf's
- * pseudo-elements paint the edge rail or spotlight corner marks, with a
- * `.workspace-pane-ticket-overlay` covering the pane body underneath. Loads the
- * real stylesheet so the actual cascade/stacking is under test, not a
- * re-description of it. GhosttyTerminal (WASM/canvas) plays no role in this
- * stacking question, so it is not mounted. An unselected docked tile witnesses
- * that all focus styles preserve the shared inactive opacity; dim additionally
- * witnesses that no marker is drawn.
+ * multi-leaf workspace. The selected leaf's pseudo-elements paint the edge rail
+ * or spotlight corner marks, and the split divider is the workspace-local layer
+ * they must stay above. Loads the real stylesheet so the actual cascade and
+ * stacking is under test, not a re-description of it. GhosttyTerminal
+ * (WASM/canvas) plays no role in this stacking question, so it is not mounted.
+ * An unselected docked tile witnesses that all focus styles preserve the shared
+ * inactive opacity; dim additionally witnesses that no marker is drawn.
  */
 import { useEffect } from 'react';
 import '../../src/components/SessionTerminalWorkspace/SessionTerminalWorkspace.css';
@@ -35,14 +34,13 @@ export function PaneFocusRingHarness({ onReady, setTriggerRerender }: HarnessPro
         <div className="workspace-pane-header workspace-pane-header--draggable">
           <span className="workspace-pane-title">shell</span>
         </div>
-        <div className="workspace-pane-body">
-          <div
-            className="workspace-pane-ticket-overlay"
-            data-testid="ticket-overlay"
-            style={{ background: 'black' }}
-          />
-        </div>
+        <div className="workspace-pane-body" />
       </div>
+      <div
+        className="workspace-split-divider workspace-split-divider--vertical"
+        data-testid="split-divider"
+        style={{ left: '50%', top: 0, bottom: 0, background: 'black' }}
+      />
       <div
         className="workspace-pane workspace-pane--tile"
         data-testid="tile-inactive"

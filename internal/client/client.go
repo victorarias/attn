@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/victorarias/attn/internal/config"
+	"github.com/victorarias/attn/internal/garden"
 	"github.com/victorarias/attn/internal/protocol"
 )
 
@@ -411,12 +412,20 @@ func (c *Client) AgentPeek(targetSessionID string) (*protocol.AgentPeekResult, e
 // resolves the address, persists the words, and delivers them — waking an
 // asleep member first — so the result always says what became of them.
 func (c *Client) AgentMsg(target, sourceSessionID, content string) (*protocol.AgentMsgResult, error) {
-	resp, err := c.send(protocol.AgentMsgMessage{
+	msg := protocol.AgentMsgMessage{
 		Cmd:             protocol.CmdAgentMsg,
 		TargetSessionID: target,
 		SourceSessionID: sourceSessionID,
 		Content:         content,
-	})
+	}
+	// A seed id has a shape nothing else in this argument has, so the caller
+	// fills the typed field the daemon acts on rather than handing it a string
+	// to read meaning out of.
+	if garden.ValidateID(target) == nil {
+		msg.TargetSessionID = ""
+		msg.TargetSeedID = protocol.Ptr(target)
+	}
+	resp, err := c.send(msg)
 	if err != nil {
 		return nil, err
 	}
@@ -1089,6 +1098,17 @@ func (c *Client) OpenMarkdown(path, sessionID string) error {
 		Cmd:  protocol.CmdOpenMarkdown,
 		Path: path,
 	}
+	if sessionID != "" {
+		msg.SessionID = protocol.Ptr(sessionID)
+	}
+	_, err := c.send(msg)
+	return err
+}
+
+// OpenSeed docks a seed reader tile beside the requested session. An empty
+// sessionID lets the daemon use the currently selected session.
+func (c *Client) OpenSeed(seedID, sessionID string) error {
+	msg := protocol.OpenSeedMessage{Cmd: protocol.CmdOpenSeed, SeedID: seedID}
 	if sessionID != "" {
 		msg.SessionID = protocol.Ptr(sessionID)
 	}

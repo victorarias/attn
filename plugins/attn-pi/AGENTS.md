@@ -268,7 +268,7 @@ agent unchanged; everything here that says nisse is this agent in particular.
 - **A host gets the PTY path's identity block** (`ATTN_SESSION_ID`,
   `ATTN_AGENT`, `ATTN_DAEMON_MANAGED`, `ATTN_INSIDE_APP`, and the active attn
   first on PATH) on top of the daemon's environment and the user's login
-  shell. Without it a delegated agent's `attn ticket comment` is attributed to
+  shell. Without it a delegated agent's `attn seed note` is attributed to
   whichever session the daemon inherited its environment from, and bare `attn`
   resolves to whichever install is on the login shell's PATH. Both were
   observed, not theorized.

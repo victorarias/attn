@@ -197,13 +197,19 @@ func (d *Daemon) resolveSpawnIntent(req *spawnRequest) (*spawnPlan, *spawnReject
 			req.resumeSessionID = ""
 		}
 	} else if !req.hasPluginDriver && req.resumeSessionID == "" && protocol.Deref(msg.ResumePicker) {
-		// Ticket "Resume": the bound session's row (and its resume_session_id) was
-		// deleted on close, so the session-keyed lookup above is skipped. The ticket
-		// persisted the resume key under the same id (its assignee), so resolve it
-		// here to resume the prior conversation directly instead of dropping the
-		// user into the agent's resume picker. Falls back to the picker (resumeSessionID
-		// stays "") when no ticket resume key exists.
-		if ticketResumeID := d.store.GetTicketResumeSessionID(msg.ID); ticketResumeID != "" {
+		// Seed "Resume": the bound session's row (and its resume_session_id) was
+		// deleted on close, so the session-keyed lookup above is skipped. The
+		// resume key was mirrored under the same session id — on its dispatch
+		// record, or on a ticket for work bound before tickets retired — so
+		// resolve it here to
+		// resume the prior conversation directly instead of dropping the user into
+		// the agent's resume picker. Falls back to the picker (resumeSessionID
+		// stays "") when no mirrored resume key exists.
+		mirroredResumeID := d.gardenDispatchResume(msg.ID)
+		if mirroredResumeID == "" {
+			mirroredResumeID = d.store.GetTicketResumeSessionID(msg.ID)
+		}
+		if ticketResumeID := mirroredResumeID; ticketResumeID != "" {
 			// Only adopt the mirrored id when it is actually resumable. Claude writes
 			// its transcript lazily, so a session closed before it ever took a turn has
 			// a mirrored id pointing at a transcript that does not exist; `claude -r
@@ -213,7 +219,7 @@ func (d *Daemon) resolveSpawnIntent(req *spawnRequest) (*spawnPlan, *spawnReject
 			if agentdriver.ResumeAvailable(req.driver, ticketResumeID) {
 				req.resumeSessionID = ticketResumeID
 			} else {
-				d.logf("spawn: ticket resume target %s for session %s is not resumable (no transcript yet); using resume picker", ticketResumeID, msg.ID)
+				d.logf("spawn: resume target %s for session %s is not resumable (no transcript yet); using resume picker", ticketResumeID, msg.ID)
 			}
 		}
 	}

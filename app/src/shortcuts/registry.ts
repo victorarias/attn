@@ -118,7 +118,7 @@ export const SHORTCUTS = {
   // this is what ⌘P does everywhere else.
   'file.open': { key: 'p', meta: true },
 
-  // Tickets board; meta+shift+T parallels meta+T = new workspace.
+  // The garden; meta+shift+T parallels meta+T = new workspace.
   'board.open': { key: 't', meta: true, shift: true },
 
   // `editableTarget: 'native'` keeps the capture-phase dispatcher out of

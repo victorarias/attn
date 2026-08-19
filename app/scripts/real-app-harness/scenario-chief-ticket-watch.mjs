@@ -255,6 +255,17 @@ async function main() {
   if (!profile) throw new Error('this benchmark never runs against production; set ATTN_PROFILE / ATTN_HARNESS_PROFILE to a named profile');
   const attnBin = resolveAttnBin();
   const runAttn = makeAttnRunner(attnBin, profile);
+  // The board is read through the CLI: the app shows the garden now, and its
+  // ticket surfaces (with the bridge verbs that read them) are gone.
+  // `ticket list --json` prints an array; runAttn's own parse looks for an object.
+  const ticketBoard = () => {
+    try {
+      const { stdout } = runAttn(['ticket', 'list', '--json']);
+      return JSON.parse(stdout.slice(stdout.indexOf('[')));
+    } catch {
+      return [];
+    }
+  };
 
   const { runId, runDir, sessionDir } = createRunContext(options, `chief-watch-${agent}`);
 
@@ -432,8 +443,7 @@ async function main() {
 
     // 4b) Snapshot existing tickets so a PRIOR run's delegation can't masquerade as
     // this run's (the uat ticket DB persists across runs). Only a NEW ticket counts.
-    const baseline = await client.request('ticket_list').catch(() => ({ tickets: [] }));
-    const baselineIds = new Set((baseline.tickets || []).map((tk) => tk.id));
+    const baselineIds = new Set(ticketBoard().map((tk) => tk.id));
     note(`ticket baseline captured`, { existing: baselineIds.size });
 
     // 5) Observe: delegation (a NEW ticket bound to a non-chief session) and any
@@ -444,8 +454,7 @@ async function main() {
     const observeUntil = Date.now() + 240_000;
     let snap = 0;
     while (Date.now() < observeUntil && !delegation) {
-      const { tickets } = await client.request('ticket_list').catch(() => ({ tickets: [] }));
-      const bound = (tickets || []).find((tk) => !baselineIds.has(tk.id) && tk.assignee && tk.assignee !== chiefId);
+      const bound = ticketBoard().find((tk) => !baselineIds.has(tk.id) && tk.assignee && tk.assignee !== chiefId);
       if (bound) { delegation = bound; break; }
       const w = freshWatchProcesses(baselineWatchPids);
       if (w && !armedWatch) { armedWatch = w; note(`watch armed`, { processes: w.split('\n').length }); }

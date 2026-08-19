@@ -20,25 +20,22 @@ Interpret the requested object first:
 - "dispatch subagents to investigate" means native subagents
 
 Attn delegation starts another agent with a focused brief; it does not create
-durable parent-child lineage. Every delegation binds a ticket to the delegated
-session — the brief is its description, the session is its assignee — and you are a
-participant on the ticket you created. That ticket is the channel in both
-directions: the agent reports its work state onto it, and you reach the agent with
-`attn ticket comment <ticket-id> -m "<note>"`. The chief of staff is also a
-participant on every delegation ticket, whoever started it — and when the chief is
-the one delegating, that participation belongs to the ROLE. It moves to whoever
-holds the role next, instead of following the session that delegated.
+durable parent-child lineage. Every delegation binds a **seed** to the delegated
+session — the brief is its body, the session is its tender — and the seed is the
+channel in both directions: the agent writes what happened onto its log, and you
+reach the agent by seed id with `attn agent msg <seed-id> -m "<note>"`. Read the
+work back with `attn seed show <seed-id>`. See [garden.md](garden.md).
 
-Follow-up: rely on attn's ticket nudges. Never park a blocking Monitor on attn
-activity: a Monitor-blocked session reads as busy, which suppresses crew heartbeats
-and auto-sleep. Monitors remain useful for external waits such as CI; they are a
+Follow-up: read the seed. Never park a blocking Monitor on attn activity: a
+Monitor-blocked session reads as busy, which suppresses crew heartbeats and
+auto-sleep. Monitors remain useful for external waits such as CI; they are a
 helper, not an attn integration mechanism.
 
-For a delegation that returns a durable plan, read the ticket before
-continuing. `attn ticket show <ticket-id>` lists its Notebook artifacts. If one is a
-repository-reference card, pass its Git path, branch, and introducing commit in the
-follow-on brief and say that Git remains canonical. Otherwise pass the canonical
-Notebook path. The next agent edits that authority instead of creating a copy.
+For a delegation that returns a durable plan, read the seed before continuing.
+`attn seed show <seed-id>` renders its current artifacts. If one is a repository
+path, pass that path and its repository in the follow-on brief and say that Git
+remains canonical. Otherwise pass the canonical Notebook document. The next agent
+edits that authority instead of creating a copy.
 
 ## Brief Workflow
 
@@ -55,29 +52,26 @@ The brief should let the delegated agent start immediately. Include:
 3. constraints and explicit non-goals
 4. the expected deliverable or stopping condition
 
-A delegation brief *is* a ticket's description, so the fuller craft in
-[tickets.md](tickets.md) applies here too — write the objective as a stop
+A delegation brief *is* the seed's body, so the fuller craft in
+[garden.md](garden.md) applies here too — write the objective as a stop
 condition, give a verification contract, and let the shape bend by deliverable
 type. Write it to be easy to read without losing precision — plain words,
 short paragraphs, sketches where they say more ([showing.md](showing.md)).
 
 Use `--brief <text>` only for short, simple tasks.
 
-> The same brief is a ticket's description. To capture a backlog item *without* delegating — an unbound `todo` — use `attn ticket new` (see [tickets.md](tickets.md)); do this only when the user asks.
+> The same brief is the seed's body. To capture work *without* delegating, plant a seed — `attn seed plant "<title>" -m "<brief>"` (see [garden.md](garden.md)); do this only when the user asks.
 
-## Adopt an Existing Ticket
+## Dispatch at an Existing Seed
 
-When the task already has a ticket, adopt it instead of creating a duplicate:
+When the work is already planted, dispatch at it instead of planting a duplicate:
 
-    attn delegate --ticket <ticket-id>
+    attn delegate --brief-file "$brief_file" --plot <seed-id>
 
-Its description becomes the task; the ticket keeps its id and thread, binds to
-the new session, and moves to `working`. Unassigned and reconciled-orphan tickets
-transfer directly. Taking over a live assignee requires confirmation:
-
-    attn delegate --ticket <ticket-id> --confirm
-
-`--name`, placement, and worktree flags behave as usual.
+The delegate binds that seed rather than a new one, and launches knowing it.
+Aimed at a **crown**, a flag-free `attn seed ready` inside the delegate answers
+with that plot's ready seeds. `--name`, placement, and worktree flags behave as
+usual.
 
 ## Agent Selection
 

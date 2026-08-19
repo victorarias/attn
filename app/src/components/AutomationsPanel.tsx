@@ -22,7 +22,6 @@ export interface AutomationsPanelProps {
     expectedRevision: number,
   ) => Promise<{ definition: AutomationDefinitionSummary; specYaml: string }>;
   deleteDefinition: (definitionId: string) => Promise<void>;
-  onOpenTicket: (ticketId: string) => void;
   onSelectSession: (sessionId: string) => void;
   onFocusPane: (sessionId: string, paneId: string) => void;
 }
@@ -34,17 +33,16 @@ export interface AutomationsPanelProps {
 // targets always remounts a fresh editor instance (see automationFormKey).
 type EditorTarget = { definitionId: string | null } | null;
 
-// Where a run row navigates. The wire nit applies here: ticket_id/session_id/
-// pane_id are always present on AutomationRunSummary but "" means absent, so
-// a plain truthiness check is the correct emptiness test. Exported for direct
-// unit coverage of the ticket-over-session precedence.
+// Where a run row navigates: the session the run happened in. The wire nit
+// applies here: session_id/pane_id are always present on AutomationRunSummary
+// but "" means absent, so a plain truthiness check is the correct emptiness
+// test. A run that names no session is not navigable — the app has no surface
+// left for a run's ticket, so there is nowhere else to send the click.
 export type RunNavigationTarget =
-  | { kind: 'ticket'; ticketId: string }
   | { kind: 'session'; sessionId: string; paneId: string | null }
   | null;
 
 export function runNavigationTarget(run: AutomationRunSummary): RunNavigationTarget {
-  if (run.ticket_id) return { kind: 'ticket', ticketId: run.ticket_id };
   if (run.session_id) return { kind: 'session', sessionId: run.session_id, paneId: run.pane_id || null };
   return null;
 }
@@ -108,7 +106,6 @@ export function AutomationsPanel({
   getDefinition,
   applyDefinition,
   deleteDefinition,
-  onOpenTicket,
   onSelectSession,
   onFocusPane,
 }: AutomationsPanelProps) {
@@ -251,10 +248,6 @@ export function AutomationsPanel({
   function handleRunRowClick(run: AutomationRunSummary) {
     const target = runNavigationTarget(run);
     if (!target) return;
-    if (target.kind === 'ticket') {
-      onOpenTicket(target.ticketId);
-      return;
-    }
     onSelectSession(target.sessionId);
     if (target.paneId) onFocusPane(target.sessionId, target.paneId);
   }

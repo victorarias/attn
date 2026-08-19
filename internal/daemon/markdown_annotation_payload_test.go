@@ -18,6 +18,10 @@ func mdAnchor(startLine, endLine, start int, exact string) *protocol.MarkdownAnn
 	}
 }
 
+func fileAnnotationSource(path string) annotationDocumentSource {
+	return annotationDocumentSource{kind: annotationSourceFile, path: path}
+}
+
 // Mixed document: sorting by position, range + single-line labels, deletion
 // fence, quick label with tip, global last, label summary, closing line.
 func TestFormatMarkdownAnnotationPayloadMixed(t *testing.T) {
@@ -57,7 +61,7 @@ func TestFormatMarkdownAnnotationPayloadMixed(t *testing.T) {
 		"- **👍 Looks good**: 1\n" +
 		"\n" +
 		"Please address the annotation feedback above."
-	got := formatMarkdownAnnotationPayload("/tmp/doc.md", anns, nil)
+	got := formatMarkdownAnnotationPayload(fileAnnotationSource("/tmp/doc.md"), anns, nil)
 	if got != want {
 		t.Fatalf("payload mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
 	}
@@ -80,7 +84,7 @@ func TestFormatMarkdownAnnotationPayloadSingularNoSummary(t *testing.T) {
 		"\n" +
 		"---\n" +
 		"Please address the annotation feedback above."
-	got := formatMarkdownAnnotationPayload("/doc.md", anns, nil)
+	got := formatMarkdownAnnotationPayload(fileAnnotationSource("/doc.md"), anns, nil)
 	if got != want {
 		t.Fatalf("payload mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
 	}
@@ -92,7 +96,7 @@ func TestFormatMarkdownAnnotationPayloadOrphaned(t *testing.T) {
 	anns := []protocol.MarkdownAnnotation{
 		{ID: "orph", Type: "comment", Anchor: mdAnchor(7, 9, 0, "moved text"), Text: protocol.Ptr("still relevant"), CreatedAt: 1},
 	}
-	got := formatMarkdownAnnotationPayload("/doc.md", anns, map[string]bool{"orph": true})
+	got := formatMarkdownAnnotationPayload(fileAnnotationSource("/doc.md"), anns, map[string]bool{"orph": true})
 	wantLine := "## 1. (~line 7, moved) Feedback on: \"moved text\"\n> still relevant\n"
 	if !containsStr(got, wantLine) {
 		t.Fatalf("payload missing orphan label %q:\n%s", wantLine, got)
@@ -133,7 +137,7 @@ func TestFormatMarkdownAnnotationPayloadQuickLabels(t *testing.T) {
 		"- **confusing**: 1\n" +
 		"\n" +
 		"Please address the annotation feedback above."
-	got := formatMarkdownAnnotationPayload("/doc.md", anns, nil)
+	got := formatMarkdownAnnotationPayload(fileAnnotationSource("/doc.md"), anns, nil)
 	if got != want {
 		t.Fatalf("payload mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
 	}
@@ -146,7 +150,7 @@ func TestFormatMarkdownAnnotationPayloadSortWithinLine(t *testing.T) {
 		{ID: "later", Type: "comment", Anchor: mdAnchor(4, 4, 20, "tail"), Text: protocol.Ptr("second"), CreatedAt: 1},
 		{ID: "earlier", Type: "comment", Anchor: mdAnchor(4, 4, 2, "head"), Text: protocol.Ptr("first"), CreatedAt: 2},
 	}
-	got := formatMarkdownAnnotationPayload("/doc.md", anns, nil)
+	got := formatMarkdownAnnotationPayload(fileAnnotationSource("/doc.md"), anns, nil)
 	wantOrder := "## 1. (line 4) Feedback on: \"head\"\n> first\n\n## 2. (line 4) Feedback on: \"tail\"\n> second\n"
 	if !containsStr(got, wantOrder) {
 		t.Fatalf("items not ordered by start offset:\n%s", got)
@@ -159,7 +163,7 @@ func TestFormatMarkdownAnnotationPayloadNilAnchor(t *testing.T) {
 	anns := []protocol.MarkdownAnnotation{
 		{ID: "x", Type: "comment", Text: protocol.Ptr("dangling"), CreatedAt: 1},
 	}
-	got := formatMarkdownAnnotationPayload("/doc.md", anns, nil)
+	got := formatMarkdownAnnotationPayload(fileAnnotationSource("/doc.md"), anns, nil)
 	want := "## 1. Feedback on: \"\"\n> dangling\n"
 	if !containsStr(got, want) {
 		t.Fatalf("nil-anchor item mis-rendered, want %q in:\n%s", want, got)

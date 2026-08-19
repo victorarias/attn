@@ -265,32 +265,32 @@ func TestGenerateCodexConfigOverrides_OmitsEmptySocketButKeepsSessionIdentity(t 
 func TestAgentInstructionsComposition(t *testing.T) {
 	workflow := WorkflowTriggerGuidance()
 	context := WorkspaceContextGuidance("/tmp/context.md")
-	ticket := TicketAwarenessGuidance()
+	garden := GardenAwarenessGuidance()
 
-	// The ticket-awareness pointer is always-on: even with no checkout and no
-	// workflow guidance, AgentInstructions returns exactly the ticket block.
-	if got := AgentInstructions("", false); got != ticket {
-		t.Fatalf("AgentInstructions(empty, false) = %q, want the ticket block %q", got, ticket)
+	// The garden pointer is always-on: even with no checkout and no workflow
+	// guidance, AgentInstructions returns exactly the garden block.
+	if got := AgentInstructions("", false); got != garden {
+		t.Fatalf("AgentInstructions(empty, false) = %q, want the garden block %q", got, garden)
 	}
 
-	// Workspace context, then the always-on ticket block.
+	// Workspace context, then the always-on garden block.
 	contextOnly := AgentInstructions("/tmp/context.md", false)
-	if want := strings.Join([]string{context, ticket}, "\n\n"); contextOnly != want {
+	if want := strings.Join([]string{context, garden}, "\n\n"); contextOnly != want {
 		t.Fatalf("context-only instructions = %q, want %q", contextOnly, want)
 	}
 	if strings.Contains(contextOnly, "hypercode") {
 		t.Fatalf("context-only instructions leaked workflow guidance: %q", contextOnly)
 	}
 
-	// Workflow guidance (no checkout), then the always-on ticket block.
+	// Workflow guidance (no checkout), then the always-on garden block.
 	workflowOnly := AgentInstructions("", true)
-	if want := strings.Join([]string{workflow, ticket}, "\n\n"); workflowOnly != want {
+	if want := strings.Join([]string{workflow, garden}, "\n\n"); workflowOnly != want {
 		t.Fatalf("workflow-only instructions = %q, want %q", workflowOnly, want)
 	}
 
-	// Both, joined with a blank line, context first, ticket block last.
+	// Both, joined with a blank line, context first, garden block last.
 	both := AgentInstructions("/tmp/context.md", true)
-	if want := strings.Join([]string{context, workflow, ticket}, "\n\n"); both != want {
+	if want := strings.Join([]string{context, workflow, garden}, "\n\n"); both != want {
 		t.Fatalf("combined instructions = %q, want %q", both, want)
 	}
 }

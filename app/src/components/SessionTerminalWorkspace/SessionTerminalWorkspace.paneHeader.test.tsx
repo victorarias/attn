@@ -210,4 +210,23 @@ describe('SessionTerminalWorkspace pane header', () => {
 
     expect(container.querySelector('.workspace-pane-title')?.textContent).toBe('shell');
   });
+  // A delegated pane says what it reports to. The header used to carry the
+  // bound ticket; the seed is where reporting lives now.
+  it('carries the seed a delegated session reports to, and opens it', () => {
+    const onOpenSeed = vi.fn();
+    renderLonePane({
+      workspaceSessions: [{ id: 'sess-1', label: GENERATED_NAME, agent: 'claude', cwd: '/tmp/project', seedId: 's-rep111' }],
+      onOpenSeed,
+    });
+
+    fireEvent.click(screen.getByTestId('seed-chip-sess-1'));
+
+    expect(onOpenSeed).toHaveBeenCalledWith('s-rep111');
+  });
+
+  it('shows no seed chip on a session that reports to none', () => {
+    renderLonePane({ onOpenSeed: vi.fn() });
+
+    expect(screen.queryByTestId('seed-chip-sess-1')).not.toBeInTheDocument();
+  });
 });

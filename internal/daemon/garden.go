@@ -66,6 +66,9 @@ func (d *Daemon) ensureGardenCollections() {
 			d.publishCollectionRedeclared(schema.Namespace, schema.Collection)
 		}
 	}
+	d.dispatchSeedsMu.Lock()
+	d.dispatchSeeds, d.dispatchFromChief, d.dispatchSeedsLoaded = nil, nil, false
+	d.dispatchSeedsMu.Unlock()
 }
 
 // seedsCollection reads the seeds declaration, which carries the minted table
@@ -701,8 +704,135 @@ func (d *Daemon) handleSeedShow(conn net.Conn, msg *protocol.SeedShowMessage) {
 			NotesTotal: total,
 			Relations:  gardenRelations(read, seed.ID),
 			Handoff:    d.gardenHandoff(seed.ID),
+			Artifacts:  d.seedArtifacts(seed.ID),
 		},
 	})
+}
+
+// seedArtifacts projects a seed's current set from its whole log — attach minus
+// detach — for every surface that renders it. It reads the log again rather
+// than reusing a bounded one a caller already has: the attach that matters is
+// often older than the newest few entries, and a set that quietly shrinks as a
+// log gets busy is worse than none.
+//
+// A read failure is an empty set and a log line, never a refusal: the caller is
+// reading a seed, and losing the artifact list is not worth failing that.
+func (d *Daemon) seedArtifacts(seedID string) []protocol.SeedArtifactReference {
+	notes, err := d.readNotesDomain(seedID)
+	if err != nil {
+		d.logf("garden: reading the artifacts of %s: %v", seedID, err)
+		return []protocol.SeedArtifactReference{}
+	}
+	current := garden.CurrentArtifacts(notes)
+	out := make([]protocol.SeedArtifactReference, 0, len(current))
+	for _, artifact := range current {
+		out = append(out, *artifactToProtocol(artifact))
+	}
+	return out
+}
+
+func (d *Daemon) handleSeedEdit(conn net.Conn, msg *protocol.SeedEditMessage) {
+	if err := d.requireHome(garden.Surface); err != nil {
+		d.sendGardenError(conn, "edit", err)
+		return
+	}
+	if err := garden.ValidateBody(msg.Body); err != nil {
+		d.sendGardenError(conn, "edit", err)
+		return
+	}
+	seed, doc, err := d.applySeedBodyEdit(msg.SeedID, msg.Body)
+	if err != nil {
+		d.sendGardenError(conn, "edit", err)
+		return
+	}
+	d.sendGardenResponse(conn, protocol.Response{
+		Ok:             true,
+		SeedEditResult: &protocol.SeedEditResult{Seed: seedToProtocol(seed, doc, d.gardenReady()[seed.ID])},
+	})
+}
+
+// applySeedBodyEdit changes only the living markdown body. Re-reading on a
+// conflict preserves lifecycle, tender and edge changes that landed while the
+// editor was writing.
+func (d *Daemon) applySeedBodyEdit(id, body string) (garden.Seed, docstore.Document, error) {
+	schema, err := d.seedsCollection()
+	if err != nil {
+		return garden.Seed{}, docstore.Document{}, err
+	}
+	const attempts = 3
+	for range attempts {
+		seed, doc, err := d.readSeed(id)
+		if err != nil {
+			return garden.Seed{}, docstore.Document{}, err
+		}
+		seed.Body = body
+		written, err := d.writeSeed(*schema, seed, doc.Rev, FactGardenBodyEdited)
+		if err == nil {
+			return seed, written, nil
+		}
+		if !docstore.IsConflict(err) {
+			return garden.Seed{}, docstore.Document{}, err
+		}
+	}
+	return garden.Seed{}, docstore.Document{}, fmt.Errorf(
+		"%s was rewritten under all %d attempts to edit it; read it again with `attn seed show %s` and retry",
+		id, attempts, id)
+}
+
+// handleSeedDocumentGet returns the complete reading surface for one seed.
+// Garden snapshots carry the live seed itself; clients use this detail read
+// for the ledger and as a fallback when a bounded snapshot omits the open seed.
+func (d *Daemon) handleSeedDocumentGet(client *wsClient, msg *protocol.SeedDocumentGetMessage) {
+	result := protocol.SeedDocumentGetResultMessage{
+		Event:     protocol.EventSeedDocumentGetResult,
+		RequestID: msg.RequestID,
+	}
+	fail := func(err error) {
+		result.Error = protocol.Ptr(err.Error())
+		d.sendToClient(client, result)
+	}
+	if err := d.requireHome(garden.Surface); err != nil {
+		fail(err)
+		return
+	}
+	seed, doc, err := d.readSeed(msg.SeedID)
+	if err != nil {
+		fail(err)
+		return
+	}
+	read, err := d.readGarden()
+	if err != nil {
+		fail(err)
+		return
+	}
+	children := make([]garden.Seed, 0)
+	for _, candidate := range read.seeds {
+		for _, edge := range candidate.Edges {
+			if edge.Kind == garden.EdgePartOf && edge.To == seed.ID {
+				children = append(children, candidate)
+				break
+			}
+		}
+	}
+	notes, notesTotal, err := d.readNotes(seed.ID, docstore.MaxLimit)
+	if err != nil {
+		fail(err)
+		return
+	}
+	wireSeed := seedToProtocol(seed, doc, read.ready[seed.ID])
+	if progress, ok := read.progress(seed.ID); ok {
+		wireSeed.PlotProgress = progress
+	}
+	result.Document = &protocol.SeedDocument{
+		Seed:        wireSeed,
+		TenderHolds: seed.Tender().Holds(d.sessionExists),
+		Children:    read.wire(children),
+		Notes:       notes,
+		NotesTotal:  notesTotal,
+		Artifacts:   d.seedArtifacts(seed.ID),
+	}
+	result.Success = true
+	d.sendToClient(client, result)
 }
 
 // gardenRelations renders both directions of a seed's edges, each with the other
@@ -907,15 +1037,18 @@ func (d *Daemon) dispatchesCollection() (*docstore.CollectionSchema, error) {
 	return d.collectionFor(garden.Namespace, garden.CollectionDispatches)
 }
 
-// recordGardenDispatch stamps a session as dispatched at a crown. Last write
-// wins on purpose: a session is dispatched at one crown, and re-dispatching a
-// recovered session at a new crown is a re-aim, not a conflict.
-func (d *Daemon) recordGardenDispatch(sessionID, crown string) error {
+// recordGardenDispatch stamps a session as dispatched at a seed, with the
+// directory and agent a resume would relaunch it from. Last write wins on
+// purpose: a session reports to one seed, and re-dispatching a recovered
+// session at a new crown is a re-aim, not a conflict.
+func (d *Daemon) recordGardenDispatch(sessionID, crown, cwd, agent string, fromChief bool) error {
 	schema, err := d.dispatchesCollection()
 	if err != nil {
 		return err
 	}
-	body, err := garden.Dispatch{SessionID: sessionID, Crown: crown}.Encode()
+	body, err := garden.Dispatch{
+		SessionID: sessionID, Crown: crown, Cwd: cwd, Agent: agent, FromChief: fromChief,
+	}.Encode()
 	if err != nil {
 		return err
 	}
@@ -927,7 +1060,56 @@ func (d *Daemon) recordGardenDispatch(sessionID, crown string) error {
 		return err
 	}
 	d.announceCommittedWrite(fact, written.Seq)
+	d.rememberDispatchSeed(sessionID, crown)
+	d.rememberDispatchFromChief(sessionID, fromChief)
 	return nil
+}
+
+// rememberDispatchResume records the agent-native conversation id on the
+// dispatch record, so reopening a seed's tender after its session row is gone
+// resumes the conversation rather than opening the agent's picker. The ticket
+// row used to hold this copy; a delegation binds no ticket any more.
+//
+// It is best-effort and silent when the session has no dispatch record: not
+// every session reports to a seed, and a resume id is not worth failing the
+// transition that produced it.
+func (d *Daemon) rememberDispatchResume(sessionID, resumeSessionID string) {
+	sessionID, resumeSessionID = strings.TrimSpace(sessionID), strings.TrimSpace(resumeSessionID)
+	if sessionID == "" || resumeSessionID == "" {
+		return
+	}
+	dispatch, ok := d.gardenDispatch(sessionID)
+	if !ok || dispatch.Resume == resumeSessionID {
+		return
+	}
+	schema, err := d.dispatchesCollection()
+	if err != nil {
+		return
+	}
+	dispatch.Resume = resumeSessionID
+	body, err := dispatch.Encode()
+	if err != nil {
+		d.logf("garden: encoding the dispatch record for %s: %v", sessionID, err)
+		return
+	}
+	fact := documentChangedFact(garden.Namespace, garden.CollectionDispatches, sessionID, false)
+	written, err := d.store.CommitDocumentWrite(store.DocumentWrite{
+		Schema: *schema, ID: sessionID, Body: body,
+	}, fact, time.Now())
+	if err != nil {
+		d.logf("garden: recording the resume id for session %s: %v", sessionID, err)
+		return
+	}
+	d.announceCommittedWrite(fact, written.Seq)
+}
+
+// gardenDispatchResume is the conversation id to reopen a seed's tender on.
+func (d *Daemon) gardenDispatchResume(sessionID string) string {
+	dispatch, ok := d.gardenDispatch(sessionID)
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(dispatch.Resume)
 }
 
 // validateDispatchCrown refuses a dispatch aimed at a seed that is not here.
@@ -952,25 +1134,147 @@ func (d *Daemon) validateDispatchCrown(crown string) error {
 	return nil
 }
 
-// gardenDispatchCrown is the crown a session was dispatched at, if any.
-func (d *Daemon) gardenDispatchCrown(sessionID string) (string, bool) {
+// gardenDispatch is a session's whole dispatch record, if it has one.
+func (d *Daemon) gardenDispatch(sessionID string) (garden.Dispatch, bool) {
 	if sessionID == "" || d.store == nil {
-		return "", false
+		return garden.Dispatch{}, false
 	}
 	schema, err := d.dispatchesCollection()
 	if err != nil {
-		return "", false
+		return garden.Dispatch{}, false
 	}
 	doc, found, err := d.store.GetDocument(*schema, sessionID)
 	if err != nil || !found {
-		return "", false
+		return garden.Dispatch{}, false
 	}
 	dispatch, err := garden.DecodeDispatch(doc.Body)
 	if err != nil {
 		d.logf("garden: dispatch record for %s has an unreadable body: %v", sessionID, err)
+		return garden.Dispatch{}, false
+	}
+	return dispatch, true
+}
+
+// gardenDispatchCrown is the seed a session reports to, if any.
+func (d *Daemon) gardenDispatchCrown(sessionID string) (string, bool) {
+	dispatch, ok := d.gardenDispatch(sessionID)
+	if !ok {
 		return "", false
 	}
 	return dispatch.Crown, dispatch.Crown != ""
+}
+
+// gardenDispatchSeedsBySession maps every session that reports to a seed. A
+// session list is broadcast on every state change, so this must cost nothing:
+// the map is read from the collection once and then written through on each
+// dispatch, rather than scanning a collection that grows with every delegation
+// attn has ever made.
+//
+// Empty — never an error — when the collection is absent or unreadable:
+// decoration must not fail a broadcast.
+func (d *Daemon) gardenDispatchSeedsBySession() map[string]string {
+	if d.store == nil {
+		return nil
+	}
+	d.dispatchSeedsMu.Lock()
+	defer d.dispatchSeedsMu.Unlock()
+	if !d.dispatchSeedsLoaded {
+		read, _, err := d.runDocQuery(docstore.Query{
+			Namespace:  garden.Namespace,
+			Collection: garden.CollectionDispatches,
+		})
+		if err != nil {
+			if !docstore.IsUndeclaredCollection(err) {
+				d.logf("garden: reading dispatch records for broadcast: %v", err)
+				return nil
+			}
+			// No garden here: remember that, so a daemon nobody plants in stops
+			// asking. Declaring the collections clears this.
+			d.dispatchSeeds, d.dispatchFromChief, d.dispatchSeedsLoaded = nil, nil, true
+			return nil
+		}
+		loaded := make(map[string]string, len(read.Documents))
+		fromChief := map[string]bool{}
+		for _, doc := range read.Documents {
+			dispatch, err := garden.DecodeDispatch(doc.Body)
+			if err != nil || dispatch.Crown == "" {
+				continue
+			}
+			loaded[doc.ID] = dispatch.Crown
+			if dispatch.FromChief {
+				fromChief[doc.ID] = true
+			}
+		}
+		d.dispatchSeeds, d.dispatchFromChief = loaded, fromChief
+		d.dispatchSeedsLoaded = true
+	}
+	return d.dispatchSeeds
+}
+
+// rememberDispatchSeed writes one dispatch through to the broadcast map. Called
+// after the record is committed, so a reader never sees a binding the database
+// does not hold.
+func (d *Daemon) rememberDispatchSeed(sessionID, crown string) {
+	d.dispatchSeedsMu.Lock()
+	defer d.dispatchSeedsMu.Unlock()
+	if !d.dispatchSeedsLoaded {
+		return // Not loaded yet; the first read builds it from the collection.
+	}
+	if crown == "" {
+		delete(d.dispatchSeeds, sessionID)
+		return
+	}
+	// Copied on write: a broadcast holds the map it was handed while it renders.
+	next := make(map[string]string, len(d.dispatchSeeds)+1)
+	for id, seed := range d.dispatchSeeds {
+		next[id] = seed
+	}
+	next[sessionID] = crown
+	d.dispatchSeeds = next
+}
+
+// rememberDispatchFromChief writes the chief-dispatched bit through to the same
+// broadcast map, on the same copy-on-write rule.
+func (d *Daemon) rememberDispatchFromChief(sessionID string, fromChief bool) {
+	d.dispatchSeedsMu.Lock()
+	defer d.dispatchSeedsMu.Unlock()
+	if !d.dispatchSeedsLoaded {
+		return
+	}
+	next := make(map[string]bool, len(d.dispatchFromChief)+1)
+	for id := range d.dispatchFromChief {
+		next[id] = true
+	}
+	if fromChief {
+		next[sessionID] = true
+	} else {
+		delete(next, sessionID)
+	}
+	d.dispatchFromChief = next
+}
+
+// gardenDispatchesFromChief is the set of sessions the chief of staff
+// dispatched. It shares the dispatch cache's load, so asking costs nothing on a
+// broadcast.
+func (d *Daemon) gardenDispatchesFromChief() map[string]bool {
+	d.gardenDispatchSeedsBySession()
+	d.dispatchSeedsMu.Lock()
+	defer d.dispatchSeedsMu.Unlock()
+	return d.dispatchFromChief
+}
+
+// decorateSessionSeed names the seed a session reports to. Mirrors
+// decorateCrewMember: set only when the session has a dispatch record, cleared
+// otherwise so it round-trips as an omitted field.
+func (d *Daemon) decorateSessionSeed(session *protocol.Session, seedBySession map[string]string) {
+	if session == nil {
+		return
+	}
+	if seed := seedBySession[session.ID]; seed != "" {
+		session.SeedID = protocol.Ptr(seed)
+		return
+	}
+	session.SeedID = nil
 }
 
 // gardenPrime is what a launching session is primed with: the same answer its
@@ -1064,6 +1368,10 @@ func (d *Daemon) handleSeedTransition(conn net.Conn, msg *protocol.SeedTransitio
 	if verb == garden.VerbTend {
 		result.Handoff = d.gardenHandoff(seed.ID)
 	}
+	// Mirrored before the response: the move is not fully recorded until every
+	// place that still tracks this work has it, and a caller that harvests and
+	// then reads the board must not see the ticket mid-flight.
+	d.mirrorSeedMoveOntoTicket(sessionID, seed.ID, verb, protocol.Deref(msg.Reason))
 	d.sendGardenResponse(conn, protocol.Response{Ok: true, SeedTransitionResult: result})
 }
 
@@ -1125,44 +1433,94 @@ func (d *Daemon) handleSeedNote(conn net.Conn, msg *protocol.SeedNoteMessage) {
 		d.sendGardenError(conn, "note", err)
 		return
 	}
-	if err := garden.ValidateNote(msg.Body); err != nil {
-		d.sendGardenError(conn, "note", err)
-		return
-	}
-	kind, err := garden.ParseNoteKind(protocol.Deref(msg.Kind))
+	authorSession := strings.TrimSpace(protocol.Deref(msg.SourceSessionID))
+	note, err := d.appendSeedNote(
+		msg.SeedID,
+		msg.Body,
+		authorSession,
+		protocol.Deref(msg.Member),
+		protocol.Deref(msg.Kind),
+		artifactFromProtocol(msg.Artifact),
+	)
 	if err != nil {
 		d.sendGardenError(conn, "note", err)
 		return
 	}
-	// A note on a seed that is not planted is refused by name rather than
-	// written into a log nobody will ever read.
-	seed, _, err := d.readSeed(msg.SeedID)
+	// Mirrored before the response, for the reason handleSeedTransition states.
+	d.mirrorSeedNoteOntoTicket(authorSession, msg.SeedID, note.Body)
+	d.sendGardenResponse(conn, protocol.Response{
+		Ok:             true,
+		SeedNoteResult: &protocol.SeedNoteResult{Note: note},
+	})
+}
+
+// resolveNoteArtifact pairs a kind with its reference and hands back both as
+// they should be stored. The two attach kinds require one and every other kind
+// refuses one: a reference on a plain note is invisible to the projection, and
+// an attach without one associates nothing — both would store something no
+// surface can act on.
+//
+// An attach or detach with no words of its own gets a body rendered from the
+// typed reference, so the log reads as prose either way.
+func resolveNoteArtifact(kind string, artifact *garden.ArtifactReference, body string) (*garden.ArtifactReference, string, error) {
+	if !garden.CarriesArtifact(kind) {
+		if artifact != nil {
+			return nil, "", fmt.Errorf(
+				"a %s note carries no artifact; `attn seed attach` and `attn seed detach` are what associate a document", kind)
+		}
+		return nil, body, nil
+	}
+	if artifact == nil {
+		return nil, "", fmt.Errorf("a %s note needs the artifact it %ses; the kinds are %s",
+			kind, kind, strings.Join(garden.ArtifactKinds, ", "))
+	}
+	validated, err := garden.ValidateArtifact(*artifact)
 	if err != nil {
-		d.sendGardenError(conn, "note", err)
-		return
+		return nil, "", err
+	}
+	if strings.TrimSpace(body) == "" {
+		body = garden.DefaultNoteBody(kind, validated)
+	}
+	return &validated, body, nil
+}
+
+// appendSeedNote is the one log-write path shared by the CLI and the seed
+// annotation destination. It validates the typed seed before minting so no
+// note can land in a log nobody can read.
+func (d *Daemon) appendSeedNote(seedID, body, authorSession, member, kindName string, artifact *garden.ArtifactReference) (protocol.SeedNote, error) {
+	kind, err := garden.ParseNoteKind(kindName)
+	if err != nil {
+		return protocol.SeedNote{}, err
+	}
+	artifact, body, err = resolveNoteArtifact(kind, artifact, body)
+	if err != nil {
+		return protocol.SeedNote{}, err
+	}
+	if err := garden.ValidateNote(body); err != nil {
+		return protocol.SeedNote{}, err
+	}
+	seed, _, err := d.readSeed(seedID)
+	if err != nil {
+		return protocol.SeedNote{}, err
 	}
 	schema, err := d.notesCollection()
 	if err != nil {
-		d.sendGardenError(conn, "note", err)
-		return
+		return protocol.SeedNote{}, err
 	}
-	authorSession := strings.TrimSpace(protocol.Deref(msg.SourceSessionID))
+	authorSession = strings.TrimSpace(authorSession)
 	note := garden.Note{
 		Seed:          seed.ID,
 		Kind:          kind,
-		Body:          msg.Body,
+		Body:          body,
 		AuthorSession: authorSession,
-		AuthorMember:  d.resolveTenderMember(protocol.Deref(msg.Member), authorSession),
+		AuthorMember:  d.resolveTenderMember(member, authorSession),
+		Artifact:      artifact,
 	}
 	written, doc, err := d.mintAndWriteNote(*schema, note)
 	if err != nil {
-		d.sendGardenError(conn, "note", err)
-		return
+		return protocol.SeedNote{}, err
 	}
-	d.sendGardenResponse(conn, protocol.Response{
-		Ok:             true,
-		SeedNoteResult: &protocol.SeedNoteResult{Note: noteToProtocol(written, doc)},
-	})
+	return noteToProtocol(written, doc), nil
 }
 
 // mintAndWriteNote writes one log entry, minting again on a taken id for the
@@ -1277,6 +1635,51 @@ func (d *Daemon) readNotes(seedID string, limit int) ([]protocol.SeedNote, int, 
 	return notes, total, nil
 }
 
+// readNotesDomain reads a seed's whole log as domain notes. The artifact
+// projection needs the typed reference, which the wire shape carries as
+// pointers; decoding once here keeps that conversion out of it.
+//
+// Whole means whole: the read pages to the end of the log rather than stopping
+// at one query's limit. A set that quietly shrinks as a log gets busy is worse
+// than none, and a seed is the durable record of a delegation that may run for
+// months.
+func (d *Daemon) readNotesDomain(seedID string) ([]garden.Note, error) {
+	if d.store == nil {
+		return nil, errors.New("no database")
+	}
+	page := d.gardenNotePageSize
+	if page <= 0 {
+		page = docstore.MaxLimit
+	}
+	notes := []garden.Note{}
+	after := ""
+	for {
+		read, _, err := d.runDocQuery(docstore.Query{
+			Namespace:  garden.Namespace,
+			Collection: garden.CollectionNotes,
+			Filters:    []docstore.Filter{{Field: "seed", Op: docstore.OpEq, Value: seedID}},
+			Sort:       &docstore.Sort{Field: docstore.FieldCreatedAt, Desc: true},
+			Limit:      page,
+			After:      after,
+		})
+		if err != nil {
+			return nil, err
+		}
+		for _, doc := range read.Documents {
+			note, err := garden.DecodeNote(doc.Body)
+			if err != nil {
+				d.logf("garden: note %s has an unreadable body: %v", doc.ID, err)
+				continue
+			}
+			notes = append(notes, note)
+		}
+		if len(read.Documents) < page {
+			return notes, nil
+		}
+		after = read.Documents[len(read.Documents)-1].ID
+	}
+}
+
 // freshestHandoff reads the one handoff a tender must see: the newest note of
 // kind `handoff` on this seed. It is its own query rather than a scan of the
 // notes `show` already read, because a handoff older than the newest few log
@@ -1327,7 +1730,7 @@ func (d *Daemon) gardenHandoff(seedID string) *protocol.SeedNote {
 }
 
 func noteToProtocol(note garden.Note, doc docstore.Document) protocol.SeedNote {
-	return protocol.SeedNote{
+	wire := protocol.SeedNote{
 		ID:            note.ID,
 		SeedID:        note.Seed,
 		Kind:          note.Kind,
@@ -1335,6 +1738,43 @@ func noteToProtocol(note garden.Note, doc docstore.Document) protocol.SeedNote {
 		AuthorSession: note.AuthorSession,
 		AuthorMember:  note.AuthorMember,
 		CreatedAt:     doc.CreatedAt.UTC().Format(time.RFC3339),
+	}
+	if note.Artifact != nil {
+		wire.Artifact = artifactToProtocol(*note.Artifact)
+	}
+	return wire
+}
+
+func artifactToProtocol(a garden.ArtifactReference) *protocol.SeedArtifactReference {
+	wire := &protocol.SeedArtifactReference{Kind: a.Kind}
+	if a.NotebookDocumentID != "" {
+		wire.NotebookDocumentID = protocol.Ptr(a.NotebookDocumentID)
+	}
+	if a.Repository != "" {
+		wire.Repository = protocol.Ptr(a.Repository)
+	}
+	if a.Path != "" {
+		wire.Path = protocol.Ptr(a.Path)
+	}
+	if a.URL != "" {
+		wire.URL = protocol.Ptr(a.URL)
+	}
+	return wire
+}
+
+// artifactFromProtocol reads a wire reference. It trims and validates nothing —
+// garden.ValidateArtifact does both, in one place, so the CLI and the app are
+// refused in the same words.
+func artifactFromProtocol(wire *protocol.SeedArtifactReference) *garden.ArtifactReference {
+	if wire == nil {
+		return nil
+	}
+	return &garden.ArtifactReference{
+		Kind:               wire.Kind,
+		NotebookDocumentID: protocol.Deref(wire.NotebookDocumentID),
+		Repository:         protocol.Deref(wire.Repository),
+		Path:               protocol.Deref(wire.Path),
+		URL:                protocol.Deref(wire.URL),
 	}
 }
 

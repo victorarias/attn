@@ -9,11 +9,17 @@ import { deriveTileTitle } from '../../utils/tilePresentation';
 import { serializeNotebookTileParams, type TileLeaf } from '../../types/workspace';
 import { NotebookSurfaceProvider, type NotebookSurfaceContextValue } from '../../contexts/NotebookSurfaceContext';
 import { setMarkdownAnnotationsTransport } from '../MarkdownReader/annotations/transport';
+import { fileMarkdownSource, seedMarkdownSource } from '../MarkdownReader/documentSource';
 import type {
   MarkdownAnnotationsSubmitResult,
   MarkdownAnnotationsTransport,
 } from '../MarkdownReader/annotations/transport';
 import type { WireAnnotation } from '../MarkdownReader/annotations/types';
+import { annotationToWire } from '../MarkdownReader/annotations/types';
+import { createAnchor, extractBlockTexts } from '../MarkdownReader/anchoring';
+import { DaemonApiProvider, type DaemonApi } from '../../contexts/DaemonApiContext';
+import type { Seed } from '../../types/generated';
+import type { SeedDocument } from '../SeedDocumentView';
 
 vi.mock('@tauri-apps/plugin-dialog', () => ({ open: vi.fn() }));
 
@@ -60,8 +66,24 @@ const testSurfaceValue: NotebookSurfaceContextValue = {
   connectionGeneration: 0,
 };
 
-function NotebookSurfaceTestWrapper({ children }: { children: ReactNode }) {
-  return <NotebookSurfaceProvider value={testSurfaceValue}>{children}</NotebookSurfaceProvider>;
+const defaultDaemonApi = {} as DaemonApi;
+
+function NotebookSurfaceTestWrapper({
+  api = defaultDaemonApi,
+  children,
+}: {
+  api?: DaemonApi;
+  children: ReactNode;
+}) {
+  return (
+    <DaemonApiProvider api={api}>
+      <NotebookSurfaceProvider value={testSurfaceValue}>{children}</NotebookSurfaceProvider>
+    </DaemonApiProvider>
+  );
+}
+
+function SeedTileTestWrapper({ api, children }: { api: DaemonApi; children: ReactNode }) {
+  return <NotebookSurfaceTestWrapper api={api}>{children}</NotebookSurfaceTestWrapper>;
 }
 
 const opener = vi.hoisted(() => ({
@@ -597,10 +619,23 @@ function globalNote(id = 'g1'): WireAnnotation {
   return { id, type: 'global', text: 'whole-doc note', created_at: 1 };
 }
 
+function anchoredNote(content: string, needle: string): WireAnnotation {
+  const blocks = extractBlockTexts(content);
+  const block = blocks.find((candidate) => candidate.text.includes(needle))!;
+  const start = block.text.indexOf(needle);
+  return annotationToWire({
+    id: 'stored-1',
+    type: 'comment',
+    text: 'stay attached',
+    anchor: createAnchor(content, block.blockId, start, start + needle.length, blocks)!,
+    createdAt: 1,
+  });
+}
+
 function makeSendTransport(seed: WireAnnotation[] = [globalNote()]) {
   const getSpy = vi.fn(async () => ({ annotations: seed, generation: 5 }));
   const saveSpy = vi.fn(async () => ({ stale: false }));
-  const clearSpy = vi.fn(async (_path: string, _workspaceId: string, generation: number) => ({ generation }));
+  const clearSpy = vi.fn(async (_source: unknown, generation: number) => ({ generation }));
   const submitSpy = vi.fn(
     async (): Promise<MarkdownAnnotationsSubmitResult> => ({ status: 'delivered', generation: 6 }),
   );
@@ -739,7 +774,11 @@ describe('WorkspaceDockTile markdown send flow', () => {
     // …and a Send inside that window goes to the NEW target, never sess-a.
     fireEvent.click(sendButton());
     await waitFor(() => {
-      expect(submitSpy).toHaveBeenCalledWith(SEND_PATH, 'sess-b', []);
+      expect(submitSpy).toHaveBeenCalledWith(
+        fileMarkdownSource('workspace-1', SEND_PATH),
+        { kind: 'session', sessionId: 'sess-b' },
+        [],
+      );
     });
 
     // The echo landing simply confirms the pick.
@@ -804,7 +843,11 @@ describe('WorkspaceDockTile markdown send flow', () => {
     fireEvent.click(sendButton());
     expect(sendButton()).toHaveTextContent('Sending…');
     await waitFor(() => {
-      expect(submitSpy).toHaveBeenCalledWith(SEND_PATH, 'sess-a', []);
+      expect(submitSpy).toHaveBeenCalledWith(
+        fileMarkdownSource('workspace-1', SEND_PATH),
+        { kind: 'session', sessionId: 'sess-a' },
+        [],
+      );
     });
 
     await act(async () => {
@@ -919,7 +962,11 @@ describe('WorkspaceDockTile markdown send flow', () => {
     const event = pressCmdEnter();
     expect(event.defaultPrevented).toBe(true); // dispatcher consumed it
     await waitFor(() => {
-      expect(submitSpy).toHaveBeenCalledWith(SEND_PATH, 'sess-a', []);
+      expect(submitSpy).toHaveBeenCalledWith(
+        fileMarkdownSource('workspace-1', SEND_PATH),
+        { kind: 'session', sessionId: 'sess-a' },
+        [],
+      );
     });
   });
 
@@ -960,5 +1007,313 @@ describe('WorkspaceDockTile markdown send flow', () => {
     event = pressCmdEnter();
     expect(event.defaultPrevented).toBe(false);
     expect(submitSpy).not.toHaveBeenCalled();
+  });
+});
+
+function seedFixture(overrides: Partial<Seed> = {}): Seed {
+  return {
+    id: 's-plan11',
+    title: 'Seed reader plan',
+    body: '# Seed body\n\nAnnotate this plan.',
+    status: 'growing',
+    step_slug: 'seed-reader-plan',
+    planter_session: '',
+    planter_member: '',
+    tender_session: 'sess-a',
+    tender_member: 'trellis',
+    edges: [],
+    template: false,
+    gate: false,
+    vars: [],
+    ready: false,
+    rev: 1,
+    created_at: '2026-08-15T08:00:00Z',
+    updated_at: '2026-08-15T08:00:00Z',
+    ...overrides,
+  };
+}
+
+function seedDocumentFixture(body = '# Seed body\n\nAnnotate this plan.'): SeedDocument {
+  return {
+    seed: seedFixture({ body }),
+    tender_holds: true,
+    children: [seedFixture({ id: 's-child1', title: 'Reader child', body: '', status: 'harvested' })],
+    notes: [{
+      id: 'n-live11',
+      seed_id: 's-plan11',
+      kind: 'note',
+      body: 'Live ledger note',
+      author_session: 'sess-a',
+      author_member: 'trellis',
+      created_at: '2026-08-15T09:00:00Z',
+    }],
+    notes_total: 1,
+    artifacts: [],
+  };
+}
+
+describe('WorkspaceDockTile seed reader', () => {
+  afterEach(() => {
+    setMarkdownAnnotationsTransport(null);
+  });
+
+  it('loads the seed document, renders its ledger, annotates by seed URI, and refetches on a garden push', async () => {
+    const first = seedDocumentFixture();
+    const second = {
+      ...seedDocumentFixture('# Updated seed body'),
+      seed: seedFixture({ body: '# Updated seed body', rev: 2 }),
+    };
+    const sendSeedDocumentGet = vi.fn()
+      .mockResolvedValueOnce(first)
+      .mockResolvedValueOnce(second);
+    const sendOpenMarkdown = vi.fn().mockResolvedValue({});
+    const daemonApi = { sendSeedDocumentGet, sendOpenMarkdown } as unknown as DaemonApi;
+    const { transport, getSpy, submitSpy } = makeSendTransport();
+    setMarkdownAnnotationsTransport(transport);
+    const onRequestContent = vi.fn();
+    const props = {
+      tile: {
+        type: 'tile' as const,
+        tileId: 'tile-seed-s-plan11',
+        tileKind: 'seed' as const,
+        tileParams: 's-plan11',
+        tileSessionId: 'sess-a',
+      },
+      workspaceId: 'workspace-1',
+      dragging: false,
+      workspaceSessions: SEND_SESSIONS,
+      gardenSeeds: [first.seed],
+      onClose: vi.fn(),
+      onHeaderPointerDown: vi.fn(),
+      onRequestContent,
+    };
+    const view = render(
+      <WorkspaceDockTile {...props} />,
+      { wrapper: ({ children }) => <SeedTileTestWrapper api={daemonApi}>{children}</SeedTileTestWrapper> },
+    );
+
+    expect(await screen.findByRole('heading', { name: 'Seed body' })).toBeInTheDocument();
+    expect(screen.getByText('Reader child')).toBeInTheDocument();
+    expect(screen.getByText('Live ledger note')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText('Seed reader plan', { selector: '.workspace-dock-tile-title' })).toBeInTheDocument();
+    });
+    expect(view.container.querySelector('.md-reader--annotating')).toBeInTheDocument();
+    expect(onRequestContent).not.toHaveBeenCalled();
+    expect(getSpy).toHaveBeenCalledWith(seedMarkdownSource('s-plan11'));
+
+    await waitFor(() => expect(sendButton()).toHaveTextContent('Send 1'));
+    fireEvent.click(sendButton());
+    await waitFor(() => {
+      expect(submitSpy).toHaveBeenCalledWith(
+        seedMarkdownSource('s-plan11'),
+        { kind: 'session', sessionId: 'sess-a' },
+        [],
+      );
+    });
+
+    view.rerender(<WorkspaceDockTile {...props} gardenSeeds={[second.seed]} />);
+    expect(await screen.findByRole('heading', { name: 'Updated seed body' })).toBeInTheDocument();
+    expect(sendSeedDocumentGet).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps the tended seed primary bound to its live tender and offers Note on seed in the caret menu', async () => {
+    const detail = seedDocumentFixture();
+    const daemonApi = {
+      sendSeedDocumentGet: vi.fn().mockResolvedValue(detail),
+      sendOpenMarkdown: vi.fn(),
+    } as unknown as DaemonApi;
+    const { transport, submitSpy } = makeSendTransport();
+    submitSpy.mockResolvedValue({ status: 'noted', generation: 8 });
+    setMarkdownAnnotationsTransport(transport);
+    render(
+      <WorkspaceDockTile
+        tile={{
+          type: 'tile', tileId: 'tile-seed-s-plan11', tileKind: 'seed',
+          tileParams: 's-plan11', tileSessionId: 'sess-b',
+        }}
+        workspaceId="workspace-1"
+        dragging={false}
+        workspaceSessions={SEND_SESSIONS}
+        gardenSeeds={[detail.seed]}
+        onClose={vi.fn()}
+        onHeaderPointerDown={vi.fn()}
+        onRequestContent={vi.fn()}
+      />,
+      { wrapper: ({ children }) => <SeedTileTestWrapper api={daemonApi}>{children}</SeedTileTestWrapper> },
+    );
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Send 1' })).toBeEnabled());
+    expect(screen.queryByRole('combobox', { name: 'Send annotations to session' })).toBeNull();
+    const caret = screen.getByRole('button', { name: 'More annotation destinations' });
+    expect(caret).toHaveAttribute('aria-haspopup', 'menu');
+    fireEvent.click(caret);
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Note on seed' }));
+
+    await waitFor(() => {
+      expect(submitSpy).toHaveBeenCalledWith(
+        seedMarkdownSource('s-plan11'),
+        { kind: 'seed', seedId: 's-plan11' },
+        [],
+      );
+    });
+    expect(await screen.findByRole('status')).toHaveTextContent('Noted ✓');
+  });
+
+  it('makes Note on seed the unsplit primary when nobody tends the seed', async () => {
+    const detail = {
+      ...seedDocumentFixture(),
+      seed: seedFixture({ tender_session: '', tender_member: '' }),
+      tender_holds: false,
+    };
+    const daemonApi = {
+      sendSeedDocumentGet: vi.fn().mockResolvedValue(detail),
+      sendOpenMarkdown: vi.fn(),
+    } as unknown as DaemonApi;
+    const { transport, submitSpy } = makeSendTransport();
+    submitSpy.mockResolvedValue({ status: 'noted', generation: 8 });
+    setMarkdownAnnotationsTransport(transport);
+    render(
+      <WorkspaceDockTile
+        tile={{ type: 'tile', tileId: 'tile-seed-s-plan11', tileKind: 'seed', tileParams: 's-plan11' }}
+        workspaceId="workspace-1"
+        dragging={false}
+        workspaceSessions={SEND_SESSIONS}
+        gardenSeeds={[detail.seed]}
+        onClose={vi.fn()}
+        onHeaderPointerDown={vi.fn()}
+        onRequestContent={vi.fn()}
+      />,
+      { wrapper: ({ children }) => <SeedTileTestWrapper api={daemonApi}>{children}</SeedTileTestWrapper> },
+    );
+
+    const primary = await screen.findByRole('button', { name: 'Note on seed 1' });
+    expect(primary).toBeEnabled();
+    expect(screen.queryByRole('button', { name: 'More annotation destinations' })).toBeNull();
+    fireEvent.click(primary);
+    await waitFor(() => {
+      expect(submitSpy).toHaveBeenCalledWith(
+        seedMarkdownSource('s-plan11'),
+        { kind: 'seed', seedId: 's-plan11' },
+        [],
+      );
+    });
+  });
+
+  it('flips the primary live across park and claim pushes without waiting for detail reads', async () => {
+    const first = seedDocumentFixture();
+    const never = new Promise<SeedDocument>(() => {});
+    const sendSeedDocumentGet = vi.fn()
+      .mockResolvedValueOnce(first)
+      .mockImplementation(() => never);
+    const daemonApi = { sendSeedDocumentGet, sendOpenMarkdown: vi.fn() } as unknown as DaemonApi;
+    const { transport, submitSpy } = makeSendTransport();
+    setMarkdownAnnotationsTransport(transport);
+    const props = {
+      tile: { type: 'tile' as const, tileId: 'tile-seed-s-plan11', tileKind: 'seed' as const, tileParams: 's-plan11' },
+      workspaceId: 'workspace-1',
+      dragging: false,
+      workspaceSessions: SEND_SESSIONS,
+      onClose: vi.fn(),
+      onHeaderPointerDown: vi.fn(),
+      onRequestContent: vi.fn(),
+    };
+    const view = render(
+      <WorkspaceDockTile {...props} gardenSeeds={[first.seed]} />,
+      { wrapper: ({ children }) => <SeedTileTestWrapper api={daemonApi}>{children}</SeedTileTestWrapper> },
+    );
+    await screen.findByRole('button', { name: 'Send 1' });
+
+    const parked = seedFixture({ tender_session: '', tender_member: '', rev: 2 });
+    view.rerender(<WorkspaceDockTile {...props} gardenSeeds={[parked]} />);
+    expect(screen.getByRole('button', { name: 'Note on seed 1' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'More annotation destinations' })).toBeNull();
+
+    const claimed = seedFixture({ tender_session: 'sess-b', tender_member: 'trellis', rev: 3 });
+    view.rerender(<WorkspaceDockTile {...props} gardenSeeds={[claimed]} />);
+    const primary = screen.getByRole('button', { name: 'Send 1' });
+    expect(screen.getByRole('button', { name: 'More annotation destinations' })).toBeInTheDocument();
+    fireEvent.click(primary);
+    await waitFor(() => {
+      expect(submitSpy).toHaveBeenCalledWith(
+        seedMarkdownSource('s-plan11'),
+        { kind: 'session', sessionId: 'sess-b' },
+        [],
+      );
+    });
+  });
+
+  it('re-anchors a persisted highlight from the pushed body without remounting or accepting a stale detail body', async () => {
+    const oldBody = 'First paragraph with target words inside it.\n';
+    const newBody = '# New introduction\n\n' + oldBody;
+    const first = {
+      ...seedDocumentFixture(oldBody),
+      seed: seedFixture({ body: oldBody }),
+    };
+    let resolveDetail: (document: SeedDocument) => void = () => {};
+    const detailPending = new Promise<SeedDocument>((resolve) => { resolveDetail = resolve; });
+    const sendSeedDocumentGet = vi.fn()
+      .mockResolvedValueOnce(first)
+      .mockReturnValueOnce(detailPending);
+    const daemonApi = { sendSeedDocumentGet, sendOpenMarkdown: vi.fn() } as unknown as DaemonApi;
+    const { transport } = makeSendTransport([anchoredNote(oldBody, 'target words')]);
+    setMarkdownAnnotationsTransport(transport);
+    const props = {
+      tile: { type: 'tile' as const, tileId: 'tile-seed-s-plan11', tileKind: 'seed' as const, tileParams: 's-plan11' },
+      workspaceId: 'workspace-1',
+      dragging: false,
+      gardenSeeds: [first.seed],
+      onClose: vi.fn(),
+      onHeaderPointerDown: vi.fn(),
+      onRequestContent: vi.fn(),
+    };
+    const view = render(
+      <WorkspaceDockTile {...props} />,
+      { wrapper: ({ children }) => <SeedTileTestWrapper api={daemonApi}>{children}</SeedTileTestWrapper> },
+    );
+    await waitFor(() => {
+      expect(view.container.querySelector('[data-md-mark="stored-1"]')).not.toBeNull();
+    });
+    const oldMark = view.container.querySelector('[data-md-mark="stored-1"]');
+    expect(oldMark).toHaveTextContent('target words');
+    const scrollNode = view.container.querySelector<HTMLElement>('.md-reader-doc')!;
+    scrollNode.scrollTop = 137;
+
+    const pushed = seedFixture({ body: newBody, rev: 2 });
+    view.rerender(<WorkspaceDockTile {...props} gardenSeeds={[pushed]} />);
+    expect(screen.getByRole('heading', { name: 'New introduction' })).toBeInTheDocument();
+    expect(view.container.querySelector('.md-reader-doc')).toBe(scrollNode);
+    expect(scrollNode.scrollTop).toBe(137);
+    await waitFor(() => {
+      expect(view.container.querySelector('[data-md-mark="stored-1"]')).toHaveTextContent('target words');
+    });
+    expect(view.container.querySelector('.md-card-orphan-badge')).toBeNull();
+    expect(screen.queryByText('⚠ moved')).toBeNull();
+    expect(sendSeedDocumentGet).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      resolveDetail({ ...first, notes_total: 2 });
+    });
+    expect(screen.getByRole('heading', { name: 'New introduction' })).toBeInTheDocument();
+  });
+
+  it('names an unknown seed read failure in the tile', async () => {
+    const daemonApi = {
+      sendSeedDocumentGet: vi.fn().mockRejectedValue(new Error('no seed s-missing is planted here')),
+      sendOpenMarkdown: vi.fn(),
+    } as unknown as DaemonApi;
+    render(
+      <WorkspaceDockTile
+        tile={{ type: 'tile', tileId: 'tile-seed-s-missing', tileKind: 'seed', tileParams: 's-missing' }}
+        workspaceId="workspace-1"
+        dragging={false}
+        onClose={vi.fn()}
+        onHeaderPointerDown={vi.fn()}
+        onRequestContent={vi.fn()}
+      />,
+      { wrapper: ({ children }) => <SeedTileTestWrapper api={daemonApi}>{children}</SeedTileTestWrapper> },
+    );
+
+    expect(await screen.findByText('no seed s-missing is planted here')).toBeInTheDocument();
   });
 });

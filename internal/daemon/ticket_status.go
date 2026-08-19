@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/victorarias/attn/internal/garden"
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/store"
 )
@@ -104,10 +105,51 @@ func (d *Daemon) handleSetTicketStatus(conn net.Conn, msg *protocol.SetTicketSta
 		Ok:                 true,
 		TicketStatusResult: result,
 	})
+	d.mirrorStatusOntoSeed(sourceSessionID, updated, msg.WorkState, comment)
 	// The agent moved its own ticket; notify the other observers (the chief) so the
 	// board→watcher direction reflects it. The agent itself authored the event, so
 	// Notify excludes it — no self-nudge.
 	d.notifyTicketObservers(updated.ID)
 	// Refresh the app's board view: the column moved.
 	d.publishTicketFact(FactTicketStatusChanged, updated.ID)
+}
+
+// mirrorStatusOntoSeed writes the reported work state onto the log of the seed
+// this session is bound to, so the seed carries a faithful thread of the work
+// while tickets are still the channel the agent reports through. The CLI is
+// unchanged and knows nothing about seeds: the daemon mirrors.
+//
+// It mirrors a session reporting on its own work and nothing else. The explicit
+// `--ticket <id>` form is deliberately permissive — any session may nudge any
+// ticket's column for awareness — and a peer moving somebody else's card is not
+// a status report about work it is doing.
+//
+// The mirror never fails the report. The ticket already moved; losing the note
+// is worth a log line, not an error handed to an agent that did nothing wrong.
+//
+// The seed's own lifecycle does not move with the column. A delegate reporting
+// `completed` writes a note; closing a seed stays the deliberate
+// `attn seed harvest`, with what got done in its own words.
+func (d *Daemon) mirrorStatusOntoSeed(sessionID string, ticket *store.Ticket, state protocol.DispatchWorkState, comment string) {
+	if ticket == nil || ticket.Assignee != sessionID {
+		return
+	}
+	seedID, ok := d.gardenDispatchCrown(sessionID)
+	if !ok {
+		return
+	}
+	if _, err := d.appendSeedNote(seedID, statusNoteBody(state, comment), sessionID, "", garden.NoteKindNote, nil); err != nil {
+		d.logf("garden: mirroring %s onto seed %s: %v", state, seedID, err)
+	}
+}
+
+// statusNoteBody renders one reported state as a log line. The state leads,
+// because that is what a reader scanning the log is looking for; the comment is
+// the report itself and follows on its own paragraph.
+func statusNoteBody(state protocol.DispatchWorkState, comment string) string {
+	line := fmt.Sprintf("reported %s", state)
+	if comment = strings.TrimSpace(comment); comment != "" {
+		return line + "\n\n" + comment
+	}
+	return line
 }

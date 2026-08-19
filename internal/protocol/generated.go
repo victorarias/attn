@@ -106,6 +106,9 @@ type AgentMsgMessage struct {
 	// SourceSessionID corresponds to the JSON schema field "source_session_id".
 	SourceSessionID string `json:"source_session_id"`
 
+	// TargetSeedID corresponds to the JSON schema field "target_seed_id".
+	TargetSeedID *string `json:"target_seed_id,omitempty,omitzero"`
+
 	// TargetSessionID corresponds to the JSON schema field "target_session_id".
 	TargetSessionID string `json:"target_session_id"`
 }
@@ -3724,17 +3727,6 @@ type GetSettingsMessage struct {
 	Cmd string `json:"cmd"`
 }
 
-type GetTicketMessage struct {
-	// Cmd corresponds to the JSON schema field "cmd".
-	Cmd string `json:"cmd"`
-
-	// RequestID corresponds to the JSON schema field "request_id".
-	RequestID *string `json:"request_id,omitempty,omitzero"`
-
-	// TicketID corresponds to the JSON schema field "ticket_id".
-	TicketID string `json:"ticket_id"`
-}
-
 type GitFileChange struct {
 	// Additions corresponds to the JSON schema field "additions".
 	Additions *int `json:"additions,omitempty,omitzero"`
@@ -3953,9 +3945,6 @@ type InitialStateMessage struct {
 
 	// SourceFingerprint corresponds to the JSON schema field "source_fingerprint".
 	SourceFingerprint *string `json:"source_fingerprint,omitempty,omitzero"`
-
-	// Tickets corresponds to the JSON schema field "tickets".
-	Tickets []TicketRow `json:"tickets,omitempty,omitzero"`
 
 	// Warnings corresponds to the JSON schema field "warnings".
 	Warnings []DaemonWarning `json:"warnings,omitempty,omitzero"`
@@ -4274,20 +4263,32 @@ type MarkdownAnnotationsClearMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
 
+	// DocumentUri corresponds to the JSON schema field "document_uri".
+	DocumentUri string `json:"document_uri"`
+
 	// Generation corresponds to the JSON schema field "generation".
 	Generation int `json:"generation"`
 
 	// Path corresponds to the JSON schema field "path".
-	Path string `json:"path"`
+	Path *string `json:"path,omitempty,omitzero"`
 
 	// RequestID corresponds to the JSON schema field "request_id".
 	RequestID string `json:"request_id"`
 
+	// SeedID corresponds to the JSON schema field "seed_id".
+	SeedID *string `json:"seed_id,omitempty,omitzero"`
+
+	// SourceKind corresponds to the JSON schema field "source_kind".
+	SourceKind string `json:"source_kind"`
+
 	// WorkspaceID corresponds to the JSON schema field "workspace_id".
-	WorkspaceID string `json:"workspace_id"`
+	WorkspaceID *string `json:"workspace_id,omitempty,omitzero"`
 }
 
 type MarkdownAnnotationsClearResultMessage struct {
+	// DocumentUri corresponds to the JSON schema field "document_uri".
+	DocumentUri string `json:"document_uri"`
+
 	// Error corresponds to the JSON schema field "error".
 	Error *string `json:"error,omitempty,omitzero"`
 
@@ -4298,35 +4299,53 @@ type MarkdownAnnotationsClearResultMessage struct {
 	Generation int `json:"generation"`
 
 	// Path corresponds to the JSON schema field "path".
-	Path string `json:"path"`
+	Path *string `json:"path,omitempty,omitzero"`
 
 	// RequestID corresponds to the JSON schema field "request_id".
 	RequestID string `json:"request_id"`
+
+	// SeedID corresponds to the JSON schema field "seed_id".
+	SeedID *string `json:"seed_id,omitempty,omitzero"`
+
+	// SourceKind corresponds to the JSON schema field "source_kind".
+	SourceKind string `json:"source_kind"`
 
 	// Success corresponds to the JSON schema field "success".
 	Success bool `json:"success"`
 
 	// WorkspaceID corresponds to the JSON schema field "workspace_id".
-	WorkspaceID string `json:"workspace_id"`
+	WorkspaceID *string `json:"workspace_id,omitempty,omitzero"`
 }
 
 type MarkdownAnnotationsGetMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
 
+	// DocumentUri corresponds to the JSON schema field "document_uri".
+	DocumentUri string `json:"document_uri"`
+
 	// Path corresponds to the JSON schema field "path".
-	Path string `json:"path"`
+	Path *string `json:"path,omitempty,omitzero"`
 
 	// RequestID corresponds to the JSON schema field "request_id".
 	RequestID string `json:"request_id"`
 
+	// SeedID corresponds to the JSON schema field "seed_id".
+	SeedID *string `json:"seed_id,omitempty,omitzero"`
+
+	// SourceKind corresponds to the JSON schema field "source_kind".
+	SourceKind string `json:"source_kind"`
+
 	// WorkspaceID corresponds to the JSON schema field "workspace_id".
-	WorkspaceID string `json:"workspace_id"`
+	WorkspaceID *string `json:"workspace_id,omitempty,omitzero"`
 }
 
 type MarkdownAnnotationsGetResultMessage struct {
 	// Annotations corresponds to the JSON schema field "annotations".
 	Annotations []MarkdownAnnotation `json:"annotations"`
+
+	// DocumentUri corresponds to the JSON schema field "document_uri".
+	DocumentUri string `json:"document_uri"`
 
 	// Error corresponds to the JSON schema field "error".
 	Error *string `json:"error,omitempty,omitzero"`
@@ -4338,16 +4357,22 @@ type MarkdownAnnotationsGetResultMessage struct {
 	Generation int `json:"generation"`
 
 	// Path corresponds to the JSON schema field "path".
-	Path string `json:"path"`
+	Path *string `json:"path,omitempty,omitzero"`
 
 	// RequestID corresponds to the JSON schema field "request_id".
 	RequestID string `json:"request_id"`
+
+	// SeedID corresponds to the JSON schema field "seed_id".
+	SeedID *string `json:"seed_id,omitempty,omitzero"`
+
+	// SourceKind corresponds to the JSON schema field "source_kind".
+	SourceKind string `json:"source_kind"`
 
 	// Success corresponds to the JSON schema field "success".
 	Success bool `json:"success"`
 
 	// WorkspaceID corresponds to the JSON schema field "workspace_id".
-	WorkspaceID string `json:"workspace_id"`
+	WorkspaceID *string `json:"workspace_id,omitempty,omitzero"`
 }
 
 type MarkdownAnnotationsSaveMessage struct {
@@ -4357,20 +4382,32 @@ type MarkdownAnnotationsSaveMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
 
+	// DocumentUri corresponds to the JSON schema field "document_uri".
+	DocumentUri string `json:"document_uri"`
+
 	// Generation corresponds to the JSON schema field "generation".
 	Generation int `json:"generation"`
 
 	// Path corresponds to the JSON schema field "path".
-	Path string `json:"path"`
+	Path *string `json:"path,omitempty,omitzero"`
 
 	// RequestID corresponds to the JSON schema field "request_id".
 	RequestID string `json:"request_id"`
 
+	// SeedID corresponds to the JSON schema field "seed_id".
+	SeedID *string `json:"seed_id,omitempty,omitzero"`
+
+	// SourceKind corresponds to the JSON schema field "source_kind".
+	SourceKind string `json:"source_kind"`
+
 	// WorkspaceID corresponds to the JSON schema field "workspace_id".
-	WorkspaceID string `json:"workspace_id"`
+	WorkspaceID *string `json:"workspace_id,omitempty,omitzero"`
 }
 
 type MarkdownAnnotationsSaveResultMessage struct {
+	// DocumentUri corresponds to the JSON schema field "document_uri".
+	DocumentUri string `json:"document_uri"`
+
 	// Error corresponds to the JSON schema field "error".
 	Error *string `json:"error,omitempty,omitzero"`
 
@@ -4381,10 +4418,16 @@ type MarkdownAnnotationsSaveResultMessage struct {
 	Generation int `json:"generation"`
 
 	// Path corresponds to the JSON schema field "path".
-	Path string `json:"path"`
+	Path *string `json:"path,omitempty,omitzero"`
 
 	// RequestID corresponds to the JSON schema field "request_id".
 	RequestID string `json:"request_id"`
+
+	// SeedID corresponds to the JSON schema field "seed_id".
+	SeedID *string `json:"seed_id,omitempty,omitzero"`
+
+	// SourceKind corresponds to the JSON schema field "source_kind".
+	SourceKind string `json:"source_kind"`
 
 	// Stale corresponds to the JSON schema field "stale".
 	Stale *bool `json:"stale,omitempty,omitzero"`
@@ -4393,27 +4436,45 @@ type MarkdownAnnotationsSaveResultMessage struct {
 	Success bool `json:"success"`
 
 	// WorkspaceID corresponds to the JSON schema field "workspace_id".
-	WorkspaceID string `json:"workspace_id"`
+	WorkspaceID *string `json:"workspace_id,omitempty,omitzero"`
 }
 
 type MarkdownAnnotationsSubmitMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
 
+	// DocumentUri corresponds to the JSON schema field "document_uri".
+	DocumentUri string `json:"document_uri"`
+
 	// OrphanedIds corresponds to the JSON schema field "orphaned_ids".
 	OrphanedIds []string `json:"orphaned_ids,omitempty,omitzero"`
 
 	// Path corresponds to the JSON schema field "path".
-	Path string `json:"path"`
+	Path *string `json:"path,omitempty,omitzero"`
 
 	// RequestID corresponds to the JSON schema field "request_id".
 	RequestID string `json:"request_id"`
 
+	// SeedID corresponds to the JSON schema field "seed_id".
+	SeedID *string `json:"seed_id,omitempty,omitzero"`
+
+	// SourceKind corresponds to the JSON schema field "source_kind".
+	SourceKind string `json:"source_kind"`
+
+	// TargetSeedID corresponds to the JSON schema field "target_seed_id".
+	TargetSeedID *string `json:"target_seed_id,omitempty,omitzero"`
+
 	// TargetSessionID corresponds to the JSON schema field "target_session_id".
-	TargetSessionID string `json:"target_session_id"`
+	TargetSessionID *string `json:"target_session_id,omitempty,omitzero"`
+
+	// WorkspaceID corresponds to the JSON schema field "workspace_id".
+	WorkspaceID *string `json:"workspace_id,omitempty,omitzero"`
 }
 
 type MarkdownAnnotationsSubmitResultMessage struct {
+	// DocumentUri corresponds to the JSON schema field "document_uri".
+	DocumentUri string `json:"document_uri"`
+
 	// Error corresponds to the JSON schema field "error".
 	Error *string `json:"error,omitempty,omitzero"`
 
@@ -4424,10 +4485,16 @@ type MarkdownAnnotationsSubmitResultMessage struct {
 	Generation *int `json:"generation,omitempty,omitzero"`
 
 	// Path corresponds to the JSON schema field "path".
-	Path string `json:"path"`
+	Path *string `json:"path,omitempty,omitzero"`
 
 	// RequestID corresponds to the JSON schema field "request_id".
 	RequestID string `json:"request_id"`
+
+	// SeedID corresponds to the JSON schema field "seed_id".
+	SeedID *string `json:"seed_id,omitempty,omitzero"`
+
+	// SourceKind corresponds to the JSON schema field "source_kind".
+	SourceKind string `json:"source_kind"`
 
 	// Status corresponds to the JSON schema field "status".
 	Status string `json:"status"`
@@ -4435,8 +4502,14 @@ type MarkdownAnnotationsSubmitResultMessage struct {
 	// Success corresponds to the JSON schema field "success".
 	Success bool `json:"success"`
 
+	// TargetSeedID corresponds to the JSON schema field "target_seed_id".
+	TargetSeedID *string `json:"target_seed_id,omitempty,omitzero"`
+
 	// TargetSessionID corresponds to the JSON schema field "target_session_id".
-	TargetSessionID string `json:"target_session_id"`
+	TargetSessionID *string `json:"target_session_id,omitempty,omitzero"`
+
+	// WorkspaceID corresponds to the JSON schema field "workspace_id".
+	WorkspaceID *string `json:"workspace_id,omitempty,omitzero"`
 }
 
 type MergePRMessage struct {
@@ -4870,6 +4943,43 @@ type OpenMarkdownResultMessage struct {
 
 	// RequestID corresponds to the JSON schema field "request_id".
 	RequestID *string `json:"request_id,omitempty,omitzero"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
+
+	// TileID corresponds to the JSON schema field "tile_id".
+	TileID *string `json:"tile_id,omitempty,omitzero"`
+
+	// WorkspaceID corresponds to the JSON schema field "workspace_id".
+	WorkspaceID *string `json:"workspace_id,omitempty,omitzero"`
+}
+
+type OpenSeedMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID *string `json:"request_id,omitempty,omitzero"`
+
+	// SeedID corresponds to the JSON schema field "seed_id".
+	SeedID string `json:"seed_id"`
+
+	// SessionID corresponds to the JSON schema field "session_id".
+	SessionID *string `json:"session_id,omitempty,omitzero"`
+}
+
+type OpenSeedResultMessage struct {
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty,omitzero"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID *string `json:"request_id,omitempty,omitzero"`
+
+	// SeedID corresponds to the JSON schema field "seed_id".
+	SeedID string `json:"seed_id"`
 
 	// Success corresponds to the JSON schema field "success".
 	Success bool `json:"success"`
@@ -6051,6 +6161,9 @@ type Response struct {
 	// Repos corresponds to the JSON schema field "repos".
 	Repos []RepoState `json:"repos,omitempty,omitzero"`
 
+	// SeedEditResult corresponds to the JSON schema field "seed_edit_result".
+	SeedEditResult *SeedEditResult `json:"seed_edit_result,omitempty,omitzero"`
+
 	// SeedLinkResult corresponds to the JSON schema field "seed_link_result".
 	SeedLinkResult *SeedLinkResult `json:"seed_link_result,omitempty,omitzero"`
 
@@ -6243,12 +6356,93 @@ type Seed struct {
 	Vars []SeedVar `json:"vars"`
 }
 
+type SeedArtifactReference struct {
+	// Kind corresponds to the JSON schema field "kind".
+	Kind string `json:"kind"`
+
+	// NotebookDocumentID corresponds to the JSON schema field "notebook_document_id".
+	NotebookDocumentID *string `json:"notebook_document_id,omitempty,omitzero"`
+
+	// Path corresponds to the JSON schema field "path".
+	Path *string `json:"path,omitempty,omitzero"`
+
+	// Repository corresponds to the JSON schema field "repository".
+	Repository *string `json:"repository,omitempty,omitzero"`
+
+	// URL corresponds to the JSON schema field "url".
+	URL *string `json:"url,omitempty,omitzero"`
+}
+
+type SeedDocument struct {
+	// Artifacts corresponds to the JSON schema field "artifacts".
+	Artifacts []SeedArtifactReference `json:"artifacts"`
+
+	// Children corresponds to the JSON schema field "children".
+	Children []Seed `json:"children"`
+
+	// Notes corresponds to the JSON schema field "notes".
+	Notes []SeedNote `json:"notes"`
+
+	// NotesTotal corresponds to the JSON schema field "notes_total".
+	NotesTotal int `json:"notes_total"`
+
+	// Seed corresponds to the JSON schema field "seed".
+	Seed Seed `json:"seed"`
+
+	// TenderHolds corresponds to the JSON schema field "tender_holds".
+	TenderHolds bool `json:"tender_holds"`
+}
+
+type SeedDocumentGetMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID string `json:"request_id"`
+
+	// SeedID corresponds to the JSON schema field "seed_id".
+	SeedID string `json:"seed_id"`
+}
+
+type SeedDocumentGetResultMessage struct {
+	// Document corresponds to the JSON schema field "document".
+	Document *SeedDocument `json:"document,omitempty,omitzero"`
+
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty,omitzero"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID string `json:"request_id"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
+}
+
 type SeedEdge struct {
 	// Kind corresponds to the JSON schema field "kind".
 	Kind string `json:"kind"`
 
 	// To corresponds to the JSON schema field "to".
 	To string `json:"to"`
+}
+
+type SeedEditMessage struct {
+	// Body corresponds to the JSON schema field "body".
+	Body string `json:"body"`
+
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// SeedID corresponds to the JSON schema field "seed_id".
+	SeedID string `json:"seed_id"`
+}
+
+type SeedEditResult struct {
+	// Seed corresponds to the JSON schema field "seed".
+	Seed Seed `json:"seed"`
 }
 
 type SeedLinkMessage struct {
@@ -6302,6 +6496,9 @@ type SeedListResult struct {
 }
 
 type SeedNote struct {
+	// Artifact corresponds to the JSON schema field "artifact".
+	Artifact *SeedArtifactReference `json:"artifact,omitempty,omitzero"`
+
 	// AuthorMember corresponds to the JSON schema field "author_member".
 	AuthorMember string `json:"author_member"`
 
@@ -6325,6 +6522,9 @@ type SeedNote struct {
 }
 
 type SeedNoteMessage struct {
+	// Artifact corresponds to the JSON schema field "artifact".
+	Artifact *SeedArtifactReference `json:"artifact,omitempty,omitzero"`
+
 	// Body corresponds to the JSON schema field "body".
 	Body string `json:"body"`
 
@@ -6500,6 +6700,40 @@ type SeedRelation struct {
 	Title string `json:"title"`
 }
 
+type SeedResumeMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID *string `json:"request_id,omitempty,omitzero"`
+
+	// SeedID corresponds to the JSON schema field "seed_id".
+	SeedID string `json:"seed_id"`
+}
+
+type SeedResumeResultMessage struct {
+	// AlreadyRunning corresponds to the JSON schema field "already_running".
+	AlreadyRunning *bool `json:"already_running,omitempty,omitzero"`
+
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty,omitzero"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID string `json:"request_id"`
+
+	// SessionID corresponds to the JSON schema field "session_id".
+	SessionID *string `json:"session_id,omitempty,omitzero"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
+
+	// WorkspaceID corresponds to the JSON schema field "workspace_id".
+	WorkspaceID *string `json:"workspace_id,omitempty,omitzero"`
+}
+
 type SeedShowMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
@@ -6509,6 +6743,9 @@ type SeedShowMessage struct {
 }
 
 type SeedShowResult struct {
+	// Artifacts corresponds to the JSON schema field "artifacts".
+	Artifacts []SeedArtifactReference `json:"artifacts"`
+
 	// Handoff corresponds to the JSON schema field "handoff".
 	Handoff *SeedNote `json:"handoff,omitempty,omitzero"`
 
@@ -6646,6 +6883,9 @@ type Session struct {
 
 	// PinnedAt corresponds to the JSON schema field "pinned_at".
 	PinnedAt *string `json:"pinned_at,omitempty,omitzero"`
+
+	// SeedID corresponds to the JSON schema field "seed_id".
+	SeedID *string `json:"seed_id,omitempty,omitzero"`
 
 	// State corresponds to the JSON schema field "state".
 	State SessionState `json:"state"`
@@ -7609,20 +7849,6 @@ type Ticket struct {
 	UpdatedAt string `json:"updated_at"`
 }
 
-type TicketActionResultMessage struct {
-	// Error corresponds to the JSON schema field "error".
-	Error *string `json:"error,omitempty,omitzero"`
-
-	// Event corresponds to the JSON schema field "event".
-	Event string `json:"event"`
-
-	// RequestID corresponds to the JSON schema field "request_id".
-	RequestID string `json:"request_id"`
-
-	// Success corresponds to the JSON schema field "success".
-	Success bool `json:"success"`
-}
-
 type TicketActivity struct {
 	// Author corresponds to the JSON schema field "author".
 	Author string `json:"author"`
@@ -7651,23 +7877,6 @@ type TicketActivityKind string
 const TicketActivityKindAttach TicketActivityKind = "attach"
 const TicketActivityKindComment TicketActivityKind = "comment"
 const TicketActivityKindStatusChange TicketActivityKind = "status_change"
-
-type TicketAddCommentMessage struct {
-	// Cmd corresponds to the JSON schema field "cmd".
-	Cmd string `json:"cmd"`
-
-	// Comment corresponds to the JSON schema field "comment".
-	Comment string `json:"comment"`
-
-	// ExpectedEventSeq corresponds to the JSON schema field "expected_event_seq".
-	ExpectedEventSeq *int `json:"expected_event_seq,omitempty,omitzero"`
-
-	// RequestID corresponds to the JSON schema field "request_id".
-	RequestID *string `json:"request_id,omitempty,omitzero"`
-
-	// TicketID corresponds to the JSON schema field "ticket_id".
-	TicketID string `json:"ticket_id"`
-}
 
 type TicketArtifact struct {
 	// Filename corresponds to the JSON schema field "filename".
@@ -7757,26 +7966,6 @@ type TicketAttachResultMessage struct {
 	Success bool `json:"success"`
 }
 
-type TicketChangeStatusMessage struct {
-	// Cmd corresponds to the JSON schema field "cmd".
-	Cmd string `json:"cmd"`
-
-	// Comment corresponds to the JSON schema field "comment".
-	Comment *string `json:"comment,omitempty,omitzero"`
-
-	// ExpectedEventSeq corresponds to the JSON schema field "expected_event_seq".
-	ExpectedEventSeq *int `json:"expected_event_seq,omitempty,omitzero"`
-
-	// RequestID corresponds to the JSON schema field "request_id".
-	RequestID *string `json:"request_id,omitempty,omitzero"`
-
-	// Status corresponds to the JSON schema field "status".
-	Status TicketStatus `json:"status"`
-
-	// TicketID corresponds to the JSON schema field "ticket_id".
-	TicketID string `json:"ticket_id"`
-}
-
 type TicketCommentMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
@@ -7828,23 +8017,6 @@ type TicketCreateResult struct {
 
 	// Title corresponds to the JSON schema field "title".
 	Title string `json:"title"`
-}
-
-type TicketEditDescriptionMessage struct {
-	// Cmd corresponds to the JSON schema field "cmd".
-	Cmd string `json:"cmd"`
-
-	// Description corresponds to the JSON schema field "description".
-	Description string `json:"description"`
-
-	// ExpectedEventSeq corresponds to the JSON schema field "expected_event_seq".
-	ExpectedEventSeq *int `json:"expected_event_seq,omitempty,omitzero"`
-
-	// RequestID corresponds to the JSON schema field "request_id".
-	RequestID *string `json:"request_id,omitempty,omitzero"`
-
-	// TicketID corresponds to the JSON schema field "ticket_id".
-	TicketID string `json:"ticket_id"`
 }
 
 type TicketEvent struct {
@@ -7935,89 +8107,6 @@ type TicketListMessage struct {
 type TicketListResult struct {
 	// Tickets corresponds to the JSON schema field "tickets".
 	Tickets []Ticket `json:"tickets"`
-}
-
-type TicketResultMessage struct {
-	// Error corresponds to the JSON schema field "error".
-	Error *string `json:"error,omitempty,omitzero"`
-
-	// Event corresponds to the JSON schema field "event".
-	Event string `json:"event"`
-
-	// RequestID corresponds to the JSON schema field "request_id".
-	RequestID string `json:"request_id"`
-
-	// Success corresponds to the JSON schema field "success".
-	Success bool `json:"success"`
-
-	// Ticket corresponds to the JSON schema field "ticket".
-	Ticket *Ticket `json:"ticket,omitempty,omitzero"`
-}
-
-type TicketResumeMessage struct {
-	// Cmd corresponds to the JSON schema field "cmd".
-	Cmd string `json:"cmd"`
-
-	// RequestID corresponds to the JSON schema field "request_id".
-	RequestID *string `json:"request_id,omitempty,omitzero"`
-
-	// TicketID corresponds to the JSON schema field "ticket_id".
-	TicketID string `json:"ticket_id"`
-}
-
-type TicketResumeResultMessage struct {
-	// AlreadyRunning corresponds to the JSON schema field "already_running".
-	AlreadyRunning *bool `json:"already_running,omitempty,omitzero"`
-
-	// Error corresponds to the JSON schema field "error".
-	Error *string `json:"error,omitempty,omitzero"`
-
-	// Event corresponds to the JSON schema field "event".
-	Event string `json:"event"`
-
-	// RequestID corresponds to the JSON schema field "request_id".
-	RequestID string `json:"request_id"`
-
-	// SessionID corresponds to the JSON schema field "session_id".
-	SessionID *string `json:"session_id,omitempty,omitzero"`
-
-	// Success corresponds to the JSON schema field "success".
-	Success bool `json:"success"`
-
-	// WorkspaceID corresponds to the JSON schema field "workspace_id".
-	WorkspaceID *string `json:"workspace_id,omitempty,omitzero"`
-}
-
-type TicketRow struct {
-	// Assignee corresponds to the JSON schema field "assignee".
-	Assignee string `json:"assignee"`
-
-	// Automation corresponds to the JSON schema field "automation".
-	Automation *AutomationProvenance `json:"automation,omitempty,omitzero"`
-
-	// ClosedAt corresponds to the JSON schema field "closed_at".
-	ClosedAt *string `json:"closed_at,omitempty,omitzero"`
-
-	// Cwd corresponds to the JSON schema field "cwd".
-	Cwd string `json:"cwd"`
-
-	// ID corresponds to the JSON schema field "id".
-	ID string `json:"id"`
-
-	// LastAgentID corresponds to the JSON schema field "last_agent_id".
-	LastAgentID string `json:"last_agent_id"`
-
-	// ReconciledAt corresponds to the JSON schema field "reconciled_at".
-	ReconciledAt *string `json:"reconciled_at,omitempty,omitzero"`
-
-	// Status corresponds to the JSON schema field "status".
-	Status TicketStatus `json:"status"`
-
-	// Title corresponds to the JSON schema field "title".
-	Title string `json:"title"`
-
-	// UpdatedAt corresponds to the JSON schema field "updated_at".
-	UpdatedAt string `json:"updated_at"`
 }
 
 type TicketShowMessage struct {
@@ -8119,14 +8208,6 @@ type TicketUnsubscribeMessage struct {
 type TicketUnsubscribeResult struct {
 	// TicketID corresponds to the JSON schema field "ticket_id".
 	TicketID string `json:"ticket_id"`
-}
-
-type TicketsUpdatedMessage struct {
-	// Event corresponds to the JSON schema field "event".
-	Event string `json:"event"`
-
-	// Tickets corresponds to the JSON schema field "tickets".
-	Tickets []TicketRow `json:"tickets"`
 }
 
 type TodosMessage struct {
@@ -8386,9 +8467,6 @@ type WebSocketEvent struct {
 
 	// Ticket corresponds to the JSON schema field "ticket".
 	Ticket *Ticket `json:"ticket,omitempty,omitzero"`
-
-	// Tickets corresponds to the JSON schema field "tickets".
-	Tickets []TicketRow `json:"tickets,omitempty,omitzero"`
 
 	// TileID corresponds to the JSON schema field "tile_id".
 	TileID *string `json:"tile_id,omitempty,omitzero"`

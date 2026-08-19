@@ -226,6 +226,39 @@
   padding: 10px;
 }
 
+.garden-seed__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.garden-seed__open-tile,
+.garden-seed__reopen {
+  background: var(--color-bg-button);
+  border: 1px solid var(--color-border);
+  border-radius: 5px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font-size: var(--font-size-xs);
+  padding: 4px 8px;
+}
+
+.garden-seed__open-tile:hover,
+.garden-seed__reopen:hover {
+  border-color: var(--accent);
+  color: var(--color-text-primary);
+}
+
+.garden-seed__document-state {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  margin: 8px 0;
+}
+
+.garden-seed__document-state--error {
+  color: var(--color-error);
+}
+
 .garden-seed__meta {
   color: var(--color-text-tertiary);
   display: flex;
@@ -282,25 +315,6 @@
   flex: none;
   font-size: var(--font-size-xs);
   margin-left: auto;
-}
-
-.garden-seed__body {
-  background: var(--color-bg-elevated);
-  border-radius: 4px;
-  color: var(--color-text-secondary);
-  font-size: var(--font-size-xs);
-  margin: 0;
-  max-height: 320px;
-  overflow: auto;
-  padding: 8px;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.garden-seed__nobody {
-  color: var(--color-text-muted);
-  font-size: var(--font-size-xs);
-  margin: 0;
 }
 
 /* Where you are, and the way back. Every level is its own target so climbing

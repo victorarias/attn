@@ -143,15 +143,33 @@ func NotesSchema() docstore.CollectionSchema {
 	}
 }
 
-// Dispatch records that a session was dispatched at a crown. It is scope
-// inference, nothing more: flag-free `ready` inside that session answers with
-// the plot's ready seeds and launch priming starts from the crown — never a
-// fence (the session may tend or plant anything) and never an assignment
-// (who-holds-what stays the per-seed tender, which is why no surface renders
-// this record). Keyed by session id: a session is dispatched at one crown.
+// Dispatch is the seed a session reports to, and how to relaunch the session
+// that reports to it. Keyed by session id: a session is dispatched at one seed.
+//
+// `Crown` is that seed — the plot a delegation was aimed at, or the seed
+// planted for it. It is scope inference for the session's own reading of the
+// garden (flag-free `ready` answers with the plot, launch priming starts from
+// the crown) and never a fence: the session may tend or plant anything, and
+// who-holds-what stays the per-seed tender.
+//
+// `Cwd` and `Agent` are what a resume needs. They live here because a session
+// row is deleted when the session closes, and reopening a delegate whose
+// session is gone is exactly the case that has to work.
 type Dispatch struct {
 	SessionID string `json:"session_id"`
 	Crown     string `json:"crown"`
+	Cwd       string `json:"cwd,omitempty"`
+	Agent     string `json:"agent,omitempty"`
+	// FromChief records that the chief of staff started this delegation. The
+	// board used to carry it as the ticket's owning role; the dispatch record is
+	// where it lives now, and it stays true through a role transfer for the same
+	// reason the role attachment did — it says who dispatched, not who is chief.
+	FromChief bool `json:"from_chief,omitempty"`
+	// Resume is the agent-native conversation id this session was last seen on.
+	// A session row is deleted on close and takes its own copy with it, so this
+	// is what lets a seed's Resume reattach the prior conversation instead of
+	// dropping into the agent's picker.
+	Resume string `json:"resume,omitempty"`
 }
 
 // DispatchesSchema declares the dispatch collection. `crown` is declared so
@@ -256,8 +274,14 @@ func ValidatePlant(title, body string) error {
 	if n := len([]rune(trimmed)); n > MaxTitleChars {
 		return fmt.Errorf("that title is %d characters and the limit is %d; a title names the work in a line — the detail goes in the body (`-m`, or `-m -` to read stdin)", n, MaxTitleChars)
 	}
+	return ValidateBody(body)
+}
+
+// ValidateBody applies the same measured body tripwire to planting and later
+// edits, so a seed cannot grow past the limit through a different door.
+func ValidateBody(body string) error {
 	if n := len(body); n > MaxBodyBytes {
-		return fmt.Errorf("that body is %d bytes and the limit is %d; a seed's body is a plan, not an archive", n, MaxBodyBytes)
+		return fmt.Errorf("max_body_bytes=%d, asked for %d; a seed's body is a plan, not an archive", MaxBodyBytes, n)
 	}
 	return nil
 }

@@ -38,6 +38,8 @@ export interface Session {
     readonly nudge_fires_at?: string;
     readonly parent_session_id?: string;
     readonly pinned_at?: string;
+    /** The seed this session reports to, when it was dispatched onto one. */
+    readonly seed_id?: string;
     readonly state: "idle" | "launching" | "pending_approval" | "recoverable" | "scheduled" | "unknown" | "waiting_input" | "working";
     readonly state_reason?: string;
     readonly state_since: string;

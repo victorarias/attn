@@ -1,0 +1,49 @@
+/* GardenSurface.css — fullscreen shell for the garden.
+   Mirrors .notebook-browser-shell: fixed inset-0, z-index 400, framed inner
+   panel. Token-only; no invented hex. */
+
+.garden-surface-shell {
+  position: fixed;
+  inset: 0;
+  z-index: 400;
+  padding: 12px;
+  background: var(--color-bg-app);
+  animation: garden-surface-reveal 170ms ease-out;
+}
+
+.garden-surface {
+  position: relative;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--color-bg-panel);
+}
+
+/* The panel fills the framed surface; its own corners are clipped by the
+   surface's overflow:hidden. */
+.garden-surface > .garden-panel {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes garden-surface-reveal {
+    from {
+      opacity: 0;
+      transform: scale(0.99);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .garden-surface-shell {
+    animation: none;
+  }
+}

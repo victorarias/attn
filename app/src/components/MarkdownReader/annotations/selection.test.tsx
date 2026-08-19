@@ -7,6 +7,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { render } from '@testing-library/react';
 import { MarkdownReader } from '../index';
+import { fileMarkdownSource } from '../documentSource';
 import { extractBlockTexts } from '../anchoring';
 import { evaluateSelection, type SelectionLike } from './selection';
 
@@ -43,7 +44,11 @@ const DOC = [
 
 function setup(content = DOC) {
   const { container, unmount } = render(
-    <MarkdownReader content={content} path="/tmp/project/README.md" allowLocalTargets />,
+    <MarkdownReader
+      content={content}
+      source={fileMarkdownSource('workspace-1', '/tmp/project/README.md')}
+      allowLocalTargets
+    />,
   );
   const root = container as HTMLElement;
   const blocks = extractBlockTexts(content);

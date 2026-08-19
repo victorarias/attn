@@ -179,7 +179,7 @@ orphans keep their rows.
 
 An **agent conversation** is the provider-owned history currently hosted by one
 attn session: its native id, transcript, and resume target. The attn session is
-the stable container — its workspace, pane, ticket binding, PTY, and turns can
+the stable container — its workspace, pane, seed binding, PTY, and turns can
 continue while the agent conversation changes. Codex `/new` is such a change: it
 starts a new rollout inside the same running attn session.
 
@@ -228,14 +228,27 @@ screen produces no commands, so that proxy cannot see the case the tier exists f
 
 ## Ticket
 
-The chief delegates a unit of work to a sub-agent, and that work is tracked as a
-**ticket** bound to the delegated session (the session is the ticket's assignee).
-The agent reports its own **work state** — in progress, needs input, ready for
-review, completed, or failed — which moves the ticket across the board
-(Todo · Working · Blocked · In Review · Done). Comments, status changes, and
-artifact attachments accumulate on the ticket's activity thread. Current artifacts
-are the files in the ticket's Notebook directory, and the chief watches
-progress from the ticket view and board rather than polling the agent.
+A **ticket** is how delegated work was tracked before the garden: one card bound
+to the delegated session (the session is its assignee), moved across a board
+(Todo · Working · Blocked · In Review · Done) by the agent's own reports, with
+comments, status changes, and artifact attachments on its activity thread.
+
+Tickets are retired. A delegation binds a **seed** instead, reports are notes on
+its log, and every `attn ticket` write verb prints the garden command that
+replaced it and exits nonzero. Three things survive, on purpose:
+
+- `attn ticket show` and `attn ticket list` keep reading the archived board
+  forever — a done ticket has no garden equivalent to point at.
+- Work that was already ticket-bound at the cutover keeps moving on its ticket:
+  the daemon mirrors its tender's garden moves and notes onto it, so an
+  in-flight delegation still closes where it started.
+- An automation run still mints its own daemon-internal ticket, because
+  continuation, retention, and crash classification are keyed on it. It is not
+  an agent-facing card: no CLI verb creates or moves one, and the seed moves
+  mirror onto it like any other.
+
+Unbound backlog todos were converted to seeds at the cutover, each carrying its
+description as the seed's body and a log note naming the ticket it came from.
 
 ## The raw tier
 
@@ -734,7 +747,7 @@ describe the ownership relationship carried over it.
 A **conversation session** is an attn session whose agent runs headless in a
 process attn spawns, instead of a terminal program driven through a PTY. It is a
 session in every other respect — it has a workspace, a pane, a state, turns, and
-a ticket binding — so nothing that reasons about sessions has to know which kind
+a seed binding — so nothing that reasons about sessions has to know which kind
 it is looking at.
 
 What differs is the surface. A PTY session's surface is a byte stream and a

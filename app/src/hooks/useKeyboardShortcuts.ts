@@ -30,7 +30,7 @@ interface KeyboardShortcutsConfig {
   onOpenFile?: () => void;
   onOpenNotebookTile?: () => void;
   onOpenNotebookFullscreen?: () => void;
-  onOpenBoard?: () => void;
+  onOpenGarden?: () => void;
   onQuit?: () => void;
   enabled: boolean;
 }
@@ -61,7 +61,7 @@ export function useKeyboardShortcuts({
   onOpenFile,
   onOpenNotebookTile,
   onOpenNotebookFullscreen,
-  onOpenBoard,
+  onOpenGarden,
   onQuit,
   enabled,
 }: KeyboardShortcutsConfig) {
@@ -124,8 +124,8 @@ export function useKeyboardShortcuts({
   useShortcut('notebook.openTile', onOpenNotebookTile ?? (() => {}), enabled && !!onOpenNotebookTile);
   useShortcut('notebook.openFullscreen', onOpenNotebookFullscreen ?? (() => {}), enabled && !!onOpenNotebookFullscreen);
 
-  // Tickets board: open the fullscreen surface (Esc / the close button dismiss it).
-  useShortcut('board.open', onOpenBoard ?? (() => {}), enabled && !!onOpenBoard);
+  // The garden: open the fullscreen surface (Esc / the close button dismiss it).
+  useShortcut('board.open', onOpenGarden ?? (() => {}), enabled && !!onOpenGarden);
 
   useEffect(() => {
     const preventWindowCloseShortcut = (e: KeyboardEvent) => {

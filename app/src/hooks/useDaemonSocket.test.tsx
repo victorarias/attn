@@ -6,7 +6,7 @@ import { LOCAL_SNAPSHOT_FORMAT } from '../pty/attachPlanning';
 import { AutomationActionTimeoutError, PROTOCOL_VERSION, retryTransientAttachRequest, useDaemonSocket } from './useDaemonSocket';
 import { useWorkflowRunsStore } from '../store/workflowRuns';
 import { useAutomationsStore } from '../store/automations';
-import { TicketStatus } from '../types/generated';
+import { fileMarkdownSource, seedMarkdownSource } from '../components/MarkdownReader/documentSource';
 
 class FakeWebSocket {
   static readonly CONNECTING = 0;
@@ -2927,7 +2927,7 @@ describe('useDaemonSocket fs surface', () => {
   });
 });
 
-describe('useDaemonSocket ticket request/result', () => {
+describe('useDaemonSocket seed resume request/result', () => {
   let originalWebSocket: typeof WebSocket;
 
   beforeEach(() => {
@@ -2940,7 +2940,7 @@ describe('useDaemonSocket ticket request/result', () => {
     vi.clearAllMocks();
   });
 
-  function renderTicketHook() {
+  function renderSeedHook() {
     return renderHook(() =>
       useDaemonSocket({
         onSessionsUpdate: vi.fn(),
@@ -2958,112 +2958,18 @@ describe('useDaemonSocket ticket request/result', () => {
     return JSON.parse(ws.sent[ws.sent.length - 1]);
   }
 
-  it('resolves fetchTicket with the record on a matching ticket_result', async () => {
-    const { result, unmount } = renderTicketHook();
+  it('resolves sendSeedResume with the session to focus on a successful result', async () => {
+    const { result, unmount } = renderSeedHook();
     const ws = await waitForOpenSocket();
 
-    const promise = result.current.fetchTicket('tk-1');
+    const promise = result.current.sendSeedResume('s-1');
     await Promise.resolve();
     const sent = lastSent(ws);
-    expect(sent.cmd).toBe('get_ticket');
-    expect(sent.ticket_id).toBe('tk-1');
+    expect(sent.cmd).toBe('seed_resume');
+    expect(sent.seed_id).toBe('s-1');
 
     ws.emit({
-      event: 'ticket_result',
-      request_id: sent.request_id,
-      success: true,
-      ticket: { id: 'tk-1', title: 'Migrate' },
-    });
-    await expect(promise).resolves.toEqual({ id: 'tk-1', title: 'Migrate' });
-    unmount();
-  });
-
-  it('rejects fetchTicket when ticket_result carries an error', async () => {
-    const { result, unmount } = renderTicketHook();
-    const ws = await waitForOpenSocket();
-
-    const promise = result.current.fetchTicket('missing');
-    await Promise.resolve();
-    const sent = lastSent(ws);
-
-    ws.emit({
-      event: 'ticket_result',
-      request_id: sent.request_id,
-      success: false,
-      error: 'ticket not found: missing',
-    });
-    await expect(promise).rejects.toThrow('ticket not found: missing');
-    unmount();
-  });
-
-  it('rejects a ticket action when ticket_action_result reports failure', async () => {
-    const { result, unmount } = renderTicketHook();
-    const ws = await waitForOpenSocket();
-
-    const promise = result.current.sendTicketChangeStatus('tk-1', TicketStatus.Blocked);
-    await Promise.resolve();
-    const sent = lastSent(ws);
-    expect(sent.cmd).toBe('ticket_change_status');
-    expect(sent.status).toBe('blocked');
-
-    ws.emit({
-      event: 'ticket_action_result',
-      request_id: sent.request_id,
-      success: false,
-      error: 'mutation failed',
-    });
-    await expect(promise).rejects.toThrow('mutation failed');
-    unmount();
-  });
-
-  it('resolves a ticket action on a successful ticket_action_result', async () => {
-    const { result, unmount } = renderTicketHook();
-    const ws = await waitForOpenSocket();
-
-    const promise = result.current.sendTicketAddComment('tk-1', 'looks good');
-    await Promise.resolve();
-    const sent = lastSent(ws);
-    expect(sent.cmd).toBe('ticket_add_comment');
-
-    ws.emit({ event: 'ticket_action_result', request_id: sent.request_id, success: true });
-    await expect(promise).resolves.toBeUndefined();
-    unmount();
-  });
-
-  it('sends a multi-file ticket attach and resolves its receipt', async () => {
-    const { result, unmount } = renderTicketHook();
-    const ws = await waitForOpenSocket();
-    const promise = result.current.sendTicketAttach('tk-1', ['/tmp/design.md', '/tmp/rollout.md'], 'ready_for_review', 'ready');
-    await Promise.resolve();
-    const sent = lastSent(ws);
-    expect(sent).toMatchObject({
-      cmd: 'ticket_attach',
-      ticket_id: 'tk-1',
-      state: 'ready_for_review',
-      comment: 'ready',
-      files: [
-        { source_path: '/tmp/design.md', filename: 'design.md' },
-        { source_path: '/tmp/rollout.md', filename: 'rollout.md' },
-      ],
-    });
-    const receipt = { ticket_id: 'tk-1', artifacts: [], fingerprint: 'abc', event_seq: 7, state: 'in_review', deduplicated: false };
-    ws.emit({ event: 'ticket_attach_result', request_id: sent.request_id, success: true, result: receipt });
-    await expect(promise).resolves.toEqual(receipt);
-    unmount();
-  });
-
-  it('resolves sendTicketResume with the session to focus on a successful result', async () => {
-    const { result, unmount } = renderTicketHook();
-    const ws = await waitForOpenSocket();
-
-    const promise = result.current.sendTicketResume('tk-1');
-    await Promise.resolve();
-    const sent = lastSent(ws);
-    expect(sent.cmd).toBe('ticket_resume');
-    expect(sent.ticket_id).toBe('tk-1');
-
-    ws.emit({
-      event: 'ticket_resume_result',
+      event: 'seed_resume_result',
       request_id: sent.request_id,
       success: true,
       session_id: 'sess-1',
@@ -3077,16 +2983,16 @@ describe('useDaemonSocket ticket request/result', () => {
     unmount();
   });
 
-  it('resolves sendTicketResume with alreadyRunning when the session was still tracked', async () => {
-    const { result, unmount } = renderTicketHook();
+  it('resolves sendSeedResume with alreadyRunning when the tender was still tracked', async () => {
+    const { result, unmount } = renderSeedHook();
     const ws = await waitForOpenSocket();
 
-    const promise = result.current.sendTicketResume('tk-1');
+    const promise = result.current.sendSeedResume('s-1');
     await Promise.resolve();
     const sent = lastSent(ws);
 
     ws.emit({
-      event: 'ticket_resume_result',
+      event: 'seed_resume_result',
       request_id: sent.request_id,
       success: true,
       session_id: 'sess-1',
@@ -3096,22 +3002,22 @@ describe('useDaemonSocket ticket request/result', () => {
     unmount();
   });
 
-  it('rejects sendTicketResume when ticket_resume_result reports failure', async () => {
-    const { result, unmount } = renderTicketHook();
+  it('rejects sendSeedResume when seed_resume_result reports failure', async () => {
+    const { result, unmount } = renderSeedHook();
     const ws = await waitForOpenSocket();
 
-    const promise = result.current.sendTicketResume('missing');
+    const promise = result.current.sendSeedResume('missing');
     await Promise.resolve();
     const sent = lastSent(ws);
-    expect(sent.cmd).toBe('ticket_resume');
+    expect(sent.cmd).toBe('seed_resume');
 
     ws.emit({
-      event: 'ticket_resume_result',
+      event: 'seed_resume_result',
       request_id: sent.request_id,
       success: false,
-      error: 'ticket has no agent session to resume',
+      error: 'seed has no agent session to reopen',
     });
-    await expect(promise).rejects.toThrow('ticket has no agent session to resume');
+    await expect(promise).rejects.toThrow('seed has no agent session to reopen');
     unmount();
   });
 });
@@ -3577,16 +3483,22 @@ describe('useDaemonSocket notebook and annotation events', () => {
   it('resolves markdown annotation get with annotations and generation', async () => {
     const { result, unmount, ws } = await renderAndOpen();
 
-    const promise = result.current.getMarkdownAnnotations('doc.md', 'ws-1');
+    const source = fileMarkdownSource('ws-1', '/tmp/doc.md');
+    const promise = result.current.getMarkdownAnnotations(source);
     await Promise.resolve();
     const sent = lastSent(ws);
-    expect(sent).toMatchObject({ cmd: 'markdown_annotations_get', path: 'doc.md', workspace_id: 'ws-1' });
+    expect(sent).toMatchObject({
+      cmd: 'markdown_annotations_get',
+      document_uri: source.uri,
+      source_kind: 'file',
+      path: '/tmp/doc.md',
+      workspace_id: 'ws-1',
+    });
 
     ws.emit({
       event: 'markdown_annotations_get_result',
       request_id: sent.request_id,
-      workspace_id: 'ws-1',
-      path: 'doc.md',
+      document_uri: source.uri,
       success: true,
       annotations: [{ id: 'a1' }],
       generation: 7,
@@ -3595,18 +3507,77 @@ describe('useDaemonSocket notebook and annotation events', () => {
     unmount();
   });
 
+  it('serializes exactly one typed markdown annotation destination', async () => {
+    const { result, unmount, ws } = await renderAndOpen();
+
+    const fileSource = fileMarkdownSource('ws-1', '/tmp/doc.md');
+    const delivered = result.current.submitMarkdownAnnotations(
+      fileSource,
+      { kind: 'session', sessionId: 'sess-a' },
+      ['moved-1'],
+    );
+    await Promise.resolve();
+    const sessionSent = lastSent(ws);
+    expect(sessionSent).toMatchObject({
+      cmd: 'markdown_annotations_submit',
+      document_uri: fileSource.uri,
+      target_session_id: 'sess-a',
+      orphaned_ids: ['moved-1'],
+    });
+    expect(sessionSent.target_seed_id).toBeUndefined();
+    ws.emit({
+      event: 'markdown_annotations_submit_result',
+      request_id: sessionSent.request_id,
+      document_uri: fileSource.uri,
+      success: true,
+      status: 'delivered',
+    });
+    await expect(delivered).resolves.toMatchObject({ status: 'delivered' });
+
+    const seedSource = seedMarkdownSource('s-7k3f9m');
+    const noted = result.current.submitMarkdownAnnotations(
+      seedSource,
+      { kind: 'seed', seedId: 's-7k3f9m' },
+      [],
+    );
+    await Promise.resolve();
+    const seedSent = lastSent(ws);
+    expect(seedSent).toMatchObject({
+      cmd: 'markdown_annotations_submit',
+      document_uri: seedSource.uri,
+      source_kind: 'seed',
+      seed_id: 's-7k3f9m',
+      target_seed_id: 's-7k3f9m',
+    });
+    expect(seedSent.target_session_id).toBeUndefined();
+    ws.emit({
+      event: 'markdown_annotations_submit_result',
+      request_id: seedSent.request_id,
+      document_uri: seedSource.uri,
+      success: true,
+      status: 'noted',
+    });
+    await expect(noted).resolves.toMatchObject({ status: 'noted' });
+    unmount();
+  });
+
   it('treats a stale save as a resolved outcome, not an error', async () => {
     const { result, unmount, ws } = await renderAndOpen();
 
-    const promise = result.current.saveMarkdownAnnotations('doc.md', 'ws-1', [], 3);
+    const source = seedMarkdownSource('s-7k3f9m');
+    const promise = result.current.saveMarkdownAnnotations(source, [], 3);
     await Promise.resolve();
     const sent = lastSent(ws);
+    expect(sent).toMatchObject({
+      document_uri: 'attn://seed/s-7k3f9m',
+      source_kind: 'seed',
+      seed_id: 's-7k3f9m',
+    });
 
     ws.emit({
       event: 'markdown_annotations_save_result',
       request_id: sent.request_id,
-      workspace_id: 'ws-1',
-      path: 'doc.md',
+      document_uri: source.uri,
       success: false,
       stale: true,
     });
@@ -3619,10 +3590,11 @@ describe('useDaemonSocket notebook and annotation events', () => {
 
     // `get` deliberately shares one in-flight round-trip per document, so
     // supersede is exercised through `save`, which does replace its waiter.
-    const first = result.current.saveMarkdownAnnotations('doc.md', 'ws-1', [], 1);
+    const source = fileMarkdownSource('ws-1', '/tmp/doc.md');
+    const first = result.current.saveMarkdownAnnotations(source, [], 1);
     await Promise.resolve();
     const firstSent = lastSent(ws);
-    const second = result.current.saveMarkdownAnnotations('doc.md', 'ws-1', [], 2);
+    const second = result.current.saveMarkdownAnnotations(source, [], 2);
     await Promise.resolve();
     const secondSent = lastSent(ws);
     expect(firstSent.request_id).not.toBe(secondSent.request_id);
@@ -3632,16 +3604,14 @@ describe('useDaemonSocket notebook and annotation events', () => {
     ws.emit({
       event: 'markdown_annotations_save_result',
       request_id: firstSent.request_id,
-      workspace_id: 'ws-1',
-      path: 'doc.md',
+      document_uri: source.uri,
       success: false,
       stale: true,
     });
     ws.emit({
       event: 'markdown_annotations_save_result',
       request_id: secondSent.request_id,
-      workspace_id: 'ws-1',
-      path: 'doc.md',
+      document_uri: source.uri,
       success: true,
     });
     await expect(second).resolves.toEqual({ stale: false });
@@ -3651,10 +3621,11 @@ describe('useDaemonSocket notebook and annotation events', () => {
   it('shares one in-flight round-trip when the same document is hydrated twice', async () => {
     const { result, unmount, ws } = await renderAndOpen();
 
-    const first = result.current.getMarkdownAnnotations('doc.md', 'ws-1');
+    const source = fileMarkdownSource('ws-1', '/tmp/doc.md');
+    const first = result.current.getMarkdownAnnotations(source);
     await Promise.resolve();
     const sent = lastSent(ws);
-    const second = result.current.getMarkdownAnnotations('doc.md', 'ws-1');
+    const second = result.current.getMarkdownAnnotations(source);
     await Promise.resolve();
     // No second command: a rejected hydrate would lock that tile's saves.
     expect(lastSent(ws).request_id).toBe(sent.request_id);
@@ -3662,14 +3633,57 @@ describe('useDaemonSocket notebook and annotation events', () => {
     ws.emit({
       event: 'markdown_annotations_get_result',
       request_id: sent.request_id,
-      workspace_id: 'ws-1',
-      path: 'doc.md',
+      document_uri: source.uri,
       success: true,
       annotations: [{ id: 'a1' }],
       generation: 4,
     });
     await expect(first).resolves.toEqual({ annotations: [{ id: 'a1' }], generation: 4 });
     await expect(second).resolves.toEqual({ annotations: [{ id: 'a1' }], generation: 4 });
+    unmount();
+  });
+
+  it('opens a seed tile with typed identity', async () => {
+    const { result, unmount, ws } = await renderAndOpen();
+
+    const promise = result.current.sendOpenSeed('s-7k3f9m', 'session-1');
+    await Promise.resolve();
+    const sent = lastSent(ws);
+    expect(sent).toMatchObject({ cmd: 'open_seed', seed_id: 's-7k3f9m', session_id: 'session-1' });
+
+    ws.emit({
+      event: 'open_seed_result',
+      request_id: sent.request_id,
+      seed_id: 's-7k3f9m',
+      success: true,
+      workspace_id: 'workspace-1',
+      tile_id: 'tile-seed-s-7k3f9m',
+    });
+    await expect(promise).resolves.toEqual({ workspaceId: 'workspace-1', tileId: 'tile-seed-s-7k3f9m' });
+    unmount();
+  });
+
+  it('reads the seed document used by the tile and panel', async () => {
+    const { result, unmount, ws } = await renderAndOpen();
+
+    const promise = result.current.sendSeedDocumentGet('s-7k3f9m');
+    await Promise.resolve();
+    const sent = lastSent(ws);
+    expect(sent).toMatchObject({ cmd: 'seed_document_get', seed_id: 's-7k3f9m' });
+    const document = {
+      seed: { id: 's-7k3f9m', title: 'Garden era', body: '# Plan' },
+      tender_holds: false,
+      children: [],
+      notes: [],
+      notes_total: 0,
+    };
+    ws.emit({
+      event: 'seed_document_get_result',
+      request_id: sent.request_id,
+      success: true,
+      document,
+    });
+    await expect(promise).resolves.toEqual(document);
     unmount();
   });
 });

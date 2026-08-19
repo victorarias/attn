@@ -14,6 +14,7 @@ import (
 // Submit statuses on the wire (plain strings in the protocol).
 const (
 	annotationSubmitStatusDelivered = "delivered"
+	annotationSubmitStatusNoted     = "noted"
 	annotationSubmitStatusSkipped   = "skipped_pending_approval"
 	annotationSubmitStatusError     = "error"
 )

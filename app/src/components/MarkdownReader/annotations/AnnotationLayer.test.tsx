@@ -22,6 +22,7 @@ import type { MarkdownAnnotationsTransport } from './transport';
 import type { WireAnnotation } from './types';
 import { QUICK_LABELS } from './quickLabels';
 import { useAnnotations, type UseAnnotationsApi } from './useAnnotations';
+import { fileMarkdownSource } from '../documentSource';
 
 vi.mock('@tauri-apps/plugin-opener', () => ({
   openUrl: vi.fn(async () => {}),
@@ -61,11 +62,11 @@ function makeTransport() {
   };
   const transport: MarkdownAnnotationsTransport = {
     getMarkdownAnnotations: async () => ({ annotations: [], generation: 0 }),
-    saveMarkdownAnnotations: async (_p, _w, annotations, generation) => {
+    saveMarkdownAnnotations: async (_source, annotations, generation) => {
       calls.save.push({ annotations, generation });
       return { stale: false };
     },
-    clearMarkdownAnnotations: async (_p, _w, generation) => {
+    clearMarkdownAnnotations: async (_source, generation) => {
       calls.clear.push(generation);
       return { generation };
     },
@@ -86,12 +87,13 @@ function Harness({
   apiRef: { current: UseAnnotationsApi | null };
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
-  const api = useAnnotations({ rootRef, content, path, workspaceId: 'ws-test', enabled: true, transport });
+  const source = fileMarkdownSource('ws-test', path);
+  const api = useAnnotations({ rootRef, content, source, enabled: true, transport });
   apiRef.current = api;
   return (
     <div ref={rootRef}>
-      <MarkdownReader content={content} path={path} allowLocalTargets />
-      <AnnotationLayer api={api} rootRef={rootRef} path={path} />
+      <MarkdownReader content={content} source={source} allowLocalTargets />
+      <AnnotationLayer api={api} rootRef={rootRef} source={source} />
     </div>
   );
 }
@@ -108,8 +110,8 @@ let pathSeq = 0;
 async function mount(content = DOC) {
   const { transport, calls } = makeTransport();
   const apiRef: { current: UseAnnotationsApi | null } = { current: null };
-  // Unique path per mount: the popover draft store is module-level and keyed
-  // by path — tests must not leak drafts into each other.
+  // Unique URI per mount: the popover draft store is module-level and keyed
+  // by document identity — tests must not leak drafts into each other.
   const path = `/tmp/project/layer-${pathSeq++}.md`;
   const view = render(<Harness content={content} path={path} transport={transport} apiRef={apiRef} />);
   await flush();

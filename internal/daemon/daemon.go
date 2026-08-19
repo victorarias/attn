@@ -219,11 +219,11 @@ type Daemon struct {
 	delegationRunning map[string]bool
 	// deterministic slow-preparation seam used by delegation idempotency tests.
 	delegationWorktreePrepareHook func(path string)
-	// deterministic failure seam for the LAST step of the delegation saga. Ticket
-	// creation is the only failure point past a live session, so it is the only way
-	// to exercise the deepest compensation set (session + pane + workspace +
-	// worktree) without corrupting the store. Tests only.
-	delegationTicketCreateHook func() error
+	// deterministic failure seam for the LAST step of the delegation saga. Since
+	// ticket creation retired there is no production failure point past a live
+	// session, and the deepest compensation set (session + pane + workspace +
+	// worktree) would otherwise have nothing that exercises it. Tests only.
+	delegationFinalizeHook func() error
 	// reloadingSessions marks sessions whose agent is being re-spawned in place
 	// (chief-of-staff assign/demote reload). handlePTYExit consumes the flag to
 	// suppress the killed worker's session_exited so the reload reads as a runtime
@@ -480,11 +480,9 @@ type Daemon struct {
 	selectedSessionID   string
 	selectedWorkspaceID string
 
-	// openMarkdownMu serializes openMarkdownTile's check-then-dock against
-	// itself. Layout saves are last-write-wins snapshots, so two concurrent
-	// opens of different files in one workspace would otherwise both read the
-	// same layout and the second save would silently drop the first tile.
-	openMarkdownMu sync.Mutex
+	// openTileMu serializes tile openers' check-then-dock. Layout saves are
+	// last-write-wins snapshots, so concurrent opens would otherwise drop one.
+	openTileMu sync.Mutex
 
 	// lastUserActivityAtNano is the UnixNano timestamp of the most recent
 	// UI-origin websocket command the daemon observed (see
@@ -519,11 +517,27 @@ type Daemon struct {
 	workflowEngineMu      sync.Mutex
 	workflowEngineConn    map[string]workflowEngineSink
 	workflowBroadcastHook func(*protocol.WorkflowRunUpdatedMessage) // optional, tests only
-	ticketsBroadcastHook  func([]protocol.TicketRow)                // optional, tests only
 	gardenBroadcastHook   func([]protocol.Seed, int)                // optional, tests only
 	appsBroadcastHook     func([]protocol.AppRegistryEntry)         // optional, tests only
 	gardenMintID          func() (string, error)                    // optional, tests only
 	gardenMintNoteID      func() (string, error)                    // optional, tests only
+	// dispatchSeeds is which seed each session reports to, the map every session
+	// broadcast decorates from. nil until the first read builds it from the
+	// dispatch collection; written through by recordGardenDispatch after that.
+	// A daemon with no garden declared reads nothing and caches that: a session
+	// list is broadcast constantly, and probing an absent collection every time
+	// is work a quiet daemon must not do. Declaring the garden clears it.
+	// dispatchFromChief rides in the same cache: which of those sessions the
+	// chief of staff dispatched, the set the session broadcast badges from.
+	dispatchSeedsMu     sync.Mutex
+	dispatchSeeds       map[string]string
+	dispatchFromChief   map[string]bool
+	dispatchSeedsLoaded bool
+
+	// gardenNotePageSize sizes the whole-log read's pages; zero means the store's
+	// own maximum. A test lowers it to walk several pages without writing a
+	// thousand notes.
+	gardenNotePageSize int
 
 	// automationsBroadcastHook mirrors workflowBroadcastHook for the automations
 	// WS surface (automations_broadcast.go): invoked before every
@@ -1072,6 +1086,7 @@ func (d *Daemon) Start() error {
 		return fmt.Errorf("ensure enrollment record: %w", err)
 	}
 	d.ensureGardenCollections()
+	d.convertBacklogTicketsToSeeds()
 	d.ensureCrewCollections()
 	d.importCrewHomes()
 	if err := d.migrateCrewTicketIdentities(); err != nil {
@@ -2872,6 +2887,8 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 		d.handleSeedList(conn, msg.(*protocol.SeedListMessage))
 	case protocol.CmdSeedShow: // wire: seed_show
 		d.handleSeedShow(conn, msg.(*protocol.SeedShowMessage))
+	case protocol.CmdSeedEdit: // wire: seed_edit
+		d.handleSeedEdit(conn, msg.(*protocol.SeedEditMessage))
 	case protocol.CmdSeedTransition: // wire: seed_transition
 		d.handleSeedTransition(conn, msg.(*protocol.SeedTransitionMessage))
 	case protocol.CmdSeedNote: // wire: seed_note
@@ -2961,6 +2978,8 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 		d.handleInjectTestSession(conn, msg.(*protocol.InjectTestSessionMessage))
 	case protocol.CmdOpenMarkdown: // wire: open_markdown
 		d.handleOpenMarkdown(conn, msg.(*protocol.OpenMarkdownMessage))
+	case protocol.CmdOpenSeed: // wire: open_seed
+		d.handleOpenSeed(conn, msg.(*protocol.OpenSeedMessage))
 	case protocol.CmdOpenSentFiles: // wire: open_sent_files
 		d.handleOpenSentFiles(conn, msg.(*protocol.OpenSentFilesMessage))
 	case protocol.CmdOpenBrowser: // wire: open_browser
@@ -3156,15 +3175,16 @@ func (d *Daemon) handleState(conn net.Conn, msg *protocol.StateMessage) {
 	d.sendOK(conn)
 }
 
-// persistResumeSessionID records the agent-native resume id on the session AND
-// mirrors it onto any ticket bound to that session (assignee == sessionID). The
-// session row is deleted on close, taking its resume_session_id with it, so the
-// durable copy on the ticket is what lets ticket Resume reattach the prior
-// conversation directly instead of dropping into the agent's resume picker.
+// persistResumeSessionID records the agent-native resume id on the session and
+// mirrors it where it survives the session row, which is deleted on close: onto
+// the session's dispatch record (what a seed's Resume reads) and onto any ticket
+// still bound to it. Without a durable copy, reopening the agent drops into its
+// resume picker instead of the prior conversation.
 func (d *Daemon) persistResumeSessionID(sessionID, resumeSessionID string) {
 	if _, err := d.store.TransitionSessionConversation(sessionID, resumeSessionID); err != nil {
 		d.logf("persistResumeSessionID: update failed for session %s: %v", sessionID, err)
 	}
+	d.rememberDispatchResume(sessionID, resumeSessionID)
 }
 
 func (d *Daemon) handleStop(conn net.Conn, msg *protocol.StopMessage) {
@@ -3445,6 +3465,7 @@ func (d *Daemon) sessionForBroadcast(session *protocol.Session) *protocol.Sessio
 		d.chiefOfStaffSessionID(),
 		d.delegatedFromChiefSessionIDs(),
 		d.crewMembersBySession(),
+		d.gardenDispatchSeedsBySession(),
 	)
 	if decorated != nil {
 		decorated.Automation = d.automationProvenanceForSession(decorated.ID)
@@ -3457,6 +3478,7 @@ func (d *Daemon) sessionForBroadcastWithChiefOfStaff(
 	chiefOfStaffSessionID string,
 	delegatedFromChief map[string]bool,
 	crewBySession map[string]string,
+	seedBySession map[string]string,
 ) *protocol.Session {
 	clone := cloneSession(session)
 	if clone == nil {
@@ -3469,6 +3491,7 @@ func (d *Daemon) sessionForBroadcastWithChiefOfStaff(
 	d.decorateChiefOfStaffWithSessionID(clone, chiefOfStaffSessionID)
 	d.decorateDelegatedFromChief(clone, delegatedFromChief)
 	d.decorateCrewMember(clone, crewBySession)
+	d.decorateSessionSeed(clone, seedBySession)
 	d.decorateSessionWithWorkspace(clone)
 	d.decorateSessionWithWorkspaceMute(clone)
 	d.decorateSessionWithCost(clone)
@@ -3485,10 +3508,11 @@ func (d *Daemon) sessionsForBroadcast(sessions []*protocol.Session) []protocol.S
 	chiefOfStaffSessionID := d.chiefOfStaffSessionID()
 	delegatedFromChief := d.delegatedFromChiefSessionIDs()
 	crewBySession := d.crewMembersBySession()
+	seedBySession := d.gardenDispatchSeedsBySession()
 	bySession, _ := d.latestAutomationProvenance()
 	out := make([]protocol.Session, 0, len(sessions))
 	for _, session := range sessions {
-		if decorated := d.sessionForBroadcastWithChiefOfStaff(session, chiefOfStaffSessionID, delegatedFromChief, crewBySession); decorated != nil {
+		if decorated := d.sessionForBroadcastWithChiefOfStaff(session, chiefOfStaffSessionID, delegatedFromChief, crewBySession, seedBySession); decorated != nil {
 			decorated.Automation = bySession[decorated.ID]
 			out = append(out, *decorated)
 		}

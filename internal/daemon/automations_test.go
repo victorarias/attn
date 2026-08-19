@@ -272,14 +272,14 @@ func TestAutomationOccurrenceInputIsStructurallySeparateFromPrompt(t *testing.T)
 	if string(stored) != string(payload) {
 		t.Fatalf("stored payload = %q, want %q", stored, payload)
 	}
-	prompt := automationSessionPrompt("Report the message field.", path, "example", nil, false)
+	prompt := automationSessionPrompt("Report the message field.", path, "s-abc123", "example", nil, false)
 	if strings.Contains(prompt, "ignore configured task") || strings.Contains(prompt, string(payload)) {
 		t.Fatalf("untrusted payload leaked into prompt: %q", prompt)
 	}
 	if !strings.Contains(prompt, path) || !strings.Contains(prompt, "untrusted data") {
 		t.Fatalf("prompt does not carry the constrained data reference: %q", prompt)
 	}
-	localOnlyPrompt := automationSessionPrompt("Review the change.", path, "example", nil, true)
+	localOnlyPrompt := automationSessionPrompt("Review the change.", path, "s-abc123", "example", nil, true)
 	if !strings.Contains(localOnlyPrompt, "local-only") || !strings.Contains(localOnlyPrompt, "Do not post, approve, comment, push") || !strings.Contains(localOnlyPrompt, "later explicit user action") {
 		t.Fatalf("PR-review prompt lacks the fixed local-only policy: %q", localOnlyPrompt)
 	}
@@ -287,7 +287,7 @@ func TestAutomationOccurrenceInputIsStructurallySeparateFromPrompt(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	reviewPrompt := automationSessionPrompt("Review this pull request.", path, "Requested PR review - GPT Sol medium", &pr, true)
+	reviewPrompt := automationSessionPrompt("Review this pull request.", path, "s-abc123", "Requested PR review - GPT Sol medium", &pr, true)
 	if !strings.Contains(reviewPrompt, "Target pull request:") || !strings.Contains(reviewPrompt, "Pull request: #101") || !strings.Contains(reviewPrompt, "one flat object") {
 		t.Fatalf("PR-review prompt lacks the authoritative target block: %q", reviewPrompt)
 	}

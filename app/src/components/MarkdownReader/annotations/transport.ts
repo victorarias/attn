@@ -2,7 +2,8 @@
  * Draft-persistence transport seam for markdown annotations. App startup
  * registers the daemon-socket helpers here; useAnnotations reads it at call
  * time, never reactively, and a null transport means local-only annotations.
- * Calls carry the tile's workspaceId so a hub routes to the owning endpoint.
+ * Calls carry an opaque URI for identity plus typed file/seed fields. The
+ * daemon acts on those typed fields and never parses authority from the URI.
  *
  * Generation contract, mirroring internal/store/markdown_annotations.go: saves
  * carry a pre-incremented generation; clear(generation) tombstones, so a later
@@ -11,12 +12,13 @@
  */
 
 import type { WireAnnotation } from './types';
+import type { MarkdownDocumentSource } from '../documentSource';
 
 /**
- * Submit result. `delivered`: typed into the session, drafts tombstone-cleared
- * (`generation` is the client's new floor; `error` may still report a failed
- * clear). `skipped_pending_approval`: nothing typed, drafts kept. An error
- * status rejects the promise instead.
+ * Submit result. `delivered` types into a session; `noted` appends to a seed.
+ * Both tombstone-clear drafts (`generation` is the client's new floor;
+ * `error` may still report a failed clear). `skipped_pending_approval` keeps
+ * the draft. An error status rejects the promise instead.
  */
 export interface MarkdownAnnotationsSubmitResult {
   status: string;
@@ -24,29 +26,30 @@ export interface MarkdownAnnotationsSubmitResult {
   error?: string;
 }
 
+export type MarkdownAnnotationsDestination =
+  | { kind: 'session'; sessionId: string }
+  | { kind: 'seed'; seedId: string };
+
 export interface MarkdownAnnotationsTransport {
   getMarkdownAnnotations(
-    path: string,
-    workspaceId: string,
+    source: MarkdownDocumentSource,
   ): Promise<{ annotations: WireAnnotation[]; generation: number }>;
   saveMarkdownAnnotations(
-    path: string,
-    workspaceId: string,
+    source: MarkdownDocumentSource,
     annotations: WireAnnotation[],
     generation: number,
   ): Promise<{ stale: boolean }>;
   clearMarkdownAnnotations(
-    path: string,
-    workspaceId: string,
+    source: MarkdownDocumentSource,
     generation: number,
   ): Promise<{ generation: number }>;
   /**
-   * Routed by target session, not workspace: that daemon owns the draft store
-   * the submit clears. `orphanedIds` is client-derived and not persisted.
+   * Routed by the typed destination. `orphanedIds` is client-derived and not
+   * persisted; the document URI remains opaque identity.
    */
   submitMarkdownAnnotations(
-    path: string,
-    targetSessionId: string,
+    source: MarkdownDocumentSource,
+    destination: MarkdownAnnotationsDestination,
     orphanedIds: string[],
   ): Promise<MarkdownAnnotationsSubmitResult>;
 }

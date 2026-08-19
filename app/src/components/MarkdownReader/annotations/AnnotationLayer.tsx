@@ -23,6 +23,7 @@ import { SelectionToolbar } from './SelectionToolbar';
 import type { PendingSelection } from './selection';
 import type { QuickLabel } from './quickLabels';
 import type { UseAnnotationsApi } from './useAnnotations';
+import type { MarkdownDocumentSource } from '../documentSource';
 
 const HOVER_HIDE_GRACE_MS = 200;
 
@@ -44,15 +45,15 @@ interface HoverBlock {
 export interface AnnotationLayerProps {
   api: UseAnnotationsApi;
   rootRef: RefObject<HTMLElement | null>;
-  path: string;
+  source: MarkdownDocumentSource;
 }
 
-function pendingDraftKey(path: string, pending: PendingSelection): string {
+function pendingDraftKey(documentUri: string, pending: PendingSelection): string {
   const { anchor } = pending;
-  return `${path}#${anchor.blockId}:${anchor.start}:${anchor.end}`;
+  return `${documentUri}#${anchor.blockId}:${anchor.start}:${anchor.end}`;
 }
 
-export function AnnotationLayer({ api, rootRef, path }: AnnotationLayerProps) {
+export function AnnotationLayer({ api, rootRef, source }: AnnotationLayerProps) {
   const { pending, annotations, orphans, selectedId } = api;
   const [popover, setPopover] = useState<PopoverState | null>(null);
   const [hoverBlock, setHoverBlock] = useState<HoverBlock | null>(null);
@@ -316,7 +317,9 @@ export function AnnotationLayer({ api, rootRef, path }: AnnotationLayerProps) {
           isGlobal={popover.kind === 'global'}
           initialText={popover.kind === 'selection' ? popover.initialText : undefined}
           draftKey={
-            popover.kind === 'global' ? `${path}#global` : pendingDraftKey(path, popover.pending)
+            popover.kind === 'global'
+              ? `${source.uri}#global`
+              : pendingDraftKey(source.uri, popover.pending)
           }
           onSubmit={handlePopoverSubmit}
           onClose={handlePopoverClose}

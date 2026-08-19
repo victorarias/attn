@@ -21,9 +21,9 @@ import type {
   WorkspaceContext as GeneratedWorkspaceContext,
   Task as GeneratedTask,
   Notification as GeneratedNotification,
-  Ticket as GeneratedTicket,
-  TicketRow as GeneratedTicketRow,
   Seed as GeneratedSeed,
+  SeedNote as GeneratedSeedNote,
+  SeedArtifactReference as GeneratedSeedArtifactReference,
   CrewMember as GeneratedCrewMember,
   MarkdownAnnotation,
   Presentation,
@@ -95,6 +95,8 @@ import {
   handleMarkdownAnnotationDaemonEvent,
   markdownAnnotationKey,
 } from './daemonMarkdownAnnotationEvents';
+import type { MarkdownDocumentSource } from '../components/MarkdownReader/documentSource';
+import type { MarkdownAnnotationsDestination } from '../components/MarkdownReader/annotations/transport';
 import {
   pendingRequestKey,
   sendKeyedRequest as sendLastWriterWinsRequest,
@@ -135,13 +137,18 @@ export interface PastConversationsResult {
   truncated: boolean;
 }
 
-export type Ticket = GeneratedTicket;
-// The board feed's row. Slimmer than Ticket on purpose: the brief, the history
-// thread and the artifacts come from a read by id, not from a whole-board push.
-export type TicketRow = GeneratedTicketRow;
 // A seed as the garden pushes it: the whole document, because a seed is small
 // and the panel renders its body without a second round trip.
 export type Seed = GeneratedSeed;
+export interface SeedDocument {
+  seed: Seed;
+  tender_holds: boolean;
+  children: Seed[];
+  notes: GeneratedSeedNote[];
+  notes_total: number;
+  // Attach minus detach over the seed's whole log, projected by the daemon.
+  artifacts: GeneratedSeedArtifactReference[];
+}
 // A crew member as the roster pushes it. Every member is here, awake or asleep:
 // an awake one names the session living its day (binding_session), and that
 // presence IS "awake" — the daemon judged the binding live before sending it.
@@ -275,7 +282,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-export const PROTOCOL_VERSION = '261';
+export const PROTOCOL_VERSION = '262';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 // Identifies this app process to the daemon across its own reconnects, so a
@@ -644,9 +651,6 @@ interface UseDaemonSocketOptions {
   // are root-relative; origin is agent|ui|external. Mirrors onNotebookChanged for
   // the generic filesystem surface (fs_changed).
   onFsChanged?: (origin: string, paths: string[], root: string) => void;
-  // Fired with the non-archived ticket board (slim rows) on initial_state and on
-  // every tickets_updated broadcast. The detail view fetches full records itself.
-  onTicketsUpdate?: (tickets: TicketRow[]) => void;
   // Fired with the garden — newest first, every workspace — on initial_state and
   // on every garden_seeds_updated broadcast. The panel filters to the workspace
   // it shows, so switching workspaces costs no round trip.
@@ -965,7 +969,6 @@ export function useDaemonSocket({
   onTasksChanged,
   onNotificationsUpdated,
   onFsChanged,
-  onTicketsUpdate,
   onSeedsUpdate,
   onAppsUpdate,
   onCrewUpdate,
@@ -1001,7 +1004,6 @@ export function useDaemonSocket({
     onTasksChanged,
     onNotificationsUpdated,
     onFsChanged,
-    onTicketsUpdate,
     onSeedsUpdate,
     onAppsUpdate,
     onCrewUpdate,
@@ -1026,7 +1028,6 @@ export function useDaemonSocket({
     onTasksChanged,
     onNotificationsUpdated,
     onFsChanged,
-    onTicketsUpdate,
     onSeedsUpdate,
     onAppsUpdate,
     onCrewUpdate,
@@ -1056,7 +1057,7 @@ export function useDaemonSocket({
   // listeners here avoids a global React tick and releases the session entry as
   // soon as its last pane unmounts.
   const sessionMessageListenersRef = useRef<Map<string, Set<() => void>>>(new Map());
-  // In-flight `get` promises shared per path: two tiles hydrating the same
+  // In-flight `get` promises shared per document URI: two tiles hydrating the same
   // document must share one round-trip, not supersede-reject each other
   // (a rejected hydrate would leave that tile's saves locked until retry).
   const mdAnnotationsGetInflightRef = useRef<Map<string, Promise<{
@@ -1604,7 +1605,6 @@ export function useDaemonSocket({
             const nextSessions = dedupeSessionsByID(data.sessions || []);
             sessionsRef.current = nextSessions;
             callbacksRef.current.onSessionsUpdate(nextSessions);
-            callbacksRef.current.onTicketsUpdate?.(data.tickets || []);
             callbacksRef.current.onSeedsUpdate?.(
               data.seeds || [],
               data.seeds_total ?? (data.seeds || []).length,
@@ -1772,10 +1772,6 @@ export function useDaemonSocket({
             break;
           }
 
-          case 'tickets_updated':
-            callbacksRef.current.onTicketsUpdate?.(data.tickets || []);
-            break;
-
           case 'crew_updated':
             callbacksRef.current.onCrewUpdate?.(data.members || []);
             break;
@@ -1938,6 +1934,44 @@ export function useDaemonSocket({
             break;
           }
 
+          case 'open_seed_result': {
+            const requestId = data.request_id;
+            if (typeof requestId !== 'string') {
+              break;
+            }
+            const key = `open_seed:${requestId}`;
+            const pending = pendingActionsRef.current.get(key);
+            if (!pending) {
+              break;
+            }
+            pendingActionsRef.current.delete(key);
+            if (data.success) {
+              pending.resolve({ workspaceId: data.workspace_id, tileId: data.tile_id });
+            } else {
+              pending.reject(new Error(data.error || 'Open seed failed'));
+            }
+            break;
+          }
+
+          case 'seed_document_get_result': {
+            const requestId = data.request_id;
+            if (typeof requestId !== 'string') {
+              break;
+            }
+            const key = `seed_document_get:${requestId}`;
+            const pending = pendingActionsRef.current.get(key);
+            if (!pending) {
+              break;
+            }
+            pendingActionsRef.current.delete(key);
+            if (data.success && data.document) {
+              pending.resolve(data.document);
+            } else {
+              pending.reject(new Error(data.error || 'Seed document read failed'));
+            }
+            break;
+          }
+
           case 'recent_files_result': {
             const requestId = data.request_id;
             if (typeof requestId !== 'string') {
@@ -1963,55 +1997,25 @@ export function useDaemonSocket({
             break;
           }
 
-          case 'ticket_result': {
+          case 'seed_resume_result': {
             const requestId = data.request_id;
             if (typeof requestId !== 'string') {
               break;
             }
-            const key = `get_ticket:${requestId}`;
+            const key = `seed_resume:${requestId}`;
             const pending = pendingActionsRef.current.get(key);
             if (!pending) {
               break;
             }
             pendingActionsRef.current.delete(key);
-            if (data.success && data.ticket) {
-              pending.resolve(data.ticket);
+            if (data.success && typeof data.session_id === 'string') {
+              pending.resolve({
+                sessionId: data.session_id,
+                workspaceId: typeof data.workspace_id === 'string' ? data.workspace_id : undefined,
+                alreadyRunning: data.already_running === true,
+              });
             } else {
-              pending.reject(new Error(data.error || 'Ticket fetch failed'));
-            }
-            break;
-          }
-
-          case 'ticket_action_result': {
-            const requestId = data.request_id;
-            if (typeof requestId !== 'string') {
-              break;
-            }
-            const key = `ticket_action:${requestId}`;
-            const pending = pendingActionsRef.current.get(key);
-            if (!pending) {
-              break;
-            }
-            pendingActionsRef.current.delete(key);
-            if (data.success) {
-              pending.resolve(undefined);
-            } else {
-              pending.reject(new Error(data.error || 'Ticket action failed'));
-            }
-            break;
-          }
-
-          case 'ticket_attach_result': {
-            const requestId = data.request_id;
-            if (typeof requestId !== 'string') break;
-            const key = `ticket_attach:${requestId}`;
-            const pending = pendingActionsRef.current.get(key);
-            if (!pending) break;
-            pendingActionsRef.current.delete(key);
-            if (data.success && data.result) {
-              pending.resolve(data.result);
-            } else {
-              pending.reject(new Error(data.error || 'Ticket attach failed'));
+              pending.reject(new Error(data.error || 'Reopening the seed failed'));
             }
             break;
           }
@@ -2056,29 +2060,6 @@ export function useDaemonSocket({
               'Asking the member to sleep failed',
             );
             break;
-
-          case 'ticket_resume_result': {
-            const requestId = data.request_id;
-            if (typeof requestId !== 'string') {
-              break;
-            }
-            const key = `ticket_resume:${requestId}`;
-            const pending = pendingActionsRef.current.get(key);
-            if (!pending) {
-              break;
-            }
-            pendingActionsRef.current.delete(key);
-            if (data.success && typeof data.session_id === 'string') {
-              pending.resolve({
-                sessionId: data.session_id,
-                workspaceId: typeof data.workspace_id === 'string' ? data.workspace_id : undefined,
-                alreadyRunning: data.already_running === true,
-              });
-            } else {
-              pending.reject(new Error(data.error || 'Ticket resume failed'));
-            }
-            break;
-          }
 
           case 'task_list_result': {
             const requestId = data.request_id;
@@ -4016,6 +3997,51 @@ export function useDaemonSocket({
     });
   }, [nextRequestID]);
 
+  const sendOpenSeed = useCallback((seedId: string, sessionId = ''): Promise<{ workspaceId?: string; tileId?: string }> => {
+    return new Promise((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+      const requestId = nextRequestID('open_seed');
+      const key = `open_seed:${requestId}`;
+      pendingActionsRef.current.set(key, { resolve, reject });
+      ws.send(JSON.stringify({
+        cmd: 'open_seed',
+        request_id: requestId,
+        seed_id: seedId,
+        ...(sessionId ? { session_id: sessionId } : {}),
+      }));
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(key)) {
+          pendingActionsRef.current.delete(key);
+          reject(new Error('Open seed timed out'));
+        }
+      }, 10000);
+    });
+  }, [nextRequestID]);
+
+  const sendSeedDocumentGet = useCallback((seedId: string): Promise<SeedDocument> => {
+    return new Promise((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+      const requestId = nextRequestID('seed_document_get');
+      const key = `seed_document_get:${requestId}`;
+      pendingActionsRef.current.set(key, { resolve, reject });
+      ws.send(JSON.stringify({ cmd: 'seed_document_get', request_id: requestId, seed_id: seedId }));
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(key)) {
+          pendingActionsRef.current.delete(key);
+          reject(new Error('Seed document read timed out'));
+        }
+      }, 10000);
+    });
+  }, [nextRequestID]);
+
   useEffect(() => {
     setPtyBackend({
       spawn: async (args: PtySpawnArgs) => {
@@ -4135,29 +4161,30 @@ export function useDaemonSocket({
     });
   }, []);
 
-  // Markdown annotation drafts use last-writer-wins request correlation keyed
-  // by operation, workspace, and path.
+  // Annotation identity is opaque; typed source fields are what the daemon
+  // validates and acts on. Never recover a path or seed id from the URI.
   const sendMarkdownAnnotationsCommand = useCallback(<T,>(
     op: 'get' | 'save' | 'clear' | 'submit',
-    path: string,
-    workspaceId: string,
+    source: MarkdownDocumentSource,
     extra: Record<string, unknown>,
   ): Promise<T> => {
     const ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) {
       return Promise.reject(new Error('WebSocket not connected'));
     }
-    // Workspace scope keeps identical paths on different endpoints independent.
-    const key = markdownAnnotationKey(op, workspaceId, path);
+    const key = markdownAnnotationKey(op, source.uri);
     const requestId = crypto.randomUUID();
+    const sourceFields = source.kind === 'file'
+      ? { source_kind: 'file', workspace_id: source.workspaceId, path: source.path }
+      : { source_kind: 'seed', seed_id: source.seedId };
     return sendLastWriterWinsRequest<T>(
       mdAnnotationsPendingRef.current,
       key,
       requestId,
       () => ws.send(JSON.stringify({
         cmd: `markdown_annotations_${op}`,
-        path,
-        workspace_id: workspaceId,
+        document_uri: source.uri,
+        ...sourceFields,
         request_id: requestId,
         ...extra,
       })),
@@ -4166,19 +4193,15 @@ export function useDaemonSocket({
     );
   }, []);
 
-  // workspace_id is the requesting tile's owning workspace: on a hub it routes
-  // the command (and therefore the draft storage) to the endpoint daemon that
-  // owns the workspace, so identical absolute paths on different endpoints
-  // never share a draft/generation/tombstone row.
-  const getMarkdownAnnotations = useCallback((path: string, workspaceId: string) => {
-    const inflightKey = `${workspaceId}\0${path}`;
+  const getMarkdownAnnotations = useCallback((source: MarkdownDocumentSource) => {
+    const inflightKey = source.uri;
     const inflight = mdAnnotationsGetInflightRef.current.get(inflightKey);
     if (inflight) {
       return inflight; // share the round-trip (see ref comment)
     }
     const promise: Promise<{ annotations: MarkdownAnnotation[]; generation: number }> =
       sendMarkdownAnnotationsCommand<{ annotations: MarkdownAnnotation[]; generation: number }>(
-        'get', path, workspaceId, {},
+        'get', source, {},
       ).finally(() => {
         if (mdAnnotationsGetInflightRef.current.get(inflightKey) === promise) {
           mdAnnotationsGetInflightRef.current.delete(inflightKey);
@@ -4189,36 +4212,35 @@ export function useDaemonSocket({
   }, [sendMarkdownAnnotationsCommand]);
 
   const saveMarkdownAnnotations = useCallback((
-    path: string,
-    workspaceId: string,
+    source: MarkdownDocumentSource,
     annotations: MarkdownAnnotation[],
     generation: number,
   ) =>
     sendMarkdownAnnotationsCommand<{ stale: boolean }>(
-      'save', path, workspaceId, { annotations, generation },
+      'save', source, { annotations, generation },
     ), [sendMarkdownAnnotationsCommand]);
 
-  const clearMarkdownAnnotations = useCallback((path: string, workspaceId: string, generation: number) =>
+  const clearMarkdownAnnotations = useCallback((source: MarkdownDocumentSource, generation: number) =>
     sendMarkdownAnnotationsCommand<{ generation: number }>(
-      'clear', path, workspaceId, { generation },
+      'clear', source, { generation },
     ), [sendMarkdownAnnotationsCommand]);
 
-  // PR6 send flow: format the persisted draft and type it into the target
-  // session's PTY. Pending key `submit:<path>` — a second Send for the same
-  // path supersedes the first; the doorbell is one PTY write, so the shared
-  // 10s timeout is ample. Resolves `{status, generation?, error?}` for both
-  // `delivered` and `skipped_pending_approval`; rejects on `status:"error"`.
+  // Format the persisted draft and submit it to one typed destination. Pending
+  // key `submit:<uri>` keeps this last-writer-wins per document. Resolves the
+  // accepted/skipped status and rejects on `status:"error"`.
   const submitMarkdownAnnotations = useCallback((
-    path: string,
-    targetSessionId: string,
+    source: MarkdownDocumentSource,
+    destination: MarkdownAnnotationsDestination,
     orphanedIds: string[],
-  ) =>
-    // Submit routes by the TARGET SESSION (the daemon owning the session also
-    // owns the draft store), so it carries no workspace; '' keys the pending
-    // map and the echoed result the same way.
+  ) => {
+    const destinationFields = destination.kind === 'session'
+      ? { target_session_id: destination.sessionId }
+      : { target_seed_id: destination.seedId };
+    return (
     sendMarkdownAnnotationsCommand<{ status: string; generation?: number; error?: string }>(
-      'submit', path, '', { target_session_id: targetSessionId, orphaned_ids: orphanedIds },
-    ), [sendMarkdownAnnotationsCommand]);
+      'submit', source, { ...destinationFields, orphaned_ids: orphanedIds },
+    ));
+  }, [sendMarkdownAnnotationsCommand]);
 
   // Mute a PR with optimistic update
   const sendMutePR = useCallback((prId: string) => {
@@ -4835,116 +4857,28 @@ export function useDaemonSocket({
     );
   }, [sendRequest]);
 
-  // Fetch one ticket's full record (row + activity thread + current artifacts) for the
-  // detail view. The board feed carries only bare rows, so the detail panel pulls
-  // the full record by id, correlated by request_id against the ticket_result event.
-  const fetchTicket = useCallback((ticketId: string): Promise<Ticket> => {
-    const requestId = nextRequestID('get_ticket');
-    const key = `get_ticket:${requestId}`;
-    return sendKeyedRequest<Ticket>(key, {
-      cmd: 'get_ticket',
-      request_id: requestId,
-      ticket_id: ticketId,
-    }, 'Ticket fetch timed out');
-  }, [nextRequestID, sendKeyedRequest]);
-
-  // Shared sender for a chief/user ticket action (change status, comment,
-  // re-brief). Resolves on a successful ticket_action_result and rejects on its
-  // error; the mutated data arrives separately via the tickets_updated broadcast.
-  const sendTicketAction = useCallback((cmd: string, payload: Record<string, unknown>): Promise<void> => {
-    const requestId = nextRequestID('ticket_action');
-    const key = `ticket_action:${requestId}`;
-    return sendKeyedRequest<void>(key, { cmd, request_id: requestId, ...payload }, 'Ticket action timed out');
-  }, [nextRequestID, sendKeyedRequest]);
-
-  const sendTicketChangeStatus = useCallback(
-    (ticketId: string, status: Ticket['status'], expectedEventSeq?: number, comment?: string): Promise<void> =>
-      sendTicketAction('ticket_change_status', {
-        ticket_id: ticketId,
-        status,
-        ...(expectedEventSeq !== undefined ? { expected_event_seq: expectedEventSeq } : {}),
-        ...(comment ? { comment } : {}),
-      }),
-    [sendTicketAction],
-  );
-
-  const sendTicketAddComment = useCallback(
-    (ticketId: string, comment: string, expectedEventSeq?: number): Promise<void> =>
-      sendTicketAction('ticket_add_comment', {
-        ticket_id: ticketId,
-        comment,
-        ...(expectedEventSeq !== undefined ? { expected_event_seq: expectedEventSeq } : {}),
-      }),
-    [sendTicketAction],
-  );
-
-  const sendTicketEditDescription = useCallback(
-    (ticketId: string, description: string, expectedEventSeq?: number): Promise<void> =>
-      sendTicketAction('ticket_edit_description', {
-        ticket_id: ticketId,
-        description,
-        ...(expectedEventSeq !== undefined ? { expected_event_seq: expectedEventSeq } : {}),
-      }),
-    [sendTicketAction],
-  );
-
-  const sendTicketAttach = useCallback((
-    ticketId: string,
-    paths: string[],
-    state?: string,
-    comment?: string,
-    expectedEventSeq?: number,
-  ): Promise<unknown> => new Promise((resolve, reject) => {
-    const ws = wsRef.current;
-    if (!ws || ws.readyState !== WebSocket.OPEN) {
-      reject(new Error('WebSocket not connected'));
-      return;
-    }
-    const requestId = nextRequestID('ticket_attach');
-    const key = `ticket_attach:${requestId}`;
-    pendingActionsRef.current.set(key, { resolve, reject });
-    ws.send(JSON.stringify({
-      cmd: 'ticket_attach',
-      request_id: requestId,
-      source_session_id: 'you',
-      ticket_id: ticketId,
-      ...(expectedEventSeq !== undefined ? { expected_event_seq: expectedEventSeq } : {}),
-      files: paths.map((sourcePath) => ({
-        source_path: sourcePath,
-        filename: sourcePath.split(/[\\/]/).pop() || sourcePath,
-      })),
-      ...(state ? { state } : {}),
-      ...(comment ? { comment } : {}),
-    }));
-    setTimeout(() => {
-      if (pendingActionsRef.current.has(key)) {
-        pendingActionsRef.current.delete(key);
-        reject(new Error('Ticket attach timed out'));
-      }
-    }, 30000);
-  }), [nextRequestID]);
-
-  // Reopen the agent session bound to a ticket. The daemon owns the whole resume
-  // composite (register workspace + add pane + spawn, with rollback), so this just
-  // sends the command and resolves with the session to focus; the session and pane
-  // arrive over the normal broadcasts. Resolves on a successful ticket_resume_result
-  // and rejects on its error — the request/result pattern, like a delegated spawn.
-  const sendTicketResume = useCallback(
-    (ticketId: string): Promise<{ sessionId: string; workspaceId?: string; alreadyRunning?: boolean }> => {
+  // Reopen the session tending a seed — the way back to a delegate whose session
+  // is gone. The daemon owns the whole resume composite (register workspace + add
+  // pane + spawn, with rollback), so this sends the command and resolves with the
+  // session to focus; the session and pane arrive over the normal broadcasts. A
+  // tender still running resolves as alreadyRunning, which is the same thing to
+  // focus.
+  const sendSeedResume = useCallback(
+    (seedId: string): Promise<{ sessionId: string; workspaceId?: string; alreadyRunning?: boolean }> => {
       return new Promise((resolve, reject) => {
         const ws = wsRef.current;
         if (!ws || ws.readyState !== WebSocket.OPEN) {
           reject(new Error('WebSocket not connected'));
           return;
         }
-        const requestId = nextRequestID('ticket_resume');
-        const key = `ticket_resume:${requestId}`;
+        const requestId = nextRequestID('seed_resume');
+        const key = `seed_resume:${requestId}`;
         pendingActionsRef.current.set(key, { resolve, reject });
-        ws.send(JSON.stringify({ cmd: 'ticket_resume', request_id: requestId, ticket_id: ticketId }));
+        ws.send(JSON.stringify({ cmd: 'seed_resume', request_id: requestId, seed_id: seedId }));
         setTimeout(() => {
           if (pendingActionsRef.current.has(key)) {
             pendingActionsRef.current.delete(key);
-            reject(new Error('Ticket resume timed out'));
+            reject(new Error('Reopening the seed timed out'));
           }
         }, 10000);
       });
@@ -5747,12 +5681,7 @@ export function useDaemonSocket({
     sendSessionAnnotationsSave,
     sendSessionAnnotationsClear,
     sendSessionAnnotationsSubmit,
-    fetchTicket,
-    sendTicketChangeStatus,
-    sendTicketAddComment,
-    sendTicketEditDescription,
-    sendTicketAttach,
-    sendTicketResume,
+    sendSeedResume,
     sendCrewWake,
     sendCrewSleep,
     sendTaskList,
@@ -5816,6 +5745,8 @@ export function useDaemonSocket({
     tileContents,
     requestTileContent,
     sendOpenMarkdown,
+    sendOpenSeed,
+    sendSeedDocumentGet,
     sendRuntimeInput: sendPtyInput,
     sendTerminalPointerActivity,
     sendSetClientPresence,

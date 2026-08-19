@@ -1430,33 +1430,33 @@ describe('SettingsModal font size', () => {
     expect(onReset).toHaveBeenCalledTimes(1);
   });
 
-  it('shows the taskboard matching the app by default, without a Match app button', async () => {
-    renderModal({ uiScale: 1, ticketBoardScale: null, effectiveTicketBoardScale: 1 });
+  it('shows the garden matching the app by default, without a Match app button', async () => {
+    renderModal({ uiScale: 1, gardenScale: null, effectiveGardenScale: 1 });
 
     fireEvent.click(screen.getByTestId('settings-nav-general'));
-    expect(await screen.findByTestId('settings-taskboard-font-scale-value')).toHaveTextContent(
+    expect(await screen.findByTestId('settings-garden-font-scale-value')).toHaveTextContent(
       'Match app',
     );
     expect(screen.queryByText('Match app', { selector: 'button' })).not.toBeInTheDocument();
   });
 
-  it('shows an overridden taskboard scale and reverts it via Match app', async () => {
+  it('shows an overridden garden scale and reverts it via Match app', async () => {
     const onMatchApp = vi.fn();
     const onIncrease = vi.fn();
     renderModal({
       uiScale: 1,
-      ticketBoardScale: 1.3,
-      effectiveTicketBoardScale: 1.3,
-      onIncreaseTicketBoardScale: onIncrease,
-      onMatchAppTicketBoardScale: onMatchApp,
+      gardenScale: 1.3,
+      effectiveGardenScale: 1.3,
+      onIncreaseGardenScale: onIncrease,
+      onMatchAppGardenScale: onMatchApp,
     });
 
     fireEvent.click(screen.getByTestId('settings-nav-general'));
-    expect(await screen.findByTestId('settings-taskboard-font-scale-value')).toHaveTextContent(
+    expect(await screen.findByTestId('settings-garden-font-scale-value')).toHaveTextContent(
       '130%',
     );
 
-    fireEvent.click(screen.getByLabelText('Increase taskboard font size'));
+    fireEvent.click(screen.getByLabelText('Increase garden font size'));
     expect(onIncrease).toHaveBeenCalledTimes(1);
 
     fireEvent.click(screen.getByText('Match app', { selector: 'button' }));

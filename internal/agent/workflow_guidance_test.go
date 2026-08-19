@@ -13,14 +13,14 @@ const workflowGuidanceMarker = "hypercode"
 
 func TestClaudeBuildCommand_GatesWorkflowGuidance(t *testing.T) {
 	// Disabled, no checkout: the launch still appends a system prompt carrying the
-	// always-on ticket-awareness pointer — but never the gated workflow guidance.
+	// always-on garden-awareness pointer — but never the gated workflow guidance.
 	off := (&Claude{}).BuildCommand(SpawnOpts{SessionID: "s", Executable: "claude"})
 	if !slices.Contains(off.Args, "--append-system-prompt") {
-		t.Fatalf("bare launch should append the always-on ticket block: %v", off.Args)
+		t.Fatalf("bare launch should append the always-on garden block: %v", off.Args)
 	}
 	offPrompt := argvValueAfter(off.Args, "--append-system-prompt")
-	if !strings.Contains(offPrompt, "attn ticket new") {
-		t.Fatalf("bare launch system prompt missing the ticket block: %q", offPrompt)
+	if !strings.Contains(offPrompt, "attn seed plant") {
+		t.Fatalf("bare launch system prompt missing the garden block: %q", offPrompt)
 	}
 	if strings.Contains(offPrompt, workflowGuidanceMarker) {
 		t.Fatalf("bare launch leaked workflow guidance: %q", offPrompt)

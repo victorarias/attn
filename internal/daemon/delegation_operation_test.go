@@ -31,7 +31,7 @@ func waitDelegationOperation(t *testing.T, d *Daemon, id string) *protocol.Deleg
 }
 
 func TestDelegationOperationSequentialAndResponseLossRetryConverge(t *testing.T) {
-	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	d := newDelegationDaemon(t)
 	backend := &fakeSpawnBackend{}
 	_, sourceID, _ := setupDelegationSource(t, d, backend)
 	if err := d.store.SetProfileRole(profileRoleChiefOfStaff, sourceID); err != nil {
@@ -63,12 +63,8 @@ func TestDelegationOperationSequentialAndResponseLossRetryConverge(t *testing.T)
 	if got := len(d.store.List("")); got != 2 {
 		t.Fatalf("sessions=%d, want source + one delegate", got)
 	}
-	tickets, err := d.store.ListTickets(store.TicketListFilter{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(tickets) != 1 || tickets[0].Assignee != done.SessionID {
-		t.Fatalf("tickets=%+v, want exactly one bound ticket", tickets)
+	if _, bound := d.gardenDispatchCrown(done.SessionID); !bound {
+		t.Fatalf("the converged delegation bound no seed to session %s", done.SessionID)
 	}
 }
 
@@ -150,7 +146,7 @@ func TestDelegationOperationAcceptedBeforeSlowPreparation(t *testing.T) {
 	}
 	runGitDaemon(t, mainRepo, "init")
 	runGitDaemon(t, mainRepo, "commit", "--allow-empty", "-m", "init")
-	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	d := newDelegationDaemon(t)
 	backend := &fakeSpawnBackend{}
 	_, sourceID, _ := setupDelegationSourceAt(t, d, backend, mainRepo)
 	if err := d.store.SetProfileRole(profileRoleChiefOfStaff, sourceID); err != nil {
@@ -195,12 +191,8 @@ func TestDelegationOperationAcceptedBeforeSlowPreparation(t *testing.T) {
 	if done.State != protocol.DelegationOperationStateCompleted {
 		t.Fatalf("done=%+v", done)
 	}
-	tickets, err := d.store.ListTickets(store.TicketListFilter{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(tickets) != 1 || tickets[0].Assignee != done.SessionID {
-		t.Fatalf("tickets=%+v, want admission-time chief delegation ticket", tickets)
+	if ids := d.delegatedFromChiefSessionIDs(); !ids[done.SessionID] {
+		t.Fatalf("chief-ness was not fixed at admission: %v", ids)
 	}
 }
 
@@ -268,40 +260,6 @@ func TestDelegationOperationAdoptsReconciledReservedRuntime(t *testing.T) {
 	}
 	if got := len(backend.spawnOpts); got != 1 {
 		t.Fatalf("spawn count=%d, want only source runtime", got)
-	}
-}
-
-func TestDelegationRecoveryDoesNotReopenAdoptedTerminalTicket(t *testing.T) {
-	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
-	backend := &fakeSpawnBackend{}
-	workspaceID, sourceID, cwd := setupDelegationSource(t, d, backend)
-	const sessionID = "session-adopted"
-	now := string(protocol.TimestampNow())
-	d.store.Add(&protocol.Session{
-		ID: sessionID, WorkspaceID: workspaceID, Label: "adopted", Agent: protocol.SessionAgentCodex,
-		Directory: cwd, State: protocol.SessionStateWorking, StateSince: now, StateUpdatedAt: now, LastSeen: now,
-	})
-	backend.sessionIDs = append(backend.sessionIDs, sessionID)
-	if _, err := d.store.CreateTicket(store.Ticket{
-		ID: "finished-adoption", Title: "Finished", Description: "Already completed.",
-		Status: store.TicketStatusDone, Assignee: sessionID,
-	}, sourceID, time.Now()); err != nil {
-		t.Fatal(err)
-	}
-
-	result, err := d.delegateOperation(&protocol.DelegateMessage{
-		Cmd: protocol.CmdDelegate, SourceSessionID: sourceID,
-		TicketID: protocol.Ptr("finished-adoption"), Agent: protocol.Ptr("codex"),
-	}, "", sessionID, "", false, "", "")
-	if err != nil {
-		t.Fatalf("recover delegation: %v", err)
-	}
-	if result.SessionID != sessionID {
-		t.Fatalf("result = %+v", result)
-	}
-	ticket, err := d.store.GetTicket("finished-adoption")
-	if err != nil || ticket.Status != store.TicketStatusDone {
-		t.Fatalf("ticket = %+v, err = %v", ticket, err)
 	}
 }
 

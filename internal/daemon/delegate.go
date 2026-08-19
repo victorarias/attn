@@ -15,7 +15,6 @@ import (
 	agentdriver "github.com/victorarias/attn/internal/agent"
 	"github.com/victorarias/attn/internal/git"
 	"github.com/victorarias/attn/internal/protocol"
-	"github.com/victorarias/attn/internal/store"
 )
 
 const (
@@ -587,8 +586,16 @@ func (d *Daemon) delegate(msg *protocol.DelegateMessage) (*protocol.DelegateResu
 	return d.delegateOperation(msg, "", "", "", false, "", "")
 }
 
-func (d *Daemon) spawnDelegatedRuntime(msg *protocol.DelegateMessage, sessionID, workspaceID, directory, name, agent, model, effort, brief string) error {
-	initialPrompt := withLeafIdentity(delegatedTicketPrompt(brief))
+func (d *Daemon) spawnDelegatedRuntime(msg *protocol.DelegateMessage, sessionID, workspaceID, directory, name, agent, model, effort, brief string, fromChief bool) error {
+	// Bound before the spawn, because the launch primer and the delegate's own
+	// prompt both read it: a delegate must launch already knowing the seed it
+	// reports to and, when it was dispatched at a crown, its plot.
+	seedID, err := d.bindDelegationSeed(sessionID, strings.TrimSpace(msg.SourceSessionID),
+		brief, name, strings.TrimSpace(protocol.Deref(msg.Plot)), directory, agent, fromChief)
+	if err != nil {
+		return err
+	}
+	initialPrompt := withLeafIdentity(delegatedBriefPrompt(brief, seedID))
 	spawnMsg := &protocol.SpawnSessionMessage{
 		Cmd:           protocol.CmdSpawnSession,
 		ID:            sessionID,
@@ -607,16 +614,9 @@ func (d *Daemon) spawnDelegatedRuntime(msg *protocol.DelegateMessage, sessionID,
 	if effort != "" {
 		spawnMsg.Effort = protocol.Ptr(effort)
 	}
-	// Recorded before the spawn, because the launch primer reads it: a delegate
-	// dispatched at a crown must launch already knowing its plot.
-	if crown := strings.TrimSpace(protocol.Deref(msg.Plot)); crown != "" {
-		if err := d.recordGardenDispatch(sessionID, crown); err != nil {
-			return fmt.Errorf("dispatch %s at %s: %w", sessionID, crown, err)
-		}
-	}
 	spawnClient := newInternalWSClient()
 	d.handleSpawnSession(spawnClient, spawnMsg)
-	_, err := readInternalActionResult(spawnClient)
+	_, err = readInternalActionResult(spawnClient)
 	return err
 }
 
@@ -626,9 +626,17 @@ func (d *Daemon) delegateOperation(msg *protocol.DelegateMessage, operationID, r
 		return nil, fmt.Errorf("source_session_id is required")
 	}
 	brief := strings.TrimSpace(msg.Brief)
-	ticketID := strings.TrimSpace(protocol.Deref(msg.TicketID))
-	if (brief == "") == (ticketID == "") {
-		return nil, fmt.Errorf("exactly one of brief or ticket_id is required")
+	// Tickets retired: a delegation binds a seed and nothing else, so there is no
+	// ticket left to adopt. The refusal names the garden path rather than failing
+	// on a missing brief, because a caller passing ticket_id is running on stale
+	// guidance and needs to be told where the capability went.
+	if ticketID := strings.TrimSpace(protocol.Deref(msg.TicketID)); ticketID != "" {
+		return nil, fmt.Errorf(
+			"delegating onto ticket %s retired: plant the work as a seed and dispatch at it — `attn seed plant \"<title>\" -m \"<brief>\"`, then `attn delegate --brief \"<brief>\" --plot <seed-id>`",
+			ticketID)
+	}
+	if brief == "" {
+		return nil, fmt.Errorf("a brief is required")
 	}
 	source := d.store.Get(sourceSessionID)
 	if source == nil {
@@ -655,36 +663,11 @@ func (d *Daemon) delegateOperation(msg *protocol.DelegateMessage, operationID, r
 	if sessionID == "" {
 		sessionID = uuid.NewString()
 	}
-	// An adopted ticket is validated before any worktree or runtime side effect.
-	// The durable operation reservation prevents another delegation from racing
-	// this one; the store repeats the ownership check atomically at bind time so a
-	// concurrent ticket-take still cannot be overwritten silently.
-	var adoptedTicket *store.Ticket
-	if ticketID != "" {
-		adoptedTicket, err = d.store.GetTicket(ticketID)
-		if err != nil {
-			return nil, err
-		}
-		if adoptedTicket == nil {
-			return nil, fmt.Errorf("ticket not found: %s", ticketID)
-		}
-		if err := store.ValidateTicketDelegationAdoption(adoptedTicket, sessionID, protocol.Deref(msg.Confirm)); err != nil {
-			return nil, fmt.Errorf("adopt ticket %s: %w", ticketID, err)
-		}
-		brief = strings.TrimSpace(adoptedTicket.Description)
-	}
-	// name is the explicit --name, otherwise an adopted ticket's title, otherwise
-	// the finalized directory basename below.
+	// name is the explicit --name, otherwise the finalized directory basename below.
 	name := strings.TrimSpace(protocol.Deref(msg.Label))
-	if name == "" && adoptedTicket != nil {
-		name = truncateDelegationName(adoptedTicket.Title)
-	}
-	// Every delegation is ticket-tracked; only the chief's own delegations are
-	// additionally chief-OWNED. delegatedByChief therefore no longer gates tracking,
-	// just the two behaviors that are genuinely about the chief: durable role
-	// ownership of the ticket (which also drives the delegated-from-chief sidebar
-	// badge) and unmuting a hidden target workspace. The chief-ness of an operation
-	// is fixed when it is claimed (initiatingChiefSessionID), so a role transfer
+	// The chief's own delegations are chief-OWNED, which now gates one behavior
+	// alone: unmuting a hidden target workspace. The chief-ness of an operation is
+	// fixed when it is claimed (initiatingChiefSessionID), so a role transfer
 	// mid-launch cannot change it underneath a resumed operation.
 	delegatedByChief := initiatingChiefSessionID != "" ||
 		(operationID == "" && d.chiefOfStaffSessionID() == sourceSessionID)
@@ -718,47 +701,20 @@ func (d *Daemon) delegateOperation(msg *protocol.DelegateMessage, operationID, r
 				_ = d.store.UpdateDelegationOperation(operationID, protocol.DelegationOperationStatePreparing,
 					"recovering delegated runtime", existing.WorkspaceID, "", existing.Directory, nil, nil, time.Now())
 			}
-			if err := d.spawnDelegatedRuntime(msg, sessionID, existing.WorkspaceID, existing.Directory, existing.Label, agent, model, effort, brief); err != nil {
+			if err := d.spawnDelegatedRuntime(msg, sessionID, existing.WorkspaceID, existing.Directory, existing.Label, agent, model, effort, brief, delegatedByChief); err != nil {
 				return nil, fmt.Errorf("recover delegated session runtime: %w", err)
 			}
 		}
-		ticket, ticketErr := d.store.ActiveTicketForSession(sessionID)
-		if ticketErr != nil {
-			return nil, ticketErr
-		}
-		// Adoption may have committed immediately before a daemon crash, and the
-		// agent may even have moved the ticket to a terminal column before this
-		// operation's completed state persisted. Recognize the requested ticket by
-		// assignment, not only through ActiveTicketForSession (which excludes
-		// terminal tickets), so recovery never reopens finished work.
-		if ticketID != "" && adoptedTicket.Assignee == sessionID {
-			ticket = adoptedTicket
-		}
-		if ticket != nil && ticketID != "" && ticket.ID != ticketID {
-			return nil, fmt.Errorf("reserved delegated session is already bound to ticket %s", ticket.ID)
-		}
-		if ticket == nil {
-			boundTicketID := ""
-			if ticketID != "" {
-				boundTicketID, ticketErr = d.adoptDelegatedTicket(sourceSessionID, delegatedByChief, existing, ticketID, agent, protocol.Deref(msg.Confirm))
-			} else {
-				boundTicketID, ticketErr = d.createDelegatedTicket(sourceSessionID, delegatedByChief, existing, brief, existing.Label, agent)
+		// The seed bind is idempotent through the dispatch record, and
+		// spawnDelegatedRuntime above already re-ran it, so a recovered delegation
+		// has its whole tracking back with nothing left to reconcile here.
+		if operationID != "" {
+			worktreePath := ""
+			if msg.Worktree != nil {
+				worktreePath = existing.Directory
 			}
-			if ticketErr != nil {
-				return nil, ticketErr
-			}
-			if operationID != "" {
-				worktreePath := ""
-				if msg.Worktree != nil {
-					worktreePath = existing.Directory
-				}
-				_ = d.store.UpdateDelegationOperation(operationID, protocol.DelegationOperationStatePreparing,
-					"recovered delegated ticket", existing.WorkspaceID, boundTicketID, worktreePath, nil, nil, time.Now())
-			}
-			if ticketID != "" {
-				d.notifyTicketObservers(ticketID)
-			}
-			d.publishTicketFact(FactTicketAssigned, boundTicketID)
+			_ = d.store.UpdateDelegationOperation(operationID, protocol.DelegationOperationStatePreparing,
+				"recovered delegated session", existing.WorkspaceID, "", worktreePath, nil, nil, time.Now())
 		}
 		return d.completedDelegationResult(existing, placement, worktreeOwned), nil
 	}
@@ -935,7 +891,7 @@ func (d *Daemon) delegateOperation(msg *protocol.DelegateMessage, operationID, r
 	// hand-listed compensations did at every failure site below.
 	rollback.onPaneCreated(sessionID)
 
-	if err := d.spawnDelegatedRuntime(msg, sessionID, workspaceID, directory, name, agent, model, effort, brief); err != nil {
+	if err := d.spawnDelegatedRuntime(msg, sessionID, workspaceID, directory, name, agent, model, effort, brief, delegatedByChief); err != nil {
 		return nil, rollback.fail(fmt.Errorf("spawn delegated session: %w", err))
 	}
 
@@ -944,6 +900,11 @@ func (d *Daemon) delegateOperation(msg *protocol.DelegateMessage, operationID, r
 		return nil, rollback.fail(fmt.Errorf("delegated session was not persisted"))
 	}
 	rollback.onSessionSpawned(sessionID)
+	if d.delegationFinalizeHook != nil {
+		if err := d.delegationFinalizeHook(); err != nil {
+			return nil, rollback.fail(err)
+		}
+	}
 	// Unmuting the target workspace stays chief-only: an ordinary delegation
 	// preserves the workspace's current mute state (references/delegation.md).
 	if delegatedByChief {
@@ -951,28 +912,12 @@ func (d *Daemon) delegateOperation(msg *protocol.DelegateMessage, operationID, r
 			return nil, rollback.fail(fmt.Errorf("make delegated workspace visible: %s", errMsg))
 		}
 	}
-	// The ticket is not incidental to a delegation: the delegated agent's own prompt
-	// tells it to report through `attn ticket status`, and the ticket is the only
-	// channel back to it. A ticket failure therefore still fails the whole delegation
-	// atomically rather than leaving a running session nobody can reach.
-	boundTicketID := ""
-	if ticketID != "" {
-		boundTicketID, err = d.adoptDelegatedTicket(sourceSessionID, delegatedByChief, session, ticketID, agent, protocol.Deref(msg.Confirm))
-	} else {
-		boundTicketID, err = d.createDelegatedTicket(sourceSessionID, delegatedByChief, session, brief, name, agent)
-	}
-	if err != nil {
-		return nil, rollback.fail(fmt.Errorf("bind delegated ticket: %w", err))
-	}
-	d.logf("delegate: bound ticket %q to session %s", boundTicketID, session.ID)
+	// The seed is what a delegation is tracked on now; spawnDelegatedRuntime bound
+	// it before the runtime launched, because the delegate's own prompt names it.
 	if operationID != "" {
 		_ = d.store.UpdateDelegationOperation(operationID, protocol.DelegationOperationStatePreparing,
-			"delegated session and ticket bound", workspaceID, boundTicketID, operationWorktreePath, nil, nil, time.Now())
+			"delegated session bound", workspaceID, "", operationWorktreePath, nil, nil, time.Now())
 	}
-	if ticketID != "" {
-		d.notifyTicketObservers(ticketID)
-	}
-	d.publishTicketFact(FactTicketAssigned, boundTicketID)
 	result := &protocol.DelegateResult{
 		SessionID:   session.ID,
 		WorkspaceID: workspaceID,
@@ -1027,41 +972,52 @@ func withLeafIdentity(prompt string) string {
 // contract: the agent's work is bound to an attn ticket (assignee == session), and
 // it moves that ticket across the board by reporting its own work state. The
 // delegator, the agent, and the chief of staff all read that board.
-func delegatedTicketPrompt(brief string) string {
-	return strings.TrimSpace(brief) + `
+// delegatedBriefPrompt is a delegate's whole initial prompt: the brief, and —
+// when a seed bound — where that work lives in the garden and the verbs that
+// move it. Tickets retired, so the brief stands alone when no seed bound (an
+// outpost, where the garden's fence refuses every write); the delegate still
+// works, it just has nowhere to report, and the launch log says so.
+func delegatedBriefPrompt(brief, seedID string) string {
+	brief = strings.TrimSpace(brief)
+	if strings.TrimSpace(seedID) == "" {
+		return brief
+	}
+	return brief + `
 
 ---
-This task is tracked as a ticket in attn. Report your work state so the ticket
-moves across the board and the chief of staff can see your progress:
+Your work is seed ` + "`" + seedID + "`" + ` in the garden — the brief above is its body, and
+you are its tender. The log is how anyone else sees what is happening, so write
+what you learned, not just what you did:
 
-    attn ticket status in_progress --comment "<progress and next action>"
+    attn seed note ` + seedID + ` -m "<what happened and what you learned>"
 
-Use the state that matches the outcome when work needs input, is ready, or ends:
+Say it when you need a decision, and say it plainly — a note is the only channel
+back to whoever is watching:
 
-    attn ticket status needs_input --comment "<needed decision>"
-    attn ticket status ready_for_review --comment "<what is ready>"
-    attn ticket status completed --comment "<completed outcome>"
-    attn ticket status failed --comment "<terminal failure>"
+    attn seed note ` + seedID + ` -m "<the decision you need and why it blocks you>"
 
-When the deliverable is a durable Markdown plan or design, hand it over with
-` + "`" + `attn ticket attach-plan --file <path>` + "`" + `. In a monorepo, add
-` + "`" + `--scope <affected-component>` + "`" + `. The command follows the applicable repository
-convention: a committed repository plan stays canonical in Git and the ticket gets
-a Notebook reference; otherwise the plan is promoted to the Notebook and its
-untracked staging source is retired after verification. It never deletes a tracked
-source. Use ` + "`" + `ticket attach` + "`" + ` for other artifacts. Keep the reported canonical
-source current, and report meaningful edits, renames, or deletions through ticket
-status or a ticket comment so the chief can react.
+Close it yourself when the outcome is settled. Harvest when the requested
+outcome is done and no review or decision remains — the user accepted the work,
+the requested PR merged. If you finished implementing but acceptance or review
+is still pending, say that in a note and leave the seed open:
 
-Report ` + "`" + `completed` + "`" + ` when strong terminal evidence shows the requested outcome is
-done and no review or decision remains — for example, the user accepted the work or
-the requested PR merged. You do not need a separate closure confirmation when that
-evidence is already clear. If you merely finished your implementation but acceptance,
-review, or another decision is still pending, report ` + "`" + `ready_for_review` + "`" + ` instead.
-Report the other states as they happen.
+    attn seed harvest ` + seedID + ` -m "<what got done>"
+    attn seed wither ` + seedID + ` -m "<why nobody should pick this up>"
 
-Continue the assigned work after reporting unless you are blocked or waiting on
-the user.`
+Associate a document you produced or are working from, and take it back when it
+stops being current:
+
+    attn seed attach ` + seedID + ` --path <file.md> [--repo <repository>]
+    attn seed attach ` + seedID + ` --notebook <document-id>
+    attn seed attach ` + seedID + ` --url <url>
+    attn seed detach ` + seedID + ` --path <file.md>
+
+Read it back with ` + "`" + `attn seed show ` + seedID + "`" + `, and leave whoever tends it after
+you a ` + "`" + `--handoff` + "`" + ` note. Continue the assigned work after reporting unless you
+are blocked or waiting on the user.
+
+` + "`" + `attn ticket` + "`" + ` retired: every write verb now prints the garden command that
+replaced it. Only ` + "`" + `attn ticket show` + "`" + ` and ` + "`" + `attn ticket list` + "`" + ` still read.`
 }
 
 func (d *Daemon) handleDelegate(conn net.Conn, msg *protocol.DelegateMessage) {

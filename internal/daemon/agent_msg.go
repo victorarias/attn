@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/victorarias/attn/internal/crew"
+	"github.com/victorarias/attn/internal/garden"
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/store"
 )
@@ -97,6 +98,20 @@ func (d *Daemon) handleAgentMsg(conn net.Conn, msg *protocol.AgentMsgMessage) {
 	if result.Detail != "" {
 		d.replyAgentMsg(conn, result)
 		return
+	}
+
+	if seedID := strings.TrimSpace(protocol.Deref(msg.TargetSeedID)); seedID != "" {
+		if strings.TrimSpace(msg.TargetSessionID) != "" {
+			d.replyAgentMsgError(conn, "ambiguous_target",
+				"a message goes to one place; name a session or a seed, not both")
+			return
+		}
+		tender, err := d.seedTenderSession(seedID)
+		if err != nil {
+			d.replyAgentMsgError(conn, "seed_untended", err.Error())
+			return
+		}
+		msg.TargetSessionID = tender
 	}
 
 	now := time.Now()
@@ -649,4 +664,32 @@ func (d *Daemon) forgetQueuedAgentMessages(sessionID string) {
 	d.agentMessageMu.Lock()
 	defer d.agentMessageMu.Unlock()
 	delete(d.queuedAgentMessages, sessionID)
+}
+
+// seedTenderSession resolves a seed to the session tending it — how a caller
+// holding a seed id reaches whoever is working on it without reading the tender
+// out of `attn seed show` first.
+//
+// An untended seed refuses by name rather than delivering nowhere: there is
+// nobody to reach, and the log is where words for a seed nobody holds go.
+func (d *Daemon) seedTenderSession(seedID string) (string, error) {
+	if err := d.requireHome(garden.Surface); err != nil {
+		return "", err
+	}
+	seed, _, err := d.readSeed(seedID)
+	if err != nil {
+		return "", err
+	}
+	tender := seed.Tender()
+	if session := strings.TrimSpace(tender.Session); session != "" {
+		return session, nil
+	}
+	if tender.Named() {
+		return "", fmt.Errorf(
+			"%s is tended by %s, who is not in an attn session; message them by name: attn agent msg %s \"…\"",
+			seed.ID, tender.DisplayName(), tender.Name())
+	}
+	return "", fmt.Errorf(
+		"nobody is tending %s, so there is nobody to reach; leave it on the log instead: attn seed note %s -m \"…\"",
+		seed.ID, seed.ID)
 }

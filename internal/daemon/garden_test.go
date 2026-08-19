@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -63,6 +64,17 @@ func plant(t *testing.T, d *Daemon, msg protocol.SeedPlantMessage) protocol.Seed
 		t.Fatalf("plant %q: %v", msg.Title, protocol.Deref(resp.Error))
 	}
 	return resp.SeedPlantResult.Seed
+}
+
+func editSeed(t *testing.T, d *Daemon, seedID, body string) protocol.Seed {
+	t.Helper()
+	resp := gardenCall(t, func(c net.Conn) {
+		d.handleSeedEdit(c, &protocol.SeedEditMessage{Cmd: protocol.CmdSeedEdit, SeedID: seedID, Body: body})
+	})
+	if !resp.Ok {
+		t.Fatalf("edit %s: %v", seedID, protocol.Deref(resp.Error))
+	}
+	return resp.SeedEditResult.Seed
 }
 
 // addGardenSession puts a second real session in the workspace, the way the app
@@ -194,6 +206,7 @@ func TestGarden_ASecondSessionCannotTakeALiveClaim(t *testing.T) {
 	seed := plant(t, d, protocol.SeedPlantMessage{SourceSessionID: protocol.Ptr("sess-a"), Title: "contended"})
 
 	move(t, d, "sess-a", seed.ID, garden.VerbTend, "", "trellis")
+	editSeed(t, d, seed.ID, "edited body")
 
 	refused := transition(t, d, "sess-b", seed.ID, garden.VerbTend, "", "alder")
 	if refused.Ok {
@@ -358,6 +371,7 @@ func TestGarden_EveryMovePublishesItsOwnFact(t *testing.T) {
 	defer unsubscribe()
 
 	move(t, d, "sess-a", seed.ID, garden.VerbTend, "", "trellis")
+	editSeed(t, d, seed.ID, "edited while tended")
 	note(t, d, "sess-a", seed.ID, "on the log", "trellis")
 	move(t, d, "sess-a", seed.ID, garden.VerbPark, "", "trellis")
 	move(t, d, "sess-a", seed.ID, garden.VerbHarvest, "done", "trellis")
@@ -365,11 +379,55 @@ func TestGarden_EveryMovePublishesItsOwnFact(t *testing.T) {
 	move(t, d, "sess-a", seed.ID, garden.VerbWither, "", "trellis")
 
 	want := []string{
-		FactGardenTended, FactGardenNoted, FactGardenParked,
+		FactGardenTended, FactGardenBodyEdited, FactGardenNoted, FactGardenParked,
 		FactGardenHarvested, FactGardenReplanted, FactGardenWithered,
 	}
 	if !slices.Equal(seen, want) {
 		t.Fatalf("the bus saw %v, want %v", seen, want)
+	}
+}
+
+func TestGarden_EditChangesOnlyTheLivingBody(t *testing.T) {
+	d := newGardenDaemon(t)
+	crown := plant(t, d, protocol.SeedPlantMessage{Title: "Crown"})
+	seed := plant(t, d, protocol.SeedPlantMessage{
+		SourceSessionID: protocol.Ptr("sess-a"), Title: "Editable", Body: protocol.Ptr("old body"), PartOf: protocol.Ptr(crown.ID),
+	})
+	before := move(t, d, "sess-a", seed.ID, garden.VerbTend, "", "trellis")
+
+	after := editSeed(t, d, seed.ID, "# New body\n\nStill the same seed.")
+
+	if after.Body != "# New body\n\nStill the same seed." || after.Rev != before.Rev+1 {
+		t.Fatalf("edited body/revision = %q/%d, want new body/rev %d", after.Body, after.Rev, before.Rev+1)
+	}
+	if after.ID != before.ID || after.Title != before.Title || after.Status != before.Status ||
+		after.TenderSession != before.TenderSession || after.TenderMember != before.TenderMember ||
+		!reflect.DeepEqual(after.Edges, before.Edges) || !reflect.DeepEqual(after.Vars, before.Vars) {
+		t.Fatalf("edit changed seed identity/lifecycle: before=%+v after=%+v", before, after)
+	}
+
+	cleared := editSeed(t, d, seed.ID, "")
+	if cleared.Body != "" {
+		t.Fatalf("explicit empty edit left body %q", cleared.Body)
+	}
+}
+
+func TestGarden_EditRejectsUnknownSeedAndOversizedBody(t *testing.T) {
+	d := newGardenDaemon(t)
+	unknown := gardenCall(t, func(c net.Conn) {
+		d.handleSeedEdit(c, &protocol.SeedEditMessage{Cmd: protocol.CmdSeedEdit, SeedID: "s-ffffff", Body: "words"})
+	})
+	if unknown.Ok || !strings.Contains(protocol.Deref(unknown.Error), "s-ffffff") {
+		t.Fatalf("unknown edit = %+v, want named seed refusal", unknown)
+	}
+	seed := plant(t, d, protocol.SeedPlantMessage{Title: "Bounded"})
+	oversized := gardenCall(t, func(c net.Conn) {
+		d.handleSeedEdit(c, &protocol.SeedEditMessage{
+			Cmd: protocol.CmdSeedEdit, SeedID: seed.ID, Body: strings.Repeat("x", garden.MaxBodyBytes+1),
+		})
+	})
+	if oversized.Ok || !strings.Contains(protocol.Deref(oversized.Error), "max_body_bytes") {
+		t.Fatalf("oversized edit = %+v, want named body limit", oversized)
 	}
 }
 

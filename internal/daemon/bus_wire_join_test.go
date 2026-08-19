@@ -55,7 +55,7 @@ var wireFixtures = map[string]wireFixture{
 		subject: (*wireWorld).session,
 	},
 	FactSessionRegistered: {
-		events:  []string{protocol.EventSessionRegistered},
+		events:  []string{protocol.EventSessionRegistered, protocol.EventGardenSeedsUpdated},
 		subject: (*wireWorld).session,
 	},
 	FactSessionReregistered: {
@@ -102,12 +102,12 @@ var wireFixtures = map[string]wireFixture{
 	},
 	FactSessionUnregistered: {
 		// The session is gone by then, so it rides in the payload.
-		events:  []string{protocol.EventSessionUnregistered},
+		events:  []string{protocol.EventSessionUnregistered, protocol.EventGardenSeedsUpdated},
 		subject: (*wireWorld).session,
 		payload: func(w *wireWorld) any { return w.d.sessionForBroadcast(w.d.store.Get(w.sessionID)) },
 	},
 	FactSessionRespawned: {
-		events:  []string{protocol.EventRuntimeRespawned},
+		events:  []string{protocol.EventRuntimeRespawned, protocol.EventGardenSeedsUpdated},
 		subject: (*wireWorld).session,
 	},
 	FactSessionPTYResized: {
@@ -197,22 +197,17 @@ var wireFixtures = map[string]wireFixture{
 		},
 	},
 
-	// Tickets and the garden: every fact re-pushes the whole list.
-	FactTicketCreated:       {events: []string{protocol.EventTicketsUpdated}},
-	FactTicketStatusChanged: {events: []string{protocol.EventTicketsUpdated}},
-	FactTicketCommented:     {events: []string{protocol.EventTicketsUpdated}},
-	FactTicketAssigned:      {events: []string{protocol.EventTicketsUpdated}},
-	FactTicketAttached:      {events: []string{protocol.EventTicketsUpdated}},
-	FactTicketChanged:       {events: []string{protocol.EventTicketsUpdated}},
-	FactGardenPlanted:       {events: []string{protocol.EventGardenSeedsUpdated}},
-	FactGardenTended:        {events: []string{protocol.EventGardenSeedsUpdated}},
-	FactGardenParked:        {events: []string{protocol.EventGardenSeedsUpdated}},
-	FactGardenHarvested:     {events: []string{protocol.EventGardenSeedsUpdated}},
-	FactGardenWithered:      {events: []string{protocol.EventGardenSeedsUpdated}},
-	FactGardenReplanted:     {events: []string{protocol.EventGardenSeedsUpdated}},
-	FactGardenNoted:         {events: []string{protocol.EventGardenSeedsUpdated}},
-	FactGardenLinked:        {events: []string{protocol.EventGardenSeedsUpdated}},
-	FactGardenUnlinked:      {events: []string{protocol.EventGardenSeedsUpdated}},
+	// The garden: every fact re-pushes the whole list.
+	FactGardenPlanted:    {events: []string{protocol.EventGardenSeedsUpdated}},
+	FactGardenBodyEdited: {events: []string{protocol.EventGardenSeedsUpdated}},
+	FactGardenTended:     {events: []string{protocol.EventGardenSeedsUpdated}},
+	FactGardenParked:     {events: []string{protocol.EventGardenSeedsUpdated}},
+	FactGardenHarvested:  {events: []string{protocol.EventGardenSeedsUpdated}},
+	FactGardenWithered:   {events: []string{protocol.EventGardenSeedsUpdated}},
+	FactGardenReplanted:  {events: []string{protocol.EventGardenSeedsUpdated}},
+	FactGardenNoted:      {events: []string{protocol.EventGardenSeedsUpdated}},
+	FactGardenLinked:     {events: []string{protocol.EventGardenSeedsUpdated}},
+	FactGardenUnlinked:   {events: []string{protocol.EventGardenSeedsUpdated}},
 
 	// PRs and their mute lists.
 	FactPRAppeared:       {events: []string{protocol.EventPRsUpdated}},
@@ -347,7 +342,19 @@ var factsWithoutWire = map[string]string{
 	FactDocumentCollectionRemoved:    "same consumer as document.changed; ends the subscriptions that read the collection",
 	FactDocumentCollectionRedeclared: "same consumer again; a redeclare that drops a queried field ends live queries at redeclare time",
 	FactAppRuntimeChanged:            "supervision state is read back from the supervisor (`attn app runtime status`), never from a copy",
+	FactTicketCreated:                ticketFactsHaveNoClient,
+	FactTicketStatusChanged:          ticketFactsHaveNoClient,
+	FactTicketCommented:              ticketFactsHaveNoClient,
+	FactTicketAssigned:               ticketFactsHaveNoClient,
+	FactTicketAttached:               ticketFactsHaveNoClient,
+	FactTicketChanged:                ticketFactsHaveNoClient,
 }
+
+// ticketFactsHaveNoClient is why every ticket fact stopped projecting: the app
+// shows the garden now, so nothing on a WebSocket renders a board. The facts
+// stay published because they are the durable record behind the ticket read
+// verbs (`attn ticket show`/`list`) and what an app subscribes to.
+const ticketFactsHaveNoClient = "no WebSocket client renders a ticket; the read verbs and subscribing apps read these off the durable log"
 
 // TestEveryProjectedFactReachesTheWire publishes each fact that has a projection
 // and asserts the wire saw exactly the events that fact is contracted to

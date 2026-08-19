@@ -72,7 +72,6 @@ function baseProps() {
       specYaml: '',
     }),
     deleteDefinition: vi.fn().mockResolvedValue(undefined),
-    onOpenTicket: vi.fn(),
     onSelectSession: vi.fn(),
     onFocusPane: vi.fn(),
   };
@@ -344,7 +343,9 @@ describe('AutomationsPanel', () => {
     await waitFor(() => expect(screen.getAllByTestId('automation-run-row')).toHaveLength(2));
   });
 
-  it('navigates to the ticket when a run has a ticket_id', async () => {
+  // A run's ticket_id no longer routes anywhere: the app kept no ticket
+  // surface, so the session is the only place a run row can open.
+  it('navigates to the session even when the run also carries a ticket_id', async () => {
     const user = userEvent.setup();
     const props = baseProps();
     props.fetchDefinitions.mockResolvedValue([makeDefinition({ id: 'd1' })]);
@@ -355,11 +356,10 @@ describe('AutomationsPanel', () => {
     const runOpen = await screen.findByTestId('automation-run-open-r1');
     await user.click(runOpen);
 
-    expect(props.onOpenTicket).toHaveBeenCalledWith('t1');
-    expect(props.onSelectSession).not.toHaveBeenCalled();
+    expect(props.onSelectSession).toHaveBeenCalledWith('s1');
   });
 
-  it('navigates to the session and focuses the pane when a run has session_id/pane_id but no ticket_id', async () => {
+  it('navigates to the session and focuses the pane when a run has session_id/pane_id', async () => {
     const user = userEvent.setup();
     const props = baseProps();
     props.fetchDefinitions.mockResolvedValue([makeDefinition({ id: 'd1' })]);
@@ -374,7 +374,7 @@ describe('AutomationsPanel', () => {
     expect(props.onFocusPane).toHaveBeenCalledWith('s1', 'p1');
   });
 
-  it('renders a run with no ticket_id/session_id as non-navigable', async () => {
+  it('renders a run with no session_id as non-navigable', async () => {
     const user = userEvent.setup();
     const props = baseProps();
     props.fetchDefinitions.mockResolvedValue([makeDefinition({ id: 'd1' })]);
@@ -384,7 +384,6 @@ describe('AutomationsPanel', () => {
     await user.click(await screen.findByText('PR reviewer'));
     await screen.findByTestId('automation-run-row');
     expect(screen.queryByTestId('automation-run-open-r1')).not.toBeInTheDocument();
-    expect(props.onOpenTicket).not.toHaveBeenCalled();
     expect(props.onSelectSession).not.toHaveBeenCalled();
   });
 

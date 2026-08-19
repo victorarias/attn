@@ -34,7 +34,7 @@ const (
 // Defensive: an anchored-type annotation with a nil anchor (shouldn't persist,
 // but the store blob is JSON) formats without a line label rather than
 // panicking.
-func formatMarkdownAnnotationPayload(path string, anns []protocol.MarkdownAnnotation, orphaned map[string]bool) string {
+func formatMarkdownAnnotationPayload(source annotationDocumentSource, anns []protocol.MarkdownAnnotation, orphaned map[string]bool) string {
 	var anchored, globals []protocol.MarkdownAnnotation
 	for _, a := range anns {
 		if a.Type == markdownAnnotationTypeGlobal {
@@ -61,7 +61,14 @@ func formatMarkdownAnnotationPayload(path string, anns []protocol.MarkdownAnnota
 	if len(sorted) == 1 {
 		piece = "piece"
 	}
-	fmt.Fprintf(&b, "# Markdown Annotations\n\nFile: %s\n\nI've reviewed this document and have %d %s of feedback:\n\n", path, len(sorted), piece)
+	subject := "File: " + source.path
+	if source.kind == annotationSourceSeed {
+		subject = "Seed: " + source.seedID
+		if source.seedTitle != "" {
+			subject += " — " + source.seedTitle
+		}
+	}
+	fmt.Fprintf(&b, "# Markdown Annotations\n\n%s\n\nI've reviewed this document and have %d %s of feedback:\n\n", subject, len(sorted), piece)
 
 	// Label Summary bookkeeping: counts by display text, first-appearance
 	// order over the sorted list.

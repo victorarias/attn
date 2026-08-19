@@ -1,0 +1,12 @@
+kind: added
+area: garden
+change: >
+  Delegations now report on seeds. `attn delegate` plants a seed for the work —
+  the brief is its body, the delegate session its tender — and every work state
+  the delegate reports lands as a note on that seed's log, so the seed carries
+  the whole thread. `attn seed attach` and `attn seed detach` associate a
+  document with a seed by a typed reference (a path, a Notebook document, or a
+  URL); the current set shows in `attn seed show`, in the Garden panel drill,
+  and on the seed tile, and detaching takes it back without editing the log.
+  `attn agent msg` accepts a seed id and reaches whoever is tending it. Tickets
+  are unchanged and still bind — a delegation binds both.

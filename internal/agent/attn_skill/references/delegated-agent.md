@@ -13,88 +13,66 @@ otherwise, use native subagents.
 An attn delegation creates a visible agent session the user can inspect,
 converse with, and steer directly. Native subagents report to you.
 
-## Report Your State on Your Bound Ticket
+## Report On Your Seed
 
-Every delegation is tracked. attn opened a ticket for this task when it delegated
-you (you are its assignee) and started it in the working column. Self-report your
-work state so the ticket moves across the board and the people watching it — the
-session that delegated you and the chief of staff — can follow your progress
-without interrupting you to ask. Report when you:
+Your work is a **seed** in the garden — the brief you launched with is its body,
+and you are its tender. Its id is in your launch prompt. The log is the only
+channel back to the session that delegated you and to whoever else is watching,
+so write to it when you:
 
 - reach a meaningful milestone
 - need input or are blocked
 - finish the requested work
 
-    attn ticket status in_progress --comment \
+    attn seed note <seed-id> -m \
       "Implemented the parser and tests pass. Next: review the error wording."
 
-When work needs input, is ready for review, clearly completes, or fails, report
-the matching state:
+    attn seed note <seed-id> -m \
+      "Core implementation is ready locally; which event contract should be used?"
 
-    attn ticket status needs_input \
-      --comment "Core implementation is ready locally; which event contract should be used?"
+Close it yourself when the outcome is settled:
 
-    attn ticket status ready_for_review \
-      --comment "Parser implementation is ready for review"
+    attn seed harvest <seed-id> -m "The requested PR merged and no follow-up remains"
+    attn seed wither <seed-id> -m "The required API was removed; nobody should pick this up"
 
-    attn ticket status completed \
-      --comment "The requested PR merged and no follow-up remains"
+Harvest when strong terminal evidence shows the requested outcome is done and no
+review or decision remains — Victor accepted the work, the requested PR merged,
+or an equivalent objective completion signal is clear. A separate confirmation
+ritual is unnecessary when that evidence already exists. If you merely finished
+implementing and acceptance, review, or another decision is still pending, say
+that in a note and leave the seed open.
 
-    attn ticket status failed \
-      --comment "Implementation cannot continue because the required API was removed"
+Keep a note concrete: outcome, evidence, and next action. A note is a small
+payload — put large durable reasoning in an artifact and attach it rather than
+inlining it. Leave your successor a `--handoff` note whenever you park or stop
+mid-thread.
 
-Reporting moves your bound ticket to the matching column so your delegator and the
-chief see your progress on the board. Keep the comment concrete: outcome, evidence,
-and next action.
+Noting does not stop or transfer your session. Continue working unless the task
+is blocked or complete. Untracked delegation — no seed in your prompt — has
+nowhere to report and needs none of this.
 
-Use `completed` when strong terminal evidence shows the requested outcome is done
-and no review or decision remains — for example, Victor accepted the work, the
-requested PR merged, or an equivalent objective completion signal is clear. A
-separate confirmation ritual is unnecessary when that evidence already exists. If
-you merely finished implementation but acceptance, review, or another decision is
-still pending, use `ready_for_review`.
-
-To move a ticket other than your own, add `--ticket <id>` (any ticket, no
-ownership gate) — same as `ticket comment <id>` reaching across tickets.
-
-A report is a small payload. Put large durable reasoning in an artifact and reference
-it from the status comment rather than inlining it. For plans and designs, use the
-canonical-source workflow below. For other prose, write to a path the chief or user
-designated; if none was designated and the location materially changes ownership,
-ask by reporting `needs_input`.
-
-Reporting does not stop or transfer your session. Continue working unless the task
-is blocked or complete. Do not report ticket status for ordinary, untracked
-delegation.
+`attn ticket` retired: every write verb prints the garden command that replaced
+it and exits nonzero. Only `attn ticket show` and `attn ticket list` still read.
+See [garden.md](garden.md).
 
 ## Hand Over Durable Artifacts
 
-When tracked work produces a Markdown plan or design that must outlive this
-session, let attn choose its one canonical home:
+When your work produces a Markdown plan or design that must outlive this
+session, associate it with your seed:
 
-    attn ticket attach-plan \
-      --file docs/plans/design.md \
-      --state ready_for_review \
-      --comment "The design is ready."
+    attn seed attach <seed-id> --path docs/plans/design.md --repo attn
+    attn seed attach <seed-id> --notebook <document-id>
+    attn seed attach <seed-id> --url <url>
 
-The default `--authority auto` checks the applicable repository convention. In a
-monorepo, pass `--scope <affected-component>` so an unrelated sibling's docs do not
-decide ownership. Explicit user and repository guidance wins; use `--authority
-repository` or `--authority notebook` to record that choice when auto-detection is
-not the right signal.
+Where the document lives does not change — the seed records the association
+only, and `attn seed detach` takes it back.
 
-- If that scope keeps plans or designs in Git, commit the plan first. The repository
-  file remains canonical and attn attaches a Notebook reference containing its path,
-  branch, and introducing commit. When migrating an older attachment, attn retires
-  the old Notebook copy only if it is byte-identical; a divergent copy is preserved
-  for explicit reconciliation.
-- Otherwise, attn copies the plan into the ticket's Notebook directory, verifies the
-  copy, and retires the untracked staging source. It refuses to delete a tracked file.
+- If the scope keeps plans or designs in Git, commit the plan first and attach
+  it by `--path` with the `--repo` it lives in. The repository file stays
+  canonical.
+- Otherwise write it into the Notebook (see [notebook.md](notebook.md)) and
+  attach it by `--notebook <document-id>`.
 
-Use ordinary `ticket attach` for other artifact types and for deliberate snapshots;
-it copies each source into the Notebook and does not retire it.
-
-After success, edit only the reported canonical source: the Git file named by a
-repository reference, or the returned Notebook file. When you make a meaningful
-edit, rename, or deletion, report it with `ticket status --comment` or `ticket
-comment` so the ticket's participants know to re-read it.
+Edit only the canonical source afterward. When you make a meaningful edit,
+rename, or deletion, note it on the seed so whoever reads it next knows to
+re-read the document.

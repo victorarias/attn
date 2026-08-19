@@ -22,6 +22,12 @@ func TestCommandMetaExamples(t *testing.T) {
 	if meta := CommandMeta[protocol.CmdQueryPRs]; meta.Scope != ScopeHubLocal {
 		t.Fatalf("query_prs scope = %v, want %v", meta.Scope, ScopeHubLocal)
 	}
+	if meta := CommandMeta[protocol.CmdOpenSeed]; meta.Scope != ScopeHubLocal {
+		t.Fatalf("open_seed scope = %v, want %v", meta.Scope, ScopeHubLocal)
+	}
+	if meta := CommandMeta[protocol.CmdSeedEdit]; meta.Scope != ScopeHubLocal {
+		t.Fatalf("seed_edit scope = %v, want %v", meta.Scope, ScopeHubLocal)
+	}
 	if !blocksDuringRecovery(protocol.CmdPtyInput) {
 		t.Fatal("pty_input should block during recovery")
 	}
@@ -92,6 +98,12 @@ func TestRemoteCommandSessionID(t *testing.T) {
 			want: "",
 		},
 		{
+			name: "open_seed stays hub local",
+			cmd:  protocol.CmdOpenSeed,
+			msg:  &protocol.OpenSeedMessage{SeedID: "s-abc123", SessionID: protocol.Ptr("sess-remote")},
+			want: "",
+		},
+		{
 			// Hub→remote regression: Submit's draft-read/format/deliver all run
 			// on whichever daemon handles the command, so it must route by the
 			// SAME target_session_id it delivers to — otherwise a hub would
@@ -100,8 +112,16 @@ func TestRemoteCommandSessionID(t *testing.T) {
 			// its own local store.
 			name: "markdown_annotations_submit",
 			cmd:  protocol.CmdMarkdownAnnotationsSubmit,
-			msg:  &protocol.MarkdownAnnotationsSubmitMessage{Path: "/tmp/notes.md", TargetSessionID: "sess-md-submit"},
+			msg:  &protocol.MarkdownAnnotationsSubmitMessage{Path: protocol.Ptr("/tmp/notes.md"), TargetSessionID: protocol.Ptr("sess-md-submit")},
 			want: "sess-md-submit",
+		},
+		{
+			name: "markdown_annotations_note_on_seed stays home local",
+			cmd:  protocol.CmdMarkdownAnnotationsSubmit,
+			msg: &protocol.MarkdownAnnotationsSubmitMessage{
+				SeedID: protocol.Ptr("s-abc123"), TargetSeedID: protocol.Ptr("s-abc123"),
+			},
+			want: "",
 		},
 		{
 			// Hub→remote regression: a turn's stamps are written by the daemon
@@ -172,23 +192,40 @@ func TestRemoteCommandWorkspaceID_IncludesTileContentGet(t *testing.T) {
 }
 
 func TestRemoteCommandWorkspaceID_IncludesMarkdownAnnotationsGet(t *testing.T) {
-	msg := &protocol.MarkdownAnnotationsGetMessage{WorkspaceID: "workspace-md-get"}
-	if got := remoteCommandWorkspaceID(protocol.CmdMarkdownAnnotationsGet, msg); got != msg.WorkspaceID {
-		t.Fatalf("remoteCommandWorkspaceID() = %q, want %q", got, msg.WorkspaceID)
+	msg := &protocol.MarkdownAnnotationsGetMessage{SourceKind: annotationSourceFile, WorkspaceID: protocol.Ptr("workspace-md-get")}
+	if got := remoteCommandWorkspaceID(protocol.CmdMarkdownAnnotationsGet, msg); got != protocol.Deref(msg.WorkspaceID) {
+		t.Fatalf("remoteCommandWorkspaceID() = %q, want %q", got, protocol.Deref(msg.WorkspaceID))
 	}
 }
 
 func TestRemoteCommandWorkspaceID_IncludesMarkdownAnnotationsSave(t *testing.T) {
-	msg := &protocol.MarkdownAnnotationsSaveMessage{WorkspaceID: "workspace-md-save"}
-	if got := remoteCommandWorkspaceID(protocol.CmdMarkdownAnnotationsSave, msg); got != msg.WorkspaceID {
-		t.Fatalf("remoteCommandWorkspaceID() = %q, want %q", got, msg.WorkspaceID)
+	msg := &protocol.MarkdownAnnotationsSaveMessage{SourceKind: annotationSourceFile, WorkspaceID: protocol.Ptr("workspace-md-save")}
+	if got := remoteCommandWorkspaceID(protocol.CmdMarkdownAnnotationsSave, msg); got != protocol.Deref(msg.WorkspaceID) {
+		t.Fatalf("remoteCommandWorkspaceID() = %q, want %q", got, protocol.Deref(msg.WorkspaceID))
 	}
 }
 
 func TestRemoteCommandWorkspaceID_IncludesMarkdownAnnotationsClear(t *testing.T) {
-	msg := &protocol.MarkdownAnnotationsClearMessage{WorkspaceID: "workspace-md-clear"}
-	if got := remoteCommandWorkspaceID(protocol.CmdMarkdownAnnotationsClear, msg); got != msg.WorkspaceID {
-		t.Fatalf("remoteCommandWorkspaceID() = %q, want %q", got, msg.WorkspaceID)
+	msg := &protocol.MarkdownAnnotationsClearMessage{SourceKind: annotationSourceFile, WorkspaceID: protocol.Ptr("workspace-md-clear")}
+	if got := remoteCommandWorkspaceID(protocol.CmdMarkdownAnnotationsClear, msg); got != protocol.Deref(msg.WorkspaceID) {
+		t.Fatalf("remoteCommandWorkspaceID() = %q, want %q", got, protocol.Deref(msg.WorkspaceID))
+	}
+}
+
+func TestRemoteCommandWorkspaceID_DoesNotRouteSeedAnnotations(t *testing.T) {
+	workspaceID := protocol.Ptr("workspace-must-not-route")
+	cases := []struct {
+		cmd string
+		msg interface{}
+	}{
+		{protocol.CmdMarkdownAnnotationsGet, &protocol.MarkdownAnnotationsGetMessage{SourceKind: annotationSourceSeed, WorkspaceID: workspaceID}},
+		{protocol.CmdMarkdownAnnotationsSave, &protocol.MarkdownAnnotationsSaveMessage{SourceKind: annotationSourceSeed, WorkspaceID: workspaceID}},
+		{protocol.CmdMarkdownAnnotationsClear, &protocol.MarkdownAnnotationsClearMessage{SourceKind: annotationSourceSeed, WorkspaceID: workspaceID}},
+	}
+	for _, tc := range cases {
+		if got := remoteCommandWorkspaceID(tc.cmd, tc.msg); got != "" {
+			t.Fatalf("%s routed seed annotation to %q", tc.cmd, got)
+		}
 	}
 }
 

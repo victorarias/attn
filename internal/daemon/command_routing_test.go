@@ -61,27 +61,20 @@ func protocolCommands(t *testing.T) map[string]string {
 // deleting the line here. Nothing may be added.
 var commandsPredatingTheScopeGuard = map[string]bool{
 	"automation_apply": true, "automation_cleanup": true, "automation_definition_get": true, "automation_definitions_get": true,
-	"automation_delete": true, "automation_run": true, "automation_runs_get": true,
-	"automation_set_enabled": true, "automation_validate": true, "bootstrap_endpoint": true,
-	"client_hello": true, "delegate": true, "delegate_status": true,
-	"fs_delete": true, "fs_exists": true, "fs_index": true, "fs_list": true,
-	"fs_read": true, "fs_read_asset": true, "fs_rename": true, "fs_unwatch": true,
-	"fs_watch": true, "fs_write": true, "get_screen_snapshot": true, "get_ticket": true,
-	"journal_append": true, "notebook_backlinks": true, "notebook_guide": true,
-	"notebook_list": true, "notebook_read": true, "notebook_send_to_chief": true,
-	"notebook_write": true, "notification_list": true, "notification_mark_read": true,
-	"open_browser": true, "pin_workspace": true, "present_close": true,
-	"present_feedback": true, "present_open": true, "recent_files": true,
-	"register_workspace": true, "set_endpoint_remote_web": true, "task_list": true,
-	"task_retry": true, "ticket_add_comment": true, "ticket_change_status": true,
-	"ticket_comment": true, "ticket_edit_description": true, "ticket_list": true,
-	"ticket_resume": true, "ticket_show": true, "ticket_subscribe": true,
-	"ticket_take": true, "ticket_unsubscribe": true, "unregister_workspace": true,
-	"workflow_call_upsert": true, "workflow_run_cancel": true, "workflow_run_get": true,
-	"workflow_run_list": true, "workflow_run_upsert": true, "workspace_context_checkout": true,
-	"workspace_context_compact": true, "workspace_context_list": true,
-	"workspace_context_rollback": true, "workspace_context_status": true,
-	"workspace_context_update": true,
+	"automation_delete": true, "automation_run": true, "automation_runs_get": true, "automation_set_enabled": true,
+	"automation_validate": true, "bootstrap_endpoint": true, "client_hello": true, "delegate": true,
+	"delegate_status": true, "fs_delete": true, "fs_exists": true, "fs_index": true, "fs_list": true,
+	"fs_read": true, "fs_read_asset": true, "fs_rename": true, "fs_unwatch": true, "fs_watch": true,
+	"fs_write": true, "get_screen_snapshot": true, "journal_append": true, "notebook_backlinks": true,
+	"notebook_guide": true, "notebook_list": true, "notebook_read": true, "notebook_send_to_chief": true,
+	"notebook_write": true, "notification_list": true, "notification_mark_read": true, "open_browser": true,
+	"pin_workspace": true, "present_close": true, "present_feedback": true, "present_open": true,
+	"recent_files": true, "register_workspace": true, "set_endpoint_remote_web": true, "task_list": true,
+	"task_retry": true, "ticket_comment": true, "ticket_list": true, "ticket_show": true, "ticket_subscribe": true,
+	"ticket_take": true, "ticket_unsubscribe": true, "unregister_workspace": true, "workflow_call_upsert": true,
+	"workflow_run_cancel": true, "workflow_run_get": true, "workflow_run_list": true, "workflow_run_upsert": true,
+	"workspace_context_checkout": true, "workspace_context_compact": true, "workspace_context_list": true,
+	"workspace_context_rollback": true, "workspace_context_status": true, "workspace_context_update": true,
 }
 
 func TestEveryProtocolCommandIsClassified(t *testing.T) {
@@ -170,7 +163,7 @@ var sessionCommandsAnsweredWhereTheyLand = map[string]string{
 // message says to check here first.
 func routingProbe(wire string) []byte {
 	return []byte(`{"cmd":"` + wire + `","id":"probe","session_id":"probe","target_session_id":"probe",` +
-		`"workspace_id":"probe","source_workspace_id":"probe","endpoint_id":"probe","directory":"/probe"}`)
+		`"workspace_id":"probe","source_workspace_id":"probe","source_kind":"file","endpoint_id":"probe","directory":"/probe"}`)
 }
 
 func routedByAnyRouter(wire string, msg interface{}) bool {

@@ -29,6 +29,10 @@ func callTicketAttach(t *testing.T, d *Daemon, msg *protocol.TicketAttachMessage
 	if err := json.NewDecoder(client).Decode(&resp); err != nil {
 		t.Fatalf("decode ticket attach response: %v", err)
 	}
+	// net.Pipe writes block until read, and the decoder can finish the JSON
+	// value without consuming the encoder's trailing newline — close the pipe
+	// so the handler's Encode returns before we wait on it.
+	_ = client.Close()
 	<-done
 	return resp
 }
@@ -40,6 +44,17 @@ func attachSource(t *testing.T, dir, name, content string) protocol.TicketAttach
 		t.Fatalf("write source: %v", err)
 	}
 	return protocol.TicketAttachFile{SourcePath: path, Filename: name}
+}
+
+// currentTicketEventSeq is the optimistic-concurrency stamp a caller sends with
+// a mutation: the last event it saw on the ticket.
+func currentTicketEventSeq(t *testing.T, d *Daemon, ticketID string) *int {
+	t.Helper()
+	ticket, err := d.store.GetTicket(ticketID)
+	if err != nil || ticket == nil {
+		t.Fatalf("ticket %s: %v", ticketID, err)
+	}
+	return protocol.Ptr(int(ticket.LatestEventSeq))
 }
 
 func TestTicketAttachCopiesFilesOfAnyTypeAndChangesState(t *testing.T) {
@@ -233,13 +248,13 @@ func TestTicketAttachDispatchesFromWebSocketAsUser(t *testing.T) {
 	}
 }
 
-func TestTicketAttachNotifiesChiefAndBroadcasts(t *testing.T) {
+func TestTicketAttachNotifiesChief(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	d.nudgeWindowOverride = time.Hour
 	t.Cleanup(d.stopNudgeCountdowns)
 	d.store.SetSetting(SettingNotebookRoot, t.TempDir())
 	chiefID, agentID, inputs := delegateForNotify(t, d, "codex")
-	ticketID := boundTicketID(t, d, agentID)
+	boundTicketID(t, d, agentID)
 	for _, id := range []string{chiefID, agentID} {
 		if _, err := ticketnotify.ConsumeAll(d.store, d.ticketObserversForSession(id), time.Now()); err != nil {
 			t.Fatal(err)
@@ -247,7 +262,6 @@ func TestTicketAttachNotifiesChiefAndBroadcasts(t *testing.T) {
 	}
 	d.store.UpdateState(chiefID, protocol.StateIdle)
 	d.store.UpdateState(agentID, protocol.StateIdle)
-	latestBroadcast := captureTicketBroadcasts(d)
 	source := attachSource(t, t.TempDir(), "report.md", "findings")
 	resp := callTicketAttach(t, d, &protocol.TicketAttachMessage{Cmd: protocol.CmdTicketAttach, SourceSessionID: agentID, Files: []protocol.TicketAttachFile{source}})
 	if !resp.Ok {
@@ -257,16 +271,4 @@ func TestTicketAttachNotifiesChiefAndBroadcasts(t *testing.T) {
 	if !wasNudged(inputs(chiefID)) || wasNudged(inputs(agentID)) {
 		t.Fatalf("unexpected nudge state: chief=%v agent=%v", inputs(chiefID), inputs(agentID))
 	}
-	if board := latestBroadcast(); len(board) == 0 || !containsTicketID(board, ticketID) {
-		t.Fatalf("ticket broadcast missing %q: %+v", ticketID, board)
-	}
-}
-
-func containsTicketID(tickets []protocol.TicketRow, id string) bool {
-	for _, ticket := range tickets {
-		if ticket.ID == id {
-			return true
-		}
-	}
-	return false
 }

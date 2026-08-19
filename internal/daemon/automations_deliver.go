@@ -637,7 +637,17 @@ func (d *Daemon) startAutomationSession(req automation.WorkRequest, directory, i
 	if definition, err := d.store.GetAutomationDefinition(req.DefinitionID); err == nil && definition != nil {
 		definitionName = definition.Name
 	}
-	prompt := automationSessionPrompt(req.Prompt, inputPath, definitionName, pullRequestTarget, pullRequestErr == nil)
+	// An automation run reports where every other launched agent reports: its
+	// seed. The bind is keyed by session id, so a continuation run re-binds the
+	// seed the first occurrence planted rather than planting a second one, and
+	// the run's ticket — still what continuation, retention and crash
+	// classification are keyed on — moves from the daemon's mirror of what the
+	// agent does in the garden.
+	seedID, err := d.bindDelegationSeed(req.IDs.SessionID, "", req.Prompt, req.DefinitionID, "", directory, req.Launch.Agent, false)
+	if err != nil {
+		return err
+	}
+	prompt := automationSessionPrompt(req.Prompt, inputPath, seedID, definitionName, pullRequestTarget, pullRequestErr == nil)
 	label := filepath.Base(directory)
 	if _, reviewLabel, _, ok := automationReviewNames(req); ok {
 		label = reviewLabel
@@ -648,8 +658,7 @@ func (d *Daemon) startAutomationSession(req automation.WorkRequest, directory, i
 		message.ResumeSessionID = protocol.Ptr(resumeID)
 	}
 	d.handleSpawnSessionWithPolicy(client, message, internalSpawnPolicy{unattendedLaunch: req.Launch})
-	_, err := readInternalActionResult(client)
-	if err != nil {
+	if _, err := readInternalActionResult(client); err != nil {
 		return err
 	}
 	return d.verifyUnattendedLaunch(req)
@@ -723,9 +732,9 @@ func (d *Daemon) ensureAutomationOccurrenceInput(req automation.WorkRequest) (st
 	}
 	return path, nil
 }
-func automationSessionPrompt(configuredPrompt, inputPath, definitionName string, pullRequest *automation.PullRequestInput, localOnlyReview bool) string {
+func automationSessionPrompt(configuredPrompt, inputPath, seedID, definitionName string, pullRequest *automation.PullRequestInput, localOnlyReview bool) string {
 	if localOnlyReview {
-		configuredPrompt += "\n\nThis review is local-only. Report results in the attn ticket/session. " +
+		configuredPrompt += "\n\nThis review is local-only. Report results on the attn seed/session. " +
 			"Do not post, approve, comment, push, or otherwise modify GitHub unless a later explicit user action authorizes that specific interaction."
 	}
 	dataContract := "\n\n---\n\nStructured occurrence input is available at " + inputPath + ". " +
@@ -734,7 +743,7 @@ func automationSessionPrompt(configuredPrompt, inputPath, definitionName string,
 	if pullRequest != nil && localOnlyReview {
 		dataContract = "\n\n---\n\n" + automationTargetBlock(definitionName, inputPath, *pullRequest)
 	}
-	return withLeafIdentity(delegatedTicketPrompt(configuredPrompt) + dataContract)
+	return withLeafIdentity(delegatedBriefPrompt(configuredPrompt, seedID) + dataContract)
 }
 
 const codexDirectoryTrustPrompt = "Do you trust the contents of this directory?"

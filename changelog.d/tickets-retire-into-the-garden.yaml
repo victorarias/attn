@@ -1,0 +1,13 @@
+kind: changed
+area: cli
+change: >
+  Tickets retired into the garden. Every `attn ticket` write verb now prints the
+  garden command that replaced it and exits nonzero — `attn ticket status`
+  points at `attn seed note` and `attn seed harvest`, `attn ticket new` at
+  `attn seed plant`, and so on — so an agent running on stale guidance is told
+  where the capability went instead of failing quietly. `attn ticket show` and
+  `attn ticket list` keep reading the board forever: a done ticket has no garden
+  equivalent to point at. New delegations bind a seed and no ticket, unbound
+  backlog todos became seeds carrying their description as the body (the ticket
+  they came from is archived and still readable), and work that was already
+  ticket-bound keeps moving on its ticket as its tender tends the seed.

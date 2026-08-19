@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
   ChangeEvent,
   FocusEvent as ReactFocusEvent,
@@ -15,13 +15,23 @@ import { useAppViewTitleResolver } from '../../hooks/useAppViewTitle';
 import { BrowserTileBody } from './BrowserTileBody';
 import { MarkdownReader } from '../MarkdownReader';
 import type { MarkdownAnnotationsSendHandle } from '../MarkdownReader';
+import {
+  fileMarkdownSource,
+  seedMarkdownSource,
+  type MarkdownDocumentSource,
+} from '../MarkdownReader/documentSource';
 import { getMarkdownAnnotationsTransport } from '../MarkdownReader/annotations/transport';
+import type { MarkdownAnnotationsDestination } from '../MarkdownReader/annotations/transport';
 import { useAnnotationSend } from '../../annotations/useAnnotationSend';
+import { useEscapeStack } from '../../hooks/useEscapeStack';
 import { useNotebookSurfaceContext } from '../../contexts/NotebookSurfaceContext';
 import { NotebookTile } from '../notebook/NotebookTile';
 import { AppTileHost } from '../appViews/AppTileHost';
 import { parseAppViewTileKind } from '../../utils/appBundle';
 import type { NotebookSurfaceHandle } from '../NotebookSurface';
+import { SeedDocumentView, type SeedDocument } from '../SeedDocumentView';
+import { useDaemonApi, useOptionalDaemonApi } from '../../contexts/DaemonApiContext';
+import type { Seed } from '../../hooks/useDaemonSocket';
 import './WorkspaceDockTile.css';
 
 // Link/image target resolution moved to the reader; re-exported here for
@@ -38,6 +48,7 @@ function bodyKindModifier(tileKind: string): string {
   if (tileKind === 'browser') return 'workspace-dock-tile-body--browser';
   if (tileKind === 'notebook') return 'workspace-dock-tile-body--notebook';
   if (tileKind === 'markdown') return 'workspace-dock-tile-body--markdown';
+  if (tileKind === 'seed') return 'workspace-dock-tile-body--markdown';
   return '';
 }
 
@@ -64,6 +75,7 @@ interface WorkspaceDockTileProps {
   visible?: boolean;
   // The workspace's agent sessions — the markdown tile's retarget options.
   workspaceSessions?: WorkspaceTileSessionOption[];
+  gardenSeeds?: Seed[];
   // The session the workspace has selected, if any. An app's view is given this
   // as `sessionId`; nothing else reads it.
   workspaceSessionId?: string | null;
@@ -85,12 +97,12 @@ interface WorkspaceDockTileProps {
   bodyRef?: Ref<HTMLDivElement>;
 }
 
-/** Header send state for a markdown tile. `sent` auto-clears after ~4s;
+/** Header send state for an annotated document tile. `sent` auto-clears after ~4s;
     `skipped`/`warning`/`error` persist until the next action. `warning`
-    covers delivered-but-draft-clear-failed: the payload reached the session
+    covers accepted-but-draft-clear-failed: the payload reached its destination
     but the daemon still holds the draft, so local state is kept to match. */
 type MarkdownSendResult =
-  | { kind: 'sent' }
+  | { kind: 'sent'; destination: 'session' | 'seed' }
   | { kind: 'skipped' }
   | { kind: 'warning'; message: string }
   | { kind: 'error'; message: string };
@@ -98,6 +110,7 @@ type MarkdownSendResult =
 const SEND_SENT_CLEAR_MS = 4000;
 const SKIPPED_APPROVAL_MESSAGE = 'Target is waiting for approval — not sent';
 const NOT_HYDRATED_MESSAGE = 'Annotations are still syncing — try again in a moment';
+const NO_GARDEN_SEEDS: Seed[] = [];
 
 export function WorkspaceDockTile({
   tile,
@@ -107,6 +120,7 @@ export function WorkspaceDockTile({
   dragging,
   visible = true,
   workspaceSessions = [],
+  gardenSeeds = NO_GARDEN_SEEDS,
   workspaceSessionId = null,
   workspaceDirectory,
   onClose,
@@ -132,7 +146,7 @@ export function WorkspaceDockTile({
     || '';
   const appView = parseAppViewTileKind(tile.tileKind);
   const appViewTitle = useAppViewTitleResolver();
-  const title = deriveTileTitle(tile, content, appViewTitle);
+  const baseTitle = deriveTileTitle(tile, content, appViewTitle);
   const browserLabel = browserHostLabel(workspaceId, tile.tileId);
   const [browserAddress, setBrowserAddress] = useState(tile.tileParams || '');
   const pendingBrowserParamsRef = useRef<string | null>(null);
@@ -142,8 +156,19 @@ export function WorkspaceDockTile({
   // a root switch, or worse, persist it to the wrong root after remount.
   const notebookSurfaceRef = useRef<NotebookSurfaceHandle | null>(null);
 
-  // ---- markdown annotation send flow (PR6) ---------------------------------
+  // ---- rendered-document annotation send flow ------------------------------
   const isMarkdown = tile.tileKind === 'markdown';
+  const isSeed = tile.tileKind === 'seed';
+  const isAnnotatedDocument = isMarkdown || isSeed;
+  const {
+    document: seedDocument,
+    error: seedDocumentError,
+  } = useLiveSeedDocument(path, gardenSeeds, isSeed);
+  const title = isSeed ? (seedDocument?.seed.title || path || baseTitle) : baseTitle;
+  const documentSource = useMemo(
+    () => (isSeed ? seedMarkdownSource(path) : fileMarkdownSource(workspaceId, path)),
+    [isSeed, path, workspaceId],
+  );
   const annotationsSendRef = useRef<MarkdownAnnotationsSendHandle | null>(null);
   const [annotationCount, setAnnotationCount] = useState(0);
   // Focus-within on the tile root gates the ⌘Enter shortcut's registration:
@@ -176,12 +201,26 @@ export function WorkspaceDockTile({
     : boundInWorkspace
       ? boundSessionId
       : '';
+  const seedTenderSessionId = seedDocument?.tender_holds
+    ? seedDocument.seed.tender_session.trim()
+    : '';
+  const primaryDestination = useMemo<MarkdownAnnotationsDestination | null>(() => {
+    if (isSeed) {
+      if (!seedDocument || !path) return null;
+      return seedTenderSessionId
+        ? { kind: 'session', sessionId: seedTenderSessionId }
+        : { kind: 'seed', seedId: path };
+    }
+    return targetSessionId ? { kind: 'session', sessionId: targetSessionId } : null;
+  }, [isSeed, path, seedDocument, seedTenderSessionId, targetSessionId]);
   const transportAvailable = getMarkdownAnnotationsTransport() !== null;
 
-  const performAnnotationSend = useCallback((): MarkdownSendResult | null | Promise<MarkdownSendResult> => {
+  const performAnnotationSend = useCallback((
+    destination: MarkdownAnnotationsDestination | null,
+  ): MarkdownSendResult | null | Promise<MarkdownSendResult> => {
     const handle = annotationsSendRef.current;
     const transport = getMarkdownAnnotationsTransport();
-    if (annotationCount === 0 || !targetSessionId || !handle || !transport || !path) {
+    if (annotationCount === 0 || !destination || !handle || !transport || !path) {
       return null;
     }
     if (!handle.isHydrated()) {
@@ -195,38 +234,39 @@ export function WorkspaceDockTile({
       // that includes the last keystroke's edit.
       await handle.flushPendingSave();
       const result = await transport.submitMarkdownAnnotations(
-        path,
-        targetSessionId,
+        documentSource,
+        destination,
         handle.getOrphanedIds(),
       );
-      if (result.status === 'delivered' && result.error) {
-        // The daemon delivered the payload but kept its draft; local state
+      if ((result.status === 'delivered' || result.status === 'noted') && result.error) {
+        // The daemon accepted the payload but kept its draft; local state
         // stays with that surviving source of truth.
         return { kind: 'warning', message: result.error };
       }
-      if (result.status === 'delivered') {
+      if (result.status === 'delivered' || result.status === 'noted') {
         handle.applyDeliveredClear(result.generation ?? 0);
-        return { kind: 'sent' };
+        return { kind: 'sent', destination: result.status === 'noted' ? 'seed' : 'session' };
       }
       if (result.status === 'skipped_pending_approval') {
         return { kind: 'skipped' };
       }
       return { kind: 'error', message: result.error || 'Send failed' };
     })();
-  }, [annotationCount, path, targetSessionId]);
+  }, [annotationCount, documentSource, path]);
 
-  const sendEnabled = isMarkdown
+  const sendEnabled = isAnnotatedDocument
       && visible
       && hasFocusWithin
       && annotationCount > 0
-      && !!targetSessionId
+      && !!primaryDestination
       && transportAvailable;
   const {
     outcome: sendOutcome,
     send: sendNow,
+    sendAlternative,
     clearOutcome: clearSendOutcome,
   } = useAnnotationSend<MarkdownSendResult>({
-    send: performAnnotationSend,
+    send: () => performAnnotationSend(primaryDestination),
     shortcutId: 'markdown.sendAnnotations',
     enabled: sendEnabled,
     sentClearMs: SEND_SENT_CLEAR_MS,
@@ -244,7 +284,34 @@ export function WorkspaceDockTile({
   }, []);
 
   const sending = sendStatus.kind === 'sending';
-  const sendDisabled = sending || annotationCount === 0 || !targetSessionId || !transportAvailable;
+  const sendDisabled = sending || annotationCount === 0 || !primaryDestination || !transportAvailable;
+  const seedDestinationMenuKey = seedTenderSessionId && seedDocument
+    ? `${seedTenderSessionId}:${seedDocument.seed.rev}`
+    : null;
+  const [openSeedDestinationMenuKey, setOpenSeedDestinationMenuKey] = useState<string | null>(null);
+  const seedDestinationMenuOpen = seedDestinationMenuKey !== null
+    && openSeedDestinationMenuKey === seedDestinationMenuKey;
+  const seedDestinationGroupRef = useRef<HTMLDivElement>(null);
+  const seedDestinationCaretRef = useRef<HTMLButtonElement>(null);
+  const seedDestinationItemRef = useRef<HTMLButtonElement>(null);
+  const closeSeedDestinationMenu = useCallback((restoreFocus = false) => {
+    setOpenSeedDestinationMenuKey(null);
+    if (restoreFocus) {
+      window.requestAnimationFrame(() => seedDestinationCaretRef.current?.focus());
+    }
+  }, []);
+  useEscapeStack(() => closeSeedDestinationMenu(true), seedDestinationMenuOpen);
+  useEffect(() => {
+    if (!seedDestinationMenuOpen) return;
+    seedDestinationItemRef.current?.focus();
+    const handleMouseDown = (event: MouseEvent) => {
+      if (!seedDestinationGroupRef.current?.contains(event.target as Node)) {
+        closeSeedDestinationMenu();
+      }
+    };
+    document.addEventListener('mousedown', handleMouseDown);
+    return () => document.removeEventListener('mousedown', handleMouseDown);
+  }, [closeSeedDestinationMenu, seedDestinationMenuOpen]);
 
   useEffect(() => {
     setBrowserAddress(tile.tileParams || '');
@@ -374,8 +441,8 @@ export function WorkspaceDockTile({
       className={`workspace-dock-tile ${dragging ? 'workspace-dock-tile--dragging' : ''}`.trim()}
       data-browser-host-owner={tile.tileKind === 'browser' ? true : undefined}
       onPointerDownCapture={tile.tileKind === 'browser' ? () => claimBrowserHostFocus(browserLabel) : undefined}
-      onFocus={isMarkdown ? handleTileFocus : undefined}
-      onBlur={isMarkdown ? handleTileBlur : undefined}
+      onFocus={isAnnotatedDocument ? handleTileFocus : undefined}
+      onBlur={isAnnotatedDocument ? handleTileBlur : undefined}
     >
       <div
         className="workspace-dock-tile-header"
@@ -421,7 +488,7 @@ export function WorkspaceDockTile({
             <option value={ROOT_BROWSE_VALUE}>Browse…</option>
           </select>
         ) : null}
-        {isMarkdown ? (
+        {isAnnotatedDocument ? (
           <div
             className="workspace-dock-tile-send"
             // The header is the drag handle; interacting with the send
@@ -432,7 +499,7 @@ export function WorkspaceDockTile({
               <span className="workspace-dock-tile-send-status" role="status">Sending…</span>
             ) : sendStatus.kind === 'sent' ? (
               <span className="workspace-dock-tile-send-status workspace-dock-tile-send-status--ok" role="status">
-                Sent ✓
+                {sendStatus.destination === 'seed' ? 'Noted ✓' : 'Sent ✓'}
               </span>
             ) : sendStatus.kind === 'skipped' ? (
               <span className="workspace-dock-tile-send-status workspace-dock-tile-send-status--warn" role="status">
@@ -455,47 +522,107 @@ export function WorkspaceDockTile({
                 {sendStatus.message}
               </span>
             ) : null}
-            <select
-              className="workspace-dock-tile-session-picker"
-              aria-label="Send annotations to session"
-              value={targetSessionId}
-              onChange={(event) => {
-                const sessionId = event.target.value;
-                if (!sessionId || sessionId === targetSessionId) {
-                  return;
-                }
-                // Optimistic: the pick takes effect immediately (picker value
-                // AND Send target); the daemon echo confirms it later. On a
-                // failed retarget request, roll back to the persisted binding.
-                setPendingTargetSessionId(sessionId);
-                clearSendOutcome();
-                void Promise.resolve(onRetargetTile?.(sessionId)).catch((error) => {
-                  console.warn('[WorkspaceDockTile] Failed to retarget tile session:', error);
-                  setPendingTargetSessionId((prev) => (prev === sessionId ? null : prev));
-                });
-              }}
-            >
-              {!targetSessionId && (
-                <option value="" disabled>
-                  No session
-                </option>
-              )}
-              {workspaceSessions.map((session) => (
-                <option key={session.sessionId} value={session.sessionId}>
-                  {session.label}
-                  {session.state === 'pending_approval' ? ' ⏸ approval' : ''}
-                </option>
-              ))}
-            </select>
-            <button
-              type="button"
-              className="workspace-dock-tile-send-button"
-              disabled={sendDisabled}
-              title="Send annotations to the selected session (⌘Enter)"
-              onClick={sendNow}
-            >
-              {sending ? 'Sending…' : `Send ${annotationCount}`}
-            </button>
+            {isSeed ? (
+              <div
+                ref={seedDestinationGroupRef}
+                className="workspace-dock-tile-seed-submit"
+                role="group"
+                aria-label="Submit seed annotations"
+              >
+                <button
+                  type="button"
+                  className={`workspace-dock-tile-send-button${seedTenderSessionId ? ' workspace-dock-tile-send-button--split-primary' : ''}`}
+                  disabled={sendDisabled}
+                  title={seedTenderSessionId
+                    ? 'Send annotations to the tending session (⌘Enter)'
+                    : 'Leave annotations as a note on the seed (⌘Enter)'}
+                  onClick={sendNow}
+                >
+                  {sending
+                    ? (seedTenderSessionId ? 'Sending…' : 'Noting…')
+                    : seedTenderSessionId
+                      ? `Send ${annotationCount}`
+                      : `Note on seed ${annotationCount}`}
+                </button>
+                {seedTenderSessionId ? (
+                  <>
+                    <button
+                      ref={seedDestinationCaretRef}
+                      type="button"
+                      className="workspace-dock-tile-send-button workspace-dock-tile-send-button--split-caret"
+                      aria-label="More annotation destinations"
+                      aria-haspopup="menu"
+                      aria-expanded={seedDestinationMenuOpen}
+                      disabled={sendDisabled}
+                      onClick={() => setOpenSeedDestinationMenuKey((openKey) => (
+                        openKey === seedDestinationMenuKey ? null : seedDestinationMenuKey
+                      ))}
+                    >
+                      ▾
+                    </button>
+                    {seedDestinationMenuOpen ? (
+                      <div className="workspace-dock-tile-seed-submit-menu" role="menu">
+                        <button
+                          ref={seedDestinationItemRef}
+                          type="button"
+                          role="menuitem"
+                          onClick={() => {
+                            closeSeedDestinationMenu();
+                            sendAlternative(() => performAnnotationSend({ kind: 'seed', seedId: path }));
+                          }}
+                        >
+                          Note on seed
+                        </button>
+                      </div>
+                    ) : null}
+                  </>
+                ) : null}
+              </div>
+            ) : (
+              <>
+                <select
+                  className="workspace-dock-tile-session-picker"
+                  aria-label="Send annotations to session"
+                  value={targetSessionId}
+                  onChange={(event) => {
+                    const sessionId = event.target.value;
+                    if (!sessionId || sessionId === targetSessionId) {
+                      return;
+                    }
+                    // Optimistic: the pick takes effect immediately (picker value
+                    // AND Send target); the daemon echo confirms it later. On a
+                    // failed retarget request, roll back to the persisted binding.
+                    setPendingTargetSessionId(sessionId);
+                    clearSendOutcome();
+                    void Promise.resolve(onRetargetTile?.(sessionId)).catch((error) => {
+                      console.warn('[WorkspaceDockTile] Failed to retarget tile session:', error);
+                      setPendingTargetSessionId((prev) => (prev === sessionId ? null : prev));
+                    });
+                  }}
+                >
+                  {!targetSessionId && (
+                    <option value="" disabled>
+                      No session
+                    </option>
+                  )}
+                  {workspaceSessions.map((session) => (
+                    <option key={session.sessionId} value={session.sessionId}>
+                      {session.label}
+                      {session.state === 'pending_approval' ? ' ⏸ approval' : ''}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  className="workspace-dock-tile-send-button"
+                  disabled={sendDisabled}
+                  title="Send annotations to the selected session (⌘Enter)"
+                  onClick={sendNow}
+                >
+                  {sending ? 'Sending…' : `Send ${annotationCount}`}
+                </button>
+              </>
+            )}
           </div>
         ) : null}
         <div className="workspace-dock-tile-actions">
@@ -531,8 +658,15 @@ export function WorkspaceDockTile({
         {tile.tileKind === 'markdown' ? (
           <MarkdownBody
             content={content}
-            workspaceId={workspaceId}
+            source={documentSource}
             allowLocalTargets={allowLocalTargets}
+            onAnnotationsCountChange={setAnnotationCount}
+            annotationsSendRef={annotationsSendRef}
+          />
+        ) : tile.tileKind === 'seed' ? (
+          <SeedTileBody
+            document={seedDocument}
+            error={seedDocumentError}
             onAnnotationsCountChange={setAnnotationCount}
             annotationsSendRef={annotationsSendRef}
           />
@@ -585,13 +719,13 @@ export function WorkspaceDockTile({
 
 function MarkdownBody({
   content,
-  workspaceId,
+  source,
   allowLocalTargets,
   onAnnotationsCountChange,
   annotationsSendRef,
 }: {
   content?: TileContentState;
-  workspaceId: string;
+  source: MarkdownDocumentSource;
   allowLocalTargets: boolean;
   onAnnotationsCountChange: (count: number) => void;
   annotationsSendRef: RefObject<MarkdownAnnotationsSendHandle | null>;
@@ -608,12 +742,116 @@ function MarkdownBody({
   return (
     <MarkdownReader
       content={content.content}
-      path={content.path}
+      source={source}
       allowLocalTargets={allowLocalTargets}
       annotationsEnabled
-      workspaceId={workspaceId}
       onAnnotationsCountChange={onAnnotationsCountChange}
       annotationsSendRef={annotationsSendRef}
+    />
+  );
+}
+
+function useLiveSeedDocument(seedId: string, gardenSeeds: Seed[], enabled: boolean) {
+  // Ordinary tiles are also rendered in lightweight workspace surfaces that
+  // do not need daemon commands. Only require the API when this is a seed.
+  const sendSeedDocumentGet = useOptionalDaemonApi()?.sendSeedDocumentGet;
+  const [document, setDocument] = useState<SeedDocument | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const liveSeed = useMemo(
+    () => gardenSeeds.find((seed) => seed.id === seedId) ?? null,
+    [gardenSeeds, seedId],
+  );
+  const displayedDocument = useMemo(() => {
+    if (!document || !liveSeed || liveSeed.rev < document.seed.rev) return document;
+    const tenderChanged = liveSeed.tender_session !== document.seed.tender_session
+      || liveSeed.tender_member !== document.seed.tender_member;
+    return {
+      ...document,
+      seed: liveSeed,
+      tender_holds: tenderChanged
+        ? Boolean(liveSeed.tender_session || liveSeed.tender_member)
+        : document.tender_holds,
+    };
+  }, [document, liveSeed]);
+
+  // Every garden fact re-pushes the seeds snapshot. Notes and child changes do
+  // not necessarily touch this seed's own revision, so the array identity is
+  // the live invalidation signal for the complete reader document.
+  useEffect(() => {
+    if (!enabled) return;
+    if (!seedId) {
+      setDocument(null);
+      setError('No seed is associated with this tile.');
+      return;
+    }
+    if (!sendSeedDocumentGet) {
+      setDocument(null);
+      setError('The daemon API is unavailable.');
+      return;
+    }
+    let ignore = false;
+    setError(null);
+    void sendSeedDocumentGet(seedId)
+      .then((next) => {
+        if (ignore) return;
+        if (liveSeed && liveSeed.rev >= next.seed.rev) {
+          const tenderChanged = liveSeed.tender_session !== next.seed.tender_session
+            || liveSeed.tender_member !== next.seed.tender_member;
+          setDocument({
+            ...next,
+            seed: liveSeed,
+            tender_holds: tenderChanged
+              ? Boolean(liveSeed.tender_session || liveSeed.tender_member)
+              : next.tender_holds,
+          });
+        } else {
+          setDocument(next);
+        }
+      })
+      .catch((readError) => {
+        if (ignore) return;
+        setError(readError instanceof Error ? readError.message : `Could not read ${seedId}`);
+      });
+    return () => {
+      ignore = true;
+    };
+  }, [enabled, gardenSeeds, liveSeed, seedId, sendSeedDocumentGet]);
+
+  return { document: displayedDocument, error };
+}
+
+function SeedTileBody({
+  document,
+  error,
+  onAnnotationsCountChange,
+  annotationsSendRef,
+}: {
+  document: SeedDocument | null;
+  error: string | null;
+  onAnnotationsCountChange: (count: number) => void;
+  annotationsSendRef: RefObject<MarkdownAnnotationsSendHandle | null>;
+}) {
+  const { sendOpenMarkdown } = useDaemonApi();
+
+  if (!document) {
+    return (
+      <div className={`workspace-dock-tile-message${error ? ' workspace-dock-tile-error' : ''}`}>
+        {error || 'Loading seed…'}
+      </div>
+    );
+  }
+
+  return (
+    <SeedDocumentView
+      document={document}
+      annotationsEnabled
+      onAnnotationsCountChange={onAnnotationsCountChange}
+      annotationsSendRef={annotationsSendRef}
+      onOpenMarkdownArtifact={(path) => {
+        void sendOpenMarkdown(path, '').catch((openError) => {
+          console.error('[SeedDocument] Could not open markdown artifact:', openError);
+        });
+      }}
     />
   );
 }

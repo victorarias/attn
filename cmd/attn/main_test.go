@@ -534,41 +534,11 @@ func TestParseDelegateArgsDefaultsToCurrentWorkspace(t *testing.T) {
 	}
 }
 
-func TestParseDelegateArgsAdoptsTicket(t *testing.T) {
-	parsed, err := parseDelegateArgs([]string{
-		"--source-session", "source-session",
-		"--ticket", " planned-work ",
-		"--confirm",
-	})
-	if err != nil {
-		t.Fatalf("parseDelegateArgs() error = %v", err)
-	}
-	if parsed.brief != "" || parsed.options.TicketID != "planned-work" || !parsed.options.Confirm {
-		t.Fatalf("parsed = %+v", parsed)
-	}
-}
-
 func TestParseDelegateArgsRejectsMultipleTaskSources(t *testing.T) {
-	for _, args := range [][]string{
-		{"--brief", "text", "--ticket", "planned"},
-		{"--brief-file", "brief.md", "--ticket", "planned"},
-		{"--brief", "text", "--brief-file", "brief.md"},
-	} {
-		_, err := parseDelegateArgs(append([]string{"--source-session", "source-session"}, args...))
-		if err == nil || !strings.Contains(err.Error(), "pass only one") {
-			t.Fatalf("parseDelegateArgs(%v) error = %v", args, err)
-		}
-	}
-}
-
-func TestParseDelegateArgsConfirmRequiresTicket(t *testing.T) {
-	_, err := parseDelegateArgs([]string{
-		"--source-session", "source-session",
-		"--brief", "text",
-		"--confirm",
-	})
-	if err == nil || !strings.Contains(err.Error(), "--confirm requires --ticket") {
-		t.Fatalf("parseDelegateArgs() error = %v", err)
+	args := []string{"--source-session", "source-session", "--brief", "text", "--brief-file", "brief.md"}
+	_, err := parseDelegateArgs(args)
+	if err == nil || !strings.Contains(err.Error(), "pass only one") {
+		t.Fatalf("parseDelegateArgs(%v) error = %v", args, err)
 	}
 }
 
@@ -891,6 +861,18 @@ func TestParseOpenArgs(t *testing.T) {
 				t.Fatalf("parseOpenArgs(%v) = (%q, %q), want (%q, %q)", tc.args, path, session, tc.wantPath, tc.wantSession)
 			}
 		})
+	}
+}
+
+func TestSeedOpenTargetClassification(t *testing.T) {
+	if !isSeedOpenTarget("s-7k3f9m") {
+		t.Fatal("seed id should route to open_seed")
+	}
+	if !isSeedOpenTarget("s-not-valid") {
+		t.Fatal("seed-looking input should route to open_seed so validation fails loudly")
+	}
+	if isSeedOpenTarget("./s-7k3f9m") {
+		t.Fatal("explicit relative path should remain a file target")
 	}
 }
 

@@ -76,6 +76,7 @@ func (d *Daemon) observeAgentConversation(observation agentConversationObservati
 		return
 	}
 
+	d.rememberDispatchResume(observation.SessionID, observation.NativeID)
 	d.resetSessionActivityRuntime(observation.SessionID)
 	d.publishFact(FactSessionConversationChanged, observation.SessionID, observation)
 }

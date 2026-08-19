@@ -68,7 +68,7 @@ func TestTicketInboxConsumesByIdentity(t *testing.T) {
 		t.Fatalf("delegate(): %v", err)
 	}
 	agentSession := result.SessionID
-	ticketID := boundTicketID(t, d, agentSession)
+	ticketID := bindLegacyTicketTitled(t, d, agentSession, chiefSessionID, "Migrate the store to X")
 
 	// Agent's first read is empty: the brief was delivered out of band via the spawn
 	// prompt, so the created event is pre-consumed and never re-served as inbox noise.
@@ -181,7 +181,7 @@ func TestTicketInboxRoutesOrdinaryDelegationToCreatorAndChief(t *testing.T) {
 		t.Fatalf("delegate(): %v", err)
 	}
 	agentSession := result.SessionID
-	ticketID := boundTicketID(t, d, agentSession)
+	ticketID := bindLegacyTicketAs(t, d, agentSession, creatorSessionID, "Plain delegated task.", false)
 
 	// The creator drains the created event it authored nothing of interest on, so the
 	// assertion below is about the agent's report alone.
@@ -242,7 +242,7 @@ func TestChiefCreatedTicketAttachesTheRoleAndNotTheSession(t *testing.T) {
 		t.Fatalf("delegate(): %v", err)
 	}
 	agentSession := result.SessionID
-	ticketID := boundTicketID(t, d, agentSession)
+	ticketID := bindLegacyTicketTitled(t, d, agentSession, chiefSessionID, "Migrate the store to X")
 
 	// The chief observes through both identities.
 	observers := d.ticketObserversForSession(chiefSessionID)

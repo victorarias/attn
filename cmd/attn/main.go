@@ -696,14 +696,14 @@ commands:
   presence                          check whether the current shell runs inside attn
   agent list                        name every session running here
   agent peek <id>                   read a session without interrupting it
-  agent msg <session-or-member> "text"  message a live session or durable crew member
+  agent msg <target> "text"            message a live session, crew member or seed's tender
 	  session <command>                 inspect a session's conversation
   state explain <id>                replay why a session's state is what it is
   delegate --brief-file <path>      start another agent with a delegated brief
-  delegate --ticket <id>            start another agent on an existing ticket
+  delegate --plot <seed-id>         start another agent at an existing seed
   journal append --entry <text>     serialized append to the daily notebook journal
   workspace context <command>       edit shared workspace context
-  open <file.md> [--session <id>]   show a markdown file in attn
+  open <file.md|seed-id> [--session <id>]   show a document in attn
   browser <command>                 open and control the in-app browser
   workflow <command>                run, inspect, and resume durable workflows
   automation <command>              manage and run durable automations
@@ -792,13 +792,14 @@ func runDelegate() {
 }
 
 func writeDelegateHelp(w io.Writer) {
-	fmt.Fprint(w, `usage: attn delegate (--brief <text> | --brief-file <path> | --ticket <id>) [options]
+	fmt.Fprint(w, `usage: attn delegate (--brief <text> | --brief-file <path>) [options]
+
+A delegation binds a seed: the brief is its body, the delegate its tender, and
+the seed is where the delegate reports. Tickets retired.
 
 task source:
-  --brief <text>              delegate a short task and create its ticket
-  --brief-file <path>         delegate a task file and create its ticket
-  --ticket <id>               adopt an existing ticket and use its description
-  --confirm                   take over a ticket with a non-orphan assignee
+  --brief <text>              delegate a short task; it becomes the seed's body
+  --brief-file <path>         delegate a task file; it becomes the seed's body
 
 placement:
   (no flags)                 add a pane to the source workspace; Git repositories
@@ -830,11 +831,11 @@ session options:
                              medium, high, xhigh)
   --name <text>              name for the agent and, when a new workspace is
                              created, the workspace (max 16 chars, must be
-                             unique; defaults to the ticket title for --ticket,
-                             otherwise the directory name)
+                             unique; defaults to the directory name)
   --source-session <id>      source session (defaults to ATTN_SESSION_ID)
   --yolo                     bypass agent approval prompts
-  --plot <crown>             dispatch the delegate at a crown. It launches
+  --plot <crown>             dispatch the delegate at an existing seed instead of
+                             planting a new one. Aimed at a crown it launches
                              knowing that plot, and a flag-free "attn seed ready"
                              inside it answers with the plot's ready seeds. It
                              is scope, not a fence or an assignment: who holds
@@ -856,10 +857,10 @@ func hasHelpFlag(args []string) bool {
 	return false
 }
 
-// runTicket routes `attn ticket <command>`: `status` (the agent's forward channel
-// onto its own bound ticket), `inbox`, `attach`, `attach-plan`, `new` (mint a standalone, unbound
-// backlog ticket without delegating), and `comment` (post a one-shot note onto any
-// ticket by id).
+// runTicket routes `attn ticket <command>`. Only the two read verbs still do
+// anything: `list` and `show` keep serving the archived store, because a done
+// ticket has no garden equivalent to point at. Every write verb is a signpost
+// naming the garden command that replaced it (cmd/attn/ticket_signpost.go).
 func runTicket() {
 	if len(os.Args) < 3 || os.Args[2] == "-h" || os.Args[2] == "--help" {
 		writeTicketHelp(os.Stdout)
@@ -867,18 +868,6 @@ func runTicket() {
 	}
 	warnIfDaemonVersionMismatch()
 	switch os.Args[2] {
-	case "status":
-		if hasHelpFlag(os.Args[3:]) {
-			writeTicketHelp(os.Stdout)
-			return
-		}
-		runTicketStatus(os.Args[3:])
-	case "inbox":
-		if hasHelpFlag(os.Args[3:]) {
-			writeTicketHelp(os.Stdout)
-			return
-		}
-		runTicketInbox(os.Args[3:])
 	case "list":
 		if hasHelpFlag(os.Args[3:]) {
 			writeTicketHelp(os.Stdout)
@@ -891,48 +880,10 @@ func runTicket() {
 			return
 		}
 		runTicketShow(os.Args[3:])
-	case "attach":
-		if hasHelpFlag(os.Args[3:]) {
-			writeTicketHelp(os.Stdout)
-			return
-		}
-		runTicketAttach(os.Args[3:])
-	case "attach-plan":
-		if hasHelpFlag(os.Args[3:]) {
-			writeTicketHelp(os.Stdout)
-			return
-		}
-		runTicketAttachPlan(os.Args[3:])
-	case "new":
-		if hasHelpFlag(os.Args[3:]) {
-			writeTicketHelp(os.Stdout)
-			return
-		}
-		runTicketNew(os.Args[3:])
-	case "comment":
-		if hasHelpFlag(os.Args[3:]) {
-			writeTicketHelp(os.Stdout)
-			return
-		}
-		runTicketComment(os.Args[3:])
-	case "subscribe":
-		if hasHelpFlag(os.Args[3:]) {
-			writeTicketHelp(os.Stdout)
-			return
-		}
-		runTicketSubscribe(os.Args[3:])
-	case "unsubscribe":
-		if hasHelpFlag(os.Args[3:]) {
-			writeTicketHelp(os.Stdout)
-			return
-		}
-		runTicketUnsubscribe(os.Args[3:])
-	case "take":
-		if hasHelpFlag(os.Args[3:]) {
-			writeTicketHelp(os.Stdout)
-			return
-		}
-		runTicketTake(os.Args[3:])
+	case "status", "inbox", "attach", "attach-plan", "new", "comment", "subscribe", "unsubscribe", "take":
+		// A signpost answers --help too: an agent reaching for a retired verb
+		// needs to be told it is gone, not handed the help it was looking for.
+		signpostTicketVerb(os.Args[2])
 	default:
 		fmt.Fprintf(os.Stderr, "ticket: unknown command %q\n", os.Args[2])
 		writeTicketHelp(os.Stderr)
@@ -1769,57 +1720,23 @@ func humanizeDuration(d time.Duration) string {
 }
 
 func writeTicketHelp(w io.Writer) {
-	fmt.Fprint(w, `usage: attn ticket <command>
+	fmt.Fprintf(w, `usage: attn ticket <command>
 
-commands:
-  status <work-state> [--session <id>] [--comment <text>] [--ticket <id>] [--json]
-        move this session's bound ticket to the column for the reported state;
-        --ticket <id> moves any ticket by id instead, not just the bound one
-  inbox [--session <id>] [--json] [--watch [--interval <dur>]]
-        read (and mark read) this session's unread ticket activity;
-        --watch blocks and prints new activity as it lands (for a Monitor)
+Tickets retired with the garden era. Work lives in the garden now: a seed is
+the unit of work, and `+"`attn seed --help`"+` is the whole surface. These two read
+verbs stay forever, because a done ticket has no garden equivalent to point at:
+
   list [--status <col>] [--all] [--json]
-        read the board: every ticket (id, column, assignee, title), newest first;
-        --json includes each ticket's description. No session required.
+        read the archived board: every ticket (id, column, assignee, title),
+        newest first; --json includes each ticket's description. No session
+        required.
   show <ticket-id> [--session <id>] [--json]
         print one ticket's full record — description, complete activity thread
-        with full bodies, current artifacts; non-consuming, does not touch your inbox
-        cursor
-  attach --file <path> [--file <path> ...] [--ticket <id>]
-        [--state <work-state>] [--comment <text>] [--session <id>] [--json]
-		copy artifact files into a ticket's canonical Notebook directory,
-        record one durable attachment, and optionally change ticket state
-  attach-plan --file <path> [--scope <path>]
-        [--authority auto|repository|notebook] [--ticket <id>]
-        [--state <work-state>] [--comment <text>] [--session <id>] [--json]
-        choose one canonical home for a Markdown plan or design: keep committed
-        repository plans in Git and attach a Notebook reference, or promote an
-        untracked staging file into the Notebook and retire the verified source;
-        use --scope for the affected component in a monorepo; a byte-identical
-        legacy Notebook copy is retired when replaced by a repository reference
-  new --title <t> [--description <d>] [--id <slug>] [--session <id>] [--json]
-        create an unbound backlog ticket in todo (no agent, no session)
-  comment <ticket-id> --message <text> [--session <id>] [--json]
-        post a one-shot comment onto any ticket by id (does not subscribe you);
-        -m is shorthand for --message
-  subscribe <ticket-id> [--session <id>] [--json]
-        opt into a ticket's notifications (future activity nudges you and lands
-        in your inbox; the next inbox also delivers the ticket's history)
-  unsubscribe <ticket-id> [--session <id>] [--json]
-        opt back out of a ticket's notifications (idempotent)
-  take <ticket-id> [--confirm] [--session <id>] [--json]
-        claim a ticket (become its assignee); --confirm is required to take over
-        one already assigned to someone else
+        with full bodies, current artifacts
 
-work states:
-  in_progress       working
-  needs_input       blocked
-  ready_for_review  in review
-  completed         done
-  failed            failed
-
-The session defaults to ATTN_SESSION_ID.
-`)
+Every other verb (%s) is a signpost: run it
+to be told which garden command replaced it, or read `+"`attn skill --reference garden`"+`.
+`, ticketSignpostVerbList())
 }
 
 // runJournal routes `attn journal <command>`. Today there is only one
@@ -2433,8 +2350,8 @@ func parseDelegateArgs(args []string) (delegateCLIArgs, error) {
 	fs.SetOutput(io.Discard)
 	briefText := fs.String("brief", "", "delegated task brief")
 	briefFile := fs.String("brief-file", "", "file containing the delegated task brief")
-	ticketID := fs.String("ticket", "", "existing ticket to adopt")
-	confirm := fs.Bool("confirm", false, "take over a ticket with a non-orphan assignee")
+	ticketID := fs.String("ticket", "", "retired: delegations bind a seed, not a ticket")
+	confirm := fs.Bool("confirm", false, "retired: went with --ticket")
 	agentName := fs.String("agent", "", "target agent (defaults to the source session agent)")
 	model := fs.String("model", "", "pin the delegated agent's model (alias or full id)")
 	effort := fs.String("effort", "", "pin the delegated agent's reasoning effort")
@@ -2465,19 +2382,18 @@ func parseDelegateArgs(args []string) (delegateCLIArgs, error) {
 	if source == "" {
 		return delegateCLIArgs{}, errors.New("no source session; run inside attn or pass --source-session")
 	}
-	ticket := strings.TrimSpace(*ticketID)
-	sources := 0
-	if strings.TrimSpace(*briefText) != "" {
-		sources++
+	// --ticket and --confirm retired with tickets themselves: a delegation binds a
+	// seed and there is no ticket left to adopt. Both stay parseable so the answer
+	// is the signpost rather than "flag provided but not defined".
+	if ticket := strings.TrimSpace(*ticketID); ticket != "" {
+		return delegateCLIArgs{}, fmt.Errorf(
+			"--ticket retired: plant the work and dispatch at it — `attn seed plant %q -m \"<brief>\"`, then `attn delegate --brief \"<brief>\" --plot <seed-id>`", ticket)
 	}
-	if strings.TrimSpace(*briefFile) != "" {
-		sources++
+	if *confirm {
+		return delegateCLIArgs{}, errors.New("--confirm retired: it went with --ticket, and a seed is claimed by its tender (`attn seed tend <seed-id>`)")
 	}
-	if ticket != "" {
-		sources++
-	}
-	if sources > 1 {
-		return delegateCLIArgs{}, errors.New("pass only one of --brief, --brief-file, or --ticket")
+	if strings.TrimSpace(*briefText) != "" && strings.TrimSpace(*briefFile) != "" {
+		return delegateCLIArgs{}, errors.New("pass only one of --brief or --brief-file")
 	}
 	brief := strings.TrimSpace(*briefText)
 	if strings.TrimSpace(*briefFile) != "" {
@@ -2487,11 +2403,8 @@ func parseDelegateArgs(args []string) (delegateCLIArgs, error) {
 		}
 		brief = strings.TrimSpace(string(content))
 	}
-	if sources == 0 || (brief == "" && ticket == "") {
-		return delegateCLIArgs{}, errors.New("--brief, --brief-file, or --ticket is required")
-	}
-	if *confirm && ticket == "" {
-		return delegateCLIArgs{}, errors.New("--confirm requires --ticket")
+	if brief == "" {
+		return delegateCLIArgs{}, errors.New("--brief or --brief-file is required")
 	}
 
 	explicitWorkspace := strings.TrimSpace(*workspaceID)
@@ -2523,8 +2436,6 @@ func parseDelegateArgs(args []string) (delegateCLIArgs, error) {
 		brief:           brief,
 		options: client.DelegateOptions{
 			RequestID:          stableRequestID,
-			TicketID:           ticket,
-			Confirm:            *confirm,
 			Agent:              strings.TrimSpace(*agentName),
 			Model:              strings.TrimSpace(*model),
 			Effort:             strings.TrimSpace(*effort),
@@ -2544,7 +2455,7 @@ func parseDelegateArgs(args []string) (delegateCLIArgs, error) {
 	}, nil
 }
 
-// parseOpenArgs parses the args for `attn open <file.md> [--session <id>]`.
+// parseOpenArgs parses the args for `attn open <file.md|seed-id> [--session <id>]`.
 // Go's flag parser stops at the first non-flag argument, so a naive Parse would
 // silently ignore `--session` when it trails the path. We parse interspersed
 // flags and positionals so the documented trailing form works exactly like the
@@ -2570,7 +2481,7 @@ func parseOpenArgs(args []string) (rawPath string, sessionFlag string, err error
 	}
 
 	if len(positionals) == 0 {
-		return "", "", fmt.Errorf("missing <file.md> argument")
+		return "", "", fmt.Errorf("missing <file.md|seed-id> argument")
 	}
 	if len(positionals) > 1 {
 		return "", "", fmt.Errorf("unexpected extra arguments: %v", positionals[1:])
@@ -2578,20 +2489,19 @@ func parseOpenArgs(args []string) (rawPath string, sessionFlag string, err error
 	return strings.TrimSpace(positionals[0]), strings.TrimSpace(*sessionID), nil
 }
 
-// runOpen handles `attn open <file.md> [--session <id>]`, docking a
-// live-reloading markdown tile into a workspace. The session defaults to
+func isSeedOpenTarget(target string) bool {
+	return strings.HasPrefix(strings.TrimSpace(target), "s-")
+}
+
+// runOpen handles `attn open <file.md|seed-id> [--session <id>]`, docking a
+// document tile into a workspace. The session defaults to
 // ATTN_SESSION_ID (set inside attn-managed agents), then the daemon's currently
 // selected session.
 func runOpen() {
 	warnIfDaemonVersionMismatch()
 	rawPath, sessionFlag, err := parseOpenArgs(os.Args[2:])
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "attn open: %v\nusage: attn open <file.md> [--session <id>]\n", err)
-		os.Exit(1)
-	}
-	absPath, err := filepath.Abs(rawPath)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "open: resolve path: %v\n", err)
+		fmt.Fprintf(os.Stderr, "attn open: %v\nusage: attn open <file.md|seed-id> [--session <id>]\n", err)
 		os.Exit(1)
 	}
 
@@ -2601,6 +2511,19 @@ func runOpen() {
 	}
 
 	c := client.New(strings.TrimSpace(os.Getenv("ATTN_SOCKET_PATH")))
+	if isSeedOpenTarget(rawPath) {
+		if err := c.OpenSeed(rawPath, resolvedSession); err != nil {
+			fmt.Fprintf(os.Stderr, "open: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("opened %s\n", rawPath)
+		return
+	}
+	absPath, err := filepath.Abs(rawPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "open: resolve path: %v\n", err)
+		os.Exit(1)
+	}
 	if err := c.OpenMarkdown(absPath, resolvedSession); err != nil {
 		fmt.Fprintf(os.Stderr, "open: %v\n", err)
 		os.Exit(1)
