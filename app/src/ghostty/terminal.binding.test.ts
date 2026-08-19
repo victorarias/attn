@@ -80,6 +80,20 @@ describe('GhosttyTerminal', () => {
     t.free();
   });
 
+  it('preserves the extended indexed palette when applying an ANSI theme', () => {
+    const palette = Array.from({ length: 16 }, (_, index) => index === 3 ? 0x123456 : 0);
+    const t = terminal(20, 5, { fgColor: 0x445566, bgColor: 0x112233, palette });
+    t.write('\x1b[33mA\x1b[38;5;46mG\x1b[38;5;196mR\x1b[38;5;231mW\x1b[48;5;21mB');
+
+    const cells = t.getViewport();
+    expect(cells[0]).toMatchObject({ fg_r: 0x12, fg_g: 0x34, fg_b: 0x56 });
+    expect(cells[1]).toMatchObject({ fg_r: 0x00, fg_g: 0xff, fg_b: 0x00 });
+    expect(cells[2]).toMatchObject({ fg_r: 0xff, fg_g: 0x00, fg_b: 0x00 });
+    expect(cells[3]).toMatchObject({ fg_r: 0xff, fg_g: 0xff, fg_b: 0xff });
+    expect(cells[4]).toMatchObject({ bg_r: 0x00, bg_g: 0x00, bg_b: 0xff });
+    t.free();
+  });
+
   it('reports wide cells and their spacer', () => {
     const t = terminal();
     t.write('漢x');

@@ -27,6 +27,7 @@ export const TERMINAL_DATA_MOUSE_TRACKING = 11;
 export const TERMINAL_DATA_SCROLLBACK_ROWS = 15;
 export const TERMINAL_DATA_COLOR_FOREGROUND = 18;
 export const TERMINAL_DATA_COLOR_BACKGROUND = 19;
+export const TERMINAL_DATA_COLOR_PALETTE_DEFAULT = 25;
 export const TERMINAL_DATA_MODE = 37;
 
 /** ghostty_snapshot_decoder_get data kinds. */

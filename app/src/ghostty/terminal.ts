@@ -59,6 +59,7 @@ import {
   TERMINAL_DATA_COLS,
   TERMINAL_DATA_COLOR_BACKGROUND,
   TERMINAL_DATA_COLOR_FOREGROUND,
+  TERMINAL_DATA_COLOR_PALETTE_DEFAULT,
   TERMINAL_DATA_MODE,
   TERMINAL_DATA_MOUSE_TRACKING,
   TERMINAL_DATA_ROWS,
@@ -324,9 +325,12 @@ export class GhosttyTerminal {
     if (bgColor !== undefined) setColor(TERMINAL_OPT_COLOR_BACKGROUND, bgColor);
     if (cursorColor !== undefined) setColor(TERMINAL_OPT_COLOR_CURSOR, cursorColor);
     if (palette && palette.length > 0) {
+      if (this.e.ghostty_terminal_get(this.handle, TERMINAL_DATA_COLOR_PALETTE_DEFAULT, this.pScratch) !== GHOSTTY_SUCCESS) {
+        throw new Error('ghostty_terminal_get default color palette failed');
+      }
       const bytes = new Uint8Array(this.e.memory.buffer, this.pScratch, 768);
-      for (let i = 0; i < 256; i += 1) {
-        const value = palette[i] ?? 0;
+      for (let i = 0; i < Math.min(palette.length, 256); i += 1) {
+        const value = palette[i];
         bytes[i * 3] = (value >> 16) & 0xff;
         bytes[i * 3 + 1] = (value >> 8) & 0xff;
         bytes[i * 3 + 2] = value & 0xff;
