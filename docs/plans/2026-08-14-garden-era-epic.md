@@ -115,6 +115,11 @@ The path is encoded at the ["Tickets retire" entry](2026-08-06-the-garden-vertic
   The board drains itself within days, and "done tickets stay readable"
   covers the tail.
 - Done tickets stay readable forever, never migrated.
+- One ticket writer stays after the cutover, deliberately: an automation
+  run mints its own daemon-internal ticket, because continuation,
+  retention, and crash classification key on it. It is not an
+  agent-facing card — no CLI verb creates or moves one — so "tickets are
+  gone" is about the agent surface, not about an empty table.
 - The outpost leg stays gated on the uplink per
   [the arc plan](2026-08-10-home-garden-crew-arc.md).
 
@@ -175,7 +180,7 @@ events.
       steering — the weight transfer.
 - [x] App ticket surfaces → garden surfaces; this step moves the wire
       and carries the ProtocolVersion bump in every lockstep spot.
-- [ ] Ticket write verbs → permanent CLI signposts; read verbs keep
+- [x] Ticket write verbs → permanent CLI signposts; read verbs keep
       the archived store; bulk-convert backlog todos.
 - [ ] Victor lives on the branch for days without tickets.
 - [ ] Epic merge to main on his explicit OK.

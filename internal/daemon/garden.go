@@ -67,7 +67,7 @@ func (d *Daemon) ensureGardenCollections() {
 		}
 	}
 	d.dispatchSeedsMu.Lock()
-	d.dispatchSeeds, d.dispatchSeedsLoaded = nil, false
+	d.dispatchSeeds, d.dispatchFromChief, d.dispatchSeedsLoaded = nil, nil, false
 	d.dispatchSeedsMu.Unlock()
 }
 
@@ -1041,12 +1041,14 @@ func (d *Daemon) dispatchesCollection() (*docstore.CollectionSchema, error) {
 // directory and agent a resume would relaunch it from. Last write wins on
 // purpose: a session reports to one seed, and re-dispatching a recovered
 // session at a new crown is a re-aim, not a conflict.
-func (d *Daemon) recordGardenDispatch(sessionID, crown, cwd, agent string) error {
+func (d *Daemon) recordGardenDispatch(sessionID, crown, cwd, agent string, fromChief bool) error {
 	schema, err := d.dispatchesCollection()
 	if err != nil {
 		return err
 	}
-	body, err := garden.Dispatch{SessionID: sessionID, Crown: crown, Cwd: cwd, Agent: agent}.Encode()
+	body, err := garden.Dispatch{
+		SessionID: sessionID, Crown: crown, Cwd: cwd, Agent: agent, FromChief: fromChief,
+	}.Encode()
 	if err != nil {
 		return err
 	}
@@ -1059,7 +1061,55 @@ func (d *Daemon) recordGardenDispatch(sessionID, crown, cwd, agent string) error
 	}
 	d.announceCommittedWrite(fact, written.Seq)
 	d.rememberDispatchSeed(sessionID, crown)
+	d.rememberDispatchFromChief(sessionID, fromChief)
 	return nil
+}
+
+// rememberDispatchResume records the agent-native conversation id on the
+// dispatch record, so reopening a seed's tender after its session row is gone
+// resumes the conversation rather than opening the agent's picker. The ticket
+// row used to hold this copy; a delegation binds no ticket any more.
+//
+// It is best-effort and silent when the session has no dispatch record: not
+// every session reports to a seed, and a resume id is not worth failing the
+// transition that produced it.
+func (d *Daemon) rememberDispatchResume(sessionID, resumeSessionID string) {
+	sessionID, resumeSessionID = strings.TrimSpace(sessionID), strings.TrimSpace(resumeSessionID)
+	if sessionID == "" || resumeSessionID == "" {
+		return
+	}
+	dispatch, ok := d.gardenDispatch(sessionID)
+	if !ok || dispatch.Resume == resumeSessionID {
+		return
+	}
+	schema, err := d.dispatchesCollection()
+	if err != nil {
+		return
+	}
+	dispatch.Resume = resumeSessionID
+	body, err := dispatch.Encode()
+	if err != nil {
+		d.logf("garden: encoding the dispatch record for %s: %v", sessionID, err)
+		return
+	}
+	fact := documentChangedFact(garden.Namespace, garden.CollectionDispatches, sessionID, false)
+	written, err := d.store.CommitDocumentWrite(store.DocumentWrite{
+		Schema: *schema, ID: sessionID, Body: body,
+	}, fact, time.Now())
+	if err != nil {
+		d.logf("garden: recording the resume id for session %s: %v", sessionID, err)
+		return
+	}
+	d.announceCommittedWrite(fact, written.Seq)
+}
+
+// gardenDispatchResume is the conversation id to reopen a seed's tender on.
+func (d *Daemon) gardenDispatchResume(sessionID string) string {
+	dispatch, ok := d.gardenDispatch(sessionID)
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(dispatch.Resume)
 }
 
 // validateDispatchCrown refuses a dispatch aimed at a seed that is not here.
@@ -1140,18 +1190,22 @@ func (d *Daemon) gardenDispatchSeedsBySession() map[string]string {
 			}
 			// No garden here: remember that, so a daemon nobody plants in stops
 			// asking. Declaring the collections clears this.
-			d.dispatchSeeds, d.dispatchSeedsLoaded = nil, true
+			d.dispatchSeeds, d.dispatchFromChief, d.dispatchSeedsLoaded = nil, nil, true
 			return nil
 		}
 		loaded := make(map[string]string, len(read.Documents))
+		fromChief := map[string]bool{}
 		for _, doc := range read.Documents {
 			dispatch, err := garden.DecodeDispatch(doc.Body)
 			if err != nil || dispatch.Crown == "" {
 				continue
 			}
 			loaded[doc.ID] = dispatch.Crown
+			if dispatch.FromChief {
+				fromChief[doc.ID] = true
+			}
 		}
-		d.dispatchSeeds = loaded
+		d.dispatchSeeds, d.dispatchFromChief = loaded, fromChief
 		d.dispatchSeedsLoaded = true
 	}
 	return d.dispatchSeeds
@@ -1177,6 +1231,36 @@ func (d *Daemon) rememberDispatchSeed(sessionID, crown string) {
 	}
 	next[sessionID] = crown
 	d.dispatchSeeds = next
+}
+
+// rememberDispatchFromChief writes the chief-dispatched bit through to the same
+// broadcast map, on the same copy-on-write rule.
+func (d *Daemon) rememberDispatchFromChief(sessionID string, fromChief bool) {
+	d.dispatchSeedsMu.Lock()
+	defer d.dispatchSeedsMu.Unlock()
+	if !d.dispatchSeedsLoaded {
+		return
+	}
+	next := make(map[string]bool, len(d.dispatchFromChief)+1)
+	for id := range d.dispatchFromChief {
+		next[id] = true
+	}
+	if fromChief {
+		next[sessionID] = true
+	} else {
+		delete(next, sessionID)
+	}
+	d.dispatchFromChief = next
+}
+
+// gardenDispatchesFromChief is the set of sessions the chief of staff
+// dispatched. It shares the dispatch cache's load, so asking costs nothing on a
+// broadcast.
+func (d *Daemon) gardenDispatchesFromChief() map[string]bool {
+	d.gardenDispatchSeedsBySession()
+	d.dispatchSeedsMu.Lock()
+	defer d.dispatchSeedsMu.Unlock()
+	return d.dispatchFromChief
 }
 
 // decorateSessionSeed names the seed a session reports to. Mirrors
@@ -1284,6 +1368,10 @@ func (d *Daemon) handleSeedTransition(conn net.Conn, msg *protocol.SeedTransitio
 	if verb == garden.VerbTend {
 		result.Handoff = d.gardenHandoff(seed.ID)
 	}
+	// Mirrored before the response: the move is not fully recorded until every
+	// place that still tracks this work has it, and a caller that harvests and
+	// then reads the board must not see the ticket mid-flight.
+	d.mirrorSeedMoveOntoTicket(sessionID, seed.ID, verb, protocol.Deref(msg.Reason))
 	d.sendGardenResponse(conn, protocol.Response{Ok: true, SeedTransitionResult: result})
 }
 
@@ -1358,6 +1446,8 @@ func (d *Daemon) handleSeedNote(conn net.Conn, msg *protocol.SeedNoteMessage) {
 		d.sendGardenError(conn, "note", err)
 		return
 	}
+	// Mirrored before the response, for the reason handleSeedTransition states.
+	d.mirrorSeedNoteOntoTicket(authorSession, msg.SeedID, note.Body)
 	d.sendGardenResponse(conn, protocol.Response{
 		Ok:             true,
 		SeedNoteResult: &protocol.SeedNoteResult{Note: note},

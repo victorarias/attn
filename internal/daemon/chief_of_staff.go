@@ -76,7 +76,18 @@ func (d *Daemon) delegatedFromChiefSessionIDs() map[string]bool {
 	if d.store == nil {
 		return nil
 	}
-	return d.store.TicketAssigneesOwnedByRole(store.TicketRoleChiefOfStaff)
+	// Two eras, one set: a delegation dispatched after tickets retired records
+	// the chief on its dispatch record, and one still bound to a ticket the chief
+	// owns is still on the board. The union is what keeps the badge from
+	// disappearing at the cutover and from vanishing off in-flight work.
+	delegated := d.store.TicketAssigneesOwnedByRole(store.TicketRoleChiefOfStaff)
+	if delegated == nil {
+		delegated = map[string]bool{}
+	}
+	for sessionID := range d.gardenDispatchesFromChief() {
+		delegated[sessionID] = true
+	}
+	return delegated
 }
 
 // decorateDelegatedFromChief marks a session that was delegated from the chief

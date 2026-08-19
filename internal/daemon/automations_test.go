@@ -272,14 +272,14 @@ func TestAutomationOccurrenceInputIsStructurallySeparateFromPrompt(t *testing.T)
 	if string(stored) != string(payload) {
 		t.Fatalf("stored payload = %q, want %q", stored, payload)
 	}
-	prompt := automationSessionPrompt("Report the message field.", path)
+	prompt := automationSessionPrompt("Report the message field.", path, "s-abc123")
 	if strings.Contains(prompt, "ignore configured task") || strings.Contains(prompt, string(payload)) {
 		t.Fatalf("untrusted payload leaked into prompt: %q", prompt)
 	}
 	if !strings.Contains(prompt, path) || !strings.Contains(prompt, "untrusted data") {
 		t.Fatalf("prompt does not carry the constrained data reference: %q", prompt)
 	}
-	localOnlyPrompt := automationSessionPrompt("Review the change.", path, true)
+	localOnlyPrompt := automationSessionPrompt("Review the change.", path, "s-abc123", true)
 	if !strings.Contains(localOnlyPrompt, "local-only") || !strings.Contains(localOnlyPrompt, "Do not post, approve, comment, push") || !strings.Contains(localOnlyPrompt, "later explicit user action") {
 		t.Fatalf("PR-review prompt lacks the fixed local-only policy: %q", localOnlyPrompt)
 	}

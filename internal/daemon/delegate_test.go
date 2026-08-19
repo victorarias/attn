@@ -148,8 +148,21 @@ func TestDelegateSpawnsAgentInSourceWorkspaceWithBrief(t *testing.T) {
 	}
 }
 
-func TestDelegateAdoptsExistingTicketAsTaskSource(t *testing.T) {
-	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+// newDelegationDaemon is a home daemon with the garden declared: the shape every
+// delegation runs against now that a dispatch binds a seed.
+func newDelegationDaemon(t *testing.T) *Daemon {
+	t.Helper()
+	d := newEnrolledDaemon(t, "")
+	t.Cleanup(d.stopEventBus)
+	d.ensureGardenCollections()
+	return d
+}
+
+// Adopting a ticket retired with the rest of the write surface, and the refusal
+// names the garden move that replaced it rather than launching something the
+// caller did not ask for.
+func TestDelegateRefusesTicketAdoption(t *testing.T) {
+	d := newDelegationDaemon(t)
 	backend := &fakeSpawnBackend{}
 	_, sourceSessionID, _ := setupDelegationSource(t, d, backend)
 	if _, err := d.store.CreateTicket(store.Ticket{
@@ -158,36 +171,19 @@ func TestDelegateAdoptsExistingTicketAsTaskSource(t *testing.T) {
 	}, "you", time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	var prompt string
-	backend.onSpawn = func(opts ptybackend.SpawnOptions) {
-		content, err := os.ReadFile(opts.InitialPromptFile)
-		if err != nil {
-			t.Fatalf("read initial prompt: %v", err)
-		}
-		prompt = string(content)
-		_ = os.Remove(opts.InitialPromptFile)
-	}
 
-	result, err := d.delegate(&protocol.DelegateMessage{
+	_, err := d.delegate(&protocol.DelegateMessage{
 		Cmd: protocol.CmdDelegate, SourceSessionID: sourceSessionID,
 		TicketID: protocol.Ptr("planned-fix"), Agent: protocol.Ptr("codex"),
 	})
-	if err != nil {
-		t.Fatalf("delegate: %v", err)
+	if err == nil {
+		t.Fatal("delegate() adopted a ticket, want a refusal")
 	}
-	if !strings.Contains(prompt, "Implement the complete planned fix.") {
-		t.Fatalf("prompt does not contain ticket description: %q", prompt)
+	if !strings.Contains(err.Error(), "attn seed plant") {
+		t.Fatalf("refusal does not name the garden move: %v", err)
 	}
-	delegated := d.store.Get(result.SessionID)
-	if delegated == nil || delegated.Label != "Planned fix" {
-		t.Fatalf("delegated session = %+v", delegated)
-	}
-	tickets, err := d.store.ListTickets(store.TicketListFilter{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(tickets) != 1 || tickets[0].ID != "planned-fix" || tickets[0].Assignee != result.SessionID || tickets[0].Status != store.TicketStatusWorking {
-		t.Fatalf("tickets = %+v", tickets)
+	if sessions := d.store.List(""); len(sessions) != 1 || sessions[0].ID != sourceSessionID {
+		t.Fatalf("a refused delegation still launched: %+v", sessions)
 	}
 }
 
@@ -247,8 +243,10 @@ func TestDelegateNoWorktreeReusesGitCheckout(t *testing.T) {
 	}
 }
 
-func TestChiefOfStaffDelegateBindsTicketAndPrompt(t *testing.T) {
-	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+// Delegating from the chief binds a seed, tells the delegate where the work
+// lives, and marks the session as chief-delegated.
+func TestChiefOfStaffDelegateBindsSeedAndPrompt(t *testing.T) {
+	d := newDelegationDaemon(t)
 	backend := &fakeSpawnBackend{}
 	_, sourceSessionID, _ := setupDelegationSource(t, d, backend)
 	if err := d.store.SetProfileRole(profileRoleChiefOfStaff, sourceSessionID); err != nil {
@@ -284,18 +282,22 @@ func TestChiefOfStaffDelegateBindsTicketAndPrompt(t *testing.T) {
 		t.Fatalf("tracked initial prompt = %q", prompt)
 	}
 
-	ticket, err := d.store.ActiveTicketForSession(result.SessionID)
+	seedID, bound := d.gardenDispatchCrown(result.SessionID)
+	if !bound {
+		t.Fatalf("delegation bound no seed to session %s", result.SessionID)
+	}
+	seed, _, err := d.readSeed(seedID)
 	if err != nil {
-		t.Fatalf("ActiveTicketForSession: %v", err)
+		t.Fatalf("read the bound seed: %v", err)
 	}
-	if ticket == nil {
-		t.Fatalf("delegation did not bind a ticket to session %s", result.SessionID)
+	if seed.Body != "Investigate the tracked task." || seed.TenderSession != result.SessionID {
+		t.Fatalf("bound seed = %+v", seed)
 	}
-	if ticket.Assignee != result.SessionID || ticket.Description != "Investigate the tracked task." {
-		t.Fatalf("bound ticket = %+v", ticket)
+	if !strings.Contains(prompt, seedID) {
+		t.Fatalf("initial prompt does not name the seed %s: %q", seedID, prompt)
 	}
 
-	// The delegated session is recognized as chief-delegated via the ticket binding.
+	// The delegated session is recognized as chief-delegated via the dispatch record.
 	if ids := d.delegatedFromChiefSessionIDs(); !ids[result.SessionID] {
 		t.Fatalf("delegated session missing from chief-delegated set: %v", ids)
 	}
@@ -308,7 +310,7 @@ func TestChiefOfStaffDelegationPreservesCoordinationIdentityAcrossPlacements(t *
 		delegationPlacementExisting,
 	} {
 		t.Run(placement, func(t *testing.T) {
-			d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+			d := newDelegationDaemon(t)
 			backend := &fakeSpawnBackend{}
 			_, chiefSessionID, _ := setupDelegationSource(t, d, backend)
 			if err := d.store.SetProfileRole(profileRoleChiefOfStaff, chiefSessionID); err != nil {
@@ -346,10 +348,14 @@ func TestChiefOfStaffDelegationPreservesCoordinationIdentityAcrossPlacements(t *
 				t.Fatalf("spawn = %+v, result = %+v", spawn, result)
 			}
 
-			// The delegated session owns a ticket in its resolved workspace.
-			ticket, err := d.store.ActiveTicketForSession(spawn.ID)
-			if err != nil || ticket == nil || ticket.Assignee != spawn.ID {
-				t.Fatalf("active ticket = %+v, err=%v", ticket, err)
+			// The delegated session tends its own seed in the resolved workspace.
+			seedID, bound := d.gardenDispatchCrown(spawn.ID)
+			if !bound {
+				t.Fatalf("delegation bound no seed to session %s", spawn.ID)
+			}
+			seed, _, err := d.readSeed(seedID)
+			if err != nil || seed.TenderSession != spawn.ID {
+				t.Fatalf("bound seed = %+v, err=%v", seed, err)
 			}
 
 			// Coordination identity is preserved: the delegated session, not the chief,
@@ -382,7 +388,7 @@ func TestChiefOfStaffDelegationPreservesCoordinationIdentityAcrossPlacements(t *
 }
 
 func TestDelegatedFromChiefDecoratesBroadcastSession(t *testing.T) {
-	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	d := newDelegationDaemon(t)
 	backend := &fakeSpawnBackend{}
 	_, sourceSessionID, _ := setupDelegationSource(t, d, backend)
 	if err := d.store.SetProfileRole(profileRoleChiefOfStaff, sourceSessionID); err != nil {
@@ -433,12 +439,11 @@ func TestDelegatedFromChiefDecoratesBroadcastSession(t *testing.T) {
 	}
 }
 
-// An ordinary (non-chief) delegation is ticket-tracked exactly like the chief's:
-// the ticket is bound to the delegated session and routed to the delegator, the
-// agent, and the chief role. It is NOT, however, decorated as delegated-from-chief
-// — that badge belongs to work the chief actually started.
-func TestOrdinaryDelegationBindsTicketWithoutChiefDecoration(t *testing.T) {
-	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+// An ordinary (non-chief) delegation binds its seed exactly like the chief's and
+// its delegate is told to report there. It is NOT, however, decorated as
+// delegated-from-chief — that badge belongs to work the chief actually started.
+func TestOrdinaryDelegationBindsSeedWithoutChiefDecoration(t *testing.T) {
+	d := newDelegationDaemon(t)
 	backend := &fakeSpawnBackend{}
 	// No chief role is set, so this is a plain session-to-session delegation.
 	_, sourceSessionID, _ := setupDelegationSource(t, d, backend)
@@ -468,41 +473,21 @@ func TestOrdinaryDelegationBindsTicketWithoutChiefDecoration(t *testing.T) {
 		t.Fatalf("delegate() error = %v", err)
 	}
 
-	ticket, err := d.store.ActiveTicketForSession(result.SessionID)
-	if err != nil {
-		t.Fatalf("ActiveTicketForSession: %v", err)
+	seedID, bound := d.gardenDispatchCrown(result.SessionID)
+	if !bound {
+		t.Fatalf("ordinary delegation bound no seed to session %s", result.SessionID)
 	}
-	if ticket == nil {
-		t.Fatalf("ordinary delegation did not bind a ticket to session %s", result.SessionID)
-	}
-	if ticket.Assignee != result.SessionID || ticket.Description != "Plain delegated task." {
-		t.Fatalf("bound ticket = %+v", ticket)
+	seed, _, err := d.readSeed(seedID)
+	if err != nil || seed.Body != "Plain delegated task." || seed.TenderSession != result.SessionID {
+		t.Fatalf("bound seed = %+v, err=%v", seed, err)
 	}
 
-	// The agent is told to report through the ticket, and is still told it is a leaf.
-	if !strings.Contains(prompt, "attn ticket status in_progress") {
-		t.Fatalf("ordinary delegated prompt missing the ticket self-report contract: %q", prompt)
+	// The agent is told to report on its seed, and is still told it is a leaf.
+	if !strings.Contains(prompt, "attn seed note "+seedID) {
+		t.Fatalf("ordinary delegated prompt missing the seed report contract: %q", prompt)
 	}
 	if !strings.Contains(prompt, "a leaf, not a coordinator") {
 		t.Fatalf("ordinary delegated prompt missing the leaf identity: %q", prompt)
-	}
-
-	participants, err := d.store.TicketParticipants(ticket.ID)
-	if err != nil {
-		t.Fatalf("TicketParticipants: %v", err)
-	}
-	got := map[string]bool{}
-	for _, p := range participants {
-		got[p] = true
-	}
-	for _, want := range []string{
-		result.SessionID,
-		sourceSessionID,
-		store.TicketRoleIdentity(store.TicketRoleChiefOfStaff),
-	} {
-		if !got[want] {
-			t.Fatalf("participants = %v, missing %q", participants, want)
-		}
 	}
 
 	delegated := d.sessionForBroadcast(d.store.Get(result.SessionID))
@@ -512,67 +497,8 @@ func TestOrdinaryDelegationBindsTicketWithoutChiefDecoration(t *testing.T) {
 	if protocol.Deref(delegated.DelegatedFromChief) {
 		t.Fatalf("ordinary delegated session should not carry delegated_from_chief: %+v", delegated)
 	}
-}
-
-// Delegating from the chief creates and binds a ticket: the brief is the
-// description, the delegated session is the assignee (its observer identity), the
-// ticket is in-flight (Working), and a created event lands authored by the chief.
-func TestDelegateCreatesAndBindsTicket(t *testing.T) {
-	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
-	backend := &fakeSpawnBackend{}
-	_, chiefSessionID, _ := setupDelegationSource(t, d, backend)
-	if err := d.store.SetProfileRole(profileRoleChiefOfStaff, chiefSessionID); err != nil {
-		t.Fatalf("set chief role: %v", err)
-	}
-	consumeDelegatedPrompt(t, backend)
-
-	result, err := d.delegate(&protocol.DelegateMessage{
-		Cmd:             protocol.CmdDelegate,
-		SourceSessionID: chiefSessionID,
-		Brief:           "Migrate the store to X",
-		Agent:           protocol.Ptr("codex"),
-	})
-	if err != nil {
-		t.Fatalf("delegate() error = %v", err)
-	}
-
-	ticket, err := d.store.ActiveTicketForSession(result.SessionID)
-	if err != nil {
-		t.Fatalf("ActiveTicketForSession: %v", err)
-	}
-	if ticket == nil {
-		t.Fatal("delegate did not create a ticket bound to the session")
-	}
-	if ticket.Description != "Migrate the store to X" {
-		t.Fatalf("ticket description = %q, want the brief", ticket.Description)
-	}
-	if ticket.Assignee != result.SessionID {
-		t.Fatalf("ticket assignee = %q, want session id %q", ticket.Assignee, result.SessionID)
-	}
-	if ticket.Status != store.TicketStatusWorking {
-		t.Fatalf("ticket status = %q, want working", ticket.Status)
-	}
-	if ticket.Cwd == "" {
-		t.Fatal("ticket cwd not set (needed for resume)")
-	}
-
-	// The created event is authored by the chief, so the agent observes it as its
-	// "assigned to you" signal and the chief never sees its own action.
-	events, err := d.store.TicketEventsSince(0)
-	if err != nil {
-		t.Fatalf("TicketEventsSince: %v", err)
-	}
-	var created *store.TicketEvent
-	for i := range events {
-		if events[i].TicketID == ticket.ID && events[i].Kind == store.TicketEventCreated {
-			created = &events[i]
-		}
-	}
-	if created == nil {
-		t.Fatalf("no created event for ticket %q", ticket.ID)
-	}
-	if created.Author != chiefSessionID {
-		t.Fatalf("created event author = %q, want chief %q", created.Author, chiefSessionID)
+	if protocol.Deref(delegated.SeedID) != seedID {
+		t.Fatalf("broadcast session does not name its seed: %+v", delegated)
 	}
 }
 
@@ -1382,7 +1308,7 @@ func TestDelegateTargetsPinnedEmptyWorkspace(t *testing.T) {
 }
 
 func TestChiefOfStaffDelegateUnmutesExistingWorkspace(t *testing.T) {
-	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	d := newDelegationDaemon(t)
 	backend := &fakeSpawnBackend{}
 	_, sourceSessionID, _ := setupDelegationSource(t, d, backend)
 	consumeDelegatedPrompt(t, backend)
@@ -1411,8 +1337,8 @@ func TestChiefOfStaffDelegateUnmutesExistingWorkspace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("delegate() error = %v", err)
 	}
-	if ticket, err := d.store.ActiveTicketForSession(result.SessionID); err != nil || ticket == nil {
-		t.Fatalf("chief delegation missing bound ticket: ticket=%+v err=%v", ticket, err)
+	if _, bound := d.gardenDispatchCrown(result.SessionID); !bound {
+		t.Fatalf("chief delegation bound no seed to session %s", result.SessionID)
 	}
 	if workspace := d.store.GetWorkspace(targetWorkspaceID); workspace == nil || workspace.Muted {
 		t.Fatalf("chief delegation did not unmute target workspace: %+v", workspace)
@@ -2327,11 +2253,11 @@ func TestDelegateWorktreeExplicitRepoStillUsesRepoDefault(t *testing.T) {
 	}
 }
 
-// Ticket creation is the last step of the delegation saga, and the only failure
-// point past a live session. Its compensation set is the deepest one — session,
-// pane, workspace, worktree — so this is what proves the rollback stack unwinds
-// everything rather than the subset a particular failure site happened to list.
-func TestDelegateRollsBackEverythingWhenTicketCreationFails(t *testing.T) {
+// A failure at the last step of the delegation saga — past a live session — has
+// the deepest compensation set: session, pane, workspace, worktree. This is what
+// proves the rollback stack unwinds everything rather than the subset a
+// particular failure site happened to list.
+func TestDelegateRollsBackEverythingWhenTheFinalStepFails(t *testing.T) {
 	root := t.TempDir()
 	mainRepo := filepath.Join(root, "repo")
 	if err := os.MkdirAll(mainRepo, 0o755); err != nil {
@@ -2343,13 +2269,13 @@ func TestDelegateRollsBackEverythingWhenTicketCreationFails(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	backend := &fakeSpawnBackend{}
 	sourceWorkspaceID, sourceSessionID, _ := setupDelegationSourceAt(t, d, backend, mainRepo)
-	d.delegationTicketCreateHook = func() error { return errors.New("ticket store is unavailable") }
+	d.delegationFinalizeHook = func() error { return errors.New("the last step of the delegation failed") }
 	worktreePath := filepath.Join(root, "repo--feat-ticket-rollback")
 
 	if _, err := d.delegate(&protocol.DelegateMessage{
 		Cmd:             protocol.CmdDelegate,
 		SourceSessionID: sourceSessionID,
-		Brief:           "This delegation should roll back at the ticket step.",
+		Brief:           "This delegation should roll back at the last step.",
 		Placement:       protocol.Ptr(delegationPlacementNew),
 		Label:           protocol.Ptr("ticket-rollback"),
 		Worktree: &protocol.DelegateWorktreeRequest{
@@ -2358,7 +2284,7 @@ func TestDelegateRollsBackEverythingWhenTicketCreationFails(t *testing.T) {
 			Path:   protocol.Ptr(worktreePath),
 		},
 	}); err == nil {
-		t.Fatal("delegate() succeeded, want ticket-creation failure")
+		t.Fatal("delegate() succeeded, want the seeded final-step failure")
 	}
 
 	// The worktree it created is gone.
@@ -2374,18 +2300,11 @@ func TestDelegateRollsBackEverythingWhenTicketCreationFails(t *testing.T) {
 		len(layout.Panes) != 1 || layout.Panes[0].SessionID != sourceSessionID {
 		t.Fatalf("source workspace layout after rollback = %+v", layout)
 	}
-	// No orphan session or pane is left behind, and no half-created ticket.
+	// No orphan session or pane is left behind.
 	for _, session := range d.store.List("") {
 		if session.ID != sourceSessionID {
 			t.Fatalf("delegated session %q survived the rollback", session.ID)
 		}
-	}
-	tickets, err := d.store.ListTickets(store.TicketListFilter{})
-	if err != nil {
-		t.Fatalf("ListTickets: %v", err)
-	}
-	if len(tickets) != 0 {
-		t.Fatalf("tickets after rollback = %+v, want none", tickets)
 	}
 }
 
@@ -2393,19 +2312,19 @@ func TestDelegateRollsBackEverythingWhenTicketCreationFails(t *testing.T) {
 // is created, so unregistering one cannot incidentally take the session with it.
 // The session compensation is the only thing that can remove the spawned session,
 // which is what makes this the load-bearing case for it.
-func TestDelegateRollsBackSpawnedSessionWhenTicketCreationFails(t *testing.T) {
+func TestDelegateRollsBackSpawnedSessionWhenTheFinalStepFails(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	backend := &fakeSpawnBackend{}
 	sourceWorkspaceID, sourceSessionID, _ := setupDelegationSource(t, d, backend)
-	d.delegationTicketCreateHook = func() error { return errors.New("ticket store is unavailable") }
+	d.delegationFinalizeHook = func() error { return errors.New("the last step of the delegation failed") }
 
 	if _, err := d.delegate(&protocol.DelegateMessage{
 		Cmd:             protocol.CmdDelegate,
 		SourceSessionID: sourceSessionID,
-		Brief:           "This delegation should roll back at the ticket step.",
+		Brief:           "This delegation should roll back at the last step.",
 		Label:           protocol.Ptr("tkt-rb-cur"),
 	}); err == nil {
-		t.Fatal("delegate() succeeded, want ticket-creation failure")
+		t.Fatal("delegate() succeeded, want the seeded final-step failure")
 	}
 
 	for _, session := range d.store.List("") {

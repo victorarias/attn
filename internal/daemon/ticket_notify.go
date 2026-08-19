@@ -12,9 +12,9 @@ import (
 
 // ticketNudgePrompt is the fixed doorbell typed into a nudge-eligible agent: a
 // bounded "go look" trigger, never event content. The agent then reads its own
-// queue with `attn ticket inbox`. This is the doorbell rule — the daemon signals,
+// board with `attn ticket list`. This is the doorbell rule — the daemon signals,
 // it never streams the message into the PTY.
-const ticketNudgePrompt = "📋 New ticket activity — run `attn ticket inbox` to catch up."
+const ticketNudgePrompt = "📋 Activity on a ticket that predates the garden — read the board with `attn ticket list`."
 
 // defaultTicketBundleWindow is the quiet threshold after a ticket doorbell.
 // Busy delegation tickets in the production event history had a median
