@@ -31,33 +31,29 @@ available for the reviewer to diff or adopt deliberately.
 
 ## Current and proposed flow
 
-```mermaid
-sequenceDiagram
-    participant Poll as doPRPoll<br/>daemon.go
-    participant Observe as observeGitHubReviewRequests<br/>automations_github.go
-    participant Store as automation store<br/>automations.go
-    participant GH as GitHub PR GET
-    participant Deliver as deliverAutomationRun<br/>automations_deliver.go
-    participant Git as repository/worktree
-    participant Reviewer as existing ticket/session
+```text
+Current
+doPRPoll
+  FetchAll + Store.SetPRs                 remembers refreshed HeadSHA
+  observeGitHubReviewRequests
+    ReconcileAutomationReviewRequests    owns edge + request cycle
+    FetchPullRequestSnapshot             pins the exact PR input
+    ClaimGitHubReviewAutomationRun       one occurrence per cycle
+    deliverAutomationRun
+      validateAutomationContinuation     rejects a changed HeadSHA
 
-    Poll->>Poll: FetchAll + SetPRs preserves refreshed HeadSHA
-    Poll->>Observe: current review-request demand
-    Observe->>Store: reconcile durable edge/cycle
-    Note over Store: Current: one occurrence per request cycle
-    Store-->>Observe: candidate only for new/re-requested edge or pending retry
-    Observe->>GH: focused immutable PR snapshot
-    Observe->>Store: claim occurrence
-    Store->>Deliver: pending run
-    Note over Deliver: Current: changed origin/current HeadSHA is refused
-
-    rect rgb(225, 245, 235)
-      Note over Observe,Store: Proposed: observed HeadSHA participates in candidacy
-      Note over Store: occurrence identity = cycle + authoritative head SHA
-      Store-->>Deliver: later head reuses definition+subject binding
-      Deliver->>Git: fetch exact SHA; preserve owned checkout
-      Deliver->>Reviewer: append occurrence event + ordinary ticket doorbell
-    end
+Proposed
+doPRPoll
+  FetchAll + Store.SetPRs                 detects a later refreshed HeadSHA
+  observeGitHubReviewRequests             decides whether work is relevant
+    ReconcileAutomationReviewRequests    owns edge + cycle + SHA idempotency
+    FetchPullRequestSnapshot             chooses the authoritative latest SHA
+    ClaimGitHubReviewAutomationRun       claims cycle + SHA once
+    deliverAutomationRun                 reuses definition + PR binding
+      EnsurePullRequestRevision          fetches the exact commit
+      EnsureAutomationSessionWorktree    preserves the owned checkout
+      EnsureAutomationContinuationTicket records the immutable input path
+      notifyTicketObservers              wakes the same reviewer
 ```
 
 Current-code receipts:
@@ -82,30 +78,9 @@ Current-code receipts:
   [`notifyTicketObservers`](../../internal/daemon/ticket_notify.go#L85) wakes the
   existing reviewer through the ordinary inbox/doorbell path.
 
-## Ownership and state
-
-```diff
- doPRPoll / doRefreshPRsWithResult
-   FetchAll
-   Store.SetPRs                    # retains last detail-refreshed HeadSHA
-   observeGitHubReviewRequests
--    reconcile(definition, host, []subject)
-+    reconcile(definition, host, []{subject, observedHeadSHA})
-       durable review-request edge/cycle
--      candidate = no run for cycle | pending run
-+      candidate = no run | pending retry | latest terminal head differs
-     FetchPullRequestSnapshot      # authoritative open/draft/head check
--    claim occurrence(subject, cycle)
-+    claim occurrence(subject, cycle, authoritative head)
-       reuse binding(definition, subject)
-     deliverAutomationRun
-       validate same prompt/launch/location contract
--      reject originHead != currentHead
-       EnsurePullRequestRevision(currentHead)
-       preserve persisted worktree checkout
-       append occurrence event to existing ticket
-       notify/resume the same reviewer session
-```
+The ownership change is narrow: observation recognizes a new relevant head, the
+store owns its durable identity, and delivery makes the exact commit available.
+The reviewer continues to own checkout state.
 
 No schema or protocol migration is needed. Existing occurrence payloads already
 store `head_sha`; reconciliation can recognize legacy cycle-only occurrence keys,
