@@ -33,10 +33,10 @@ import (
 // focuses it — a refusal here would make the sidebar's one action fail exactly
 // when the member is present.
 
-// crewWakeAgent is the harness a wake launches when the caller names none. The
-// crew simulation has run on Claude Code since 2026-08-06; `--agent` picks
-// another, and a member is plain markdown so any harness can live in one.
-const crewWakeAgent = "claude"
+// crewWakeAgent is the harness a wake launches when neither the caller nor the
+// member's record names one. `--agent` picks a harness for one day; `attn crew
+// set <member> --agent <name>` picks the one the member lives on.
+const crewWakeAgent = crew.DefaultAgent
 
 // crewWakeModel is what a member wakes on, hardcoded on purpose. A member's
 // session is one Victor drives himself and those run Fable; a per-member model
@@ -54,6 +54,18 @@ func crewWakeModelPin(agent string) *string {
 		return nil
 	}
 	return protocol.Ptr(crewWakeModel)
+}
+
+// crewAgentAvailable reports whether a harness this daemon can launch answers
+// to that name — a built-in driver or an installed plugin one. Both the wake
+// and `crew set --agent` ask it, so a name is refused when it is typed rather
+// than at the next morning.
+func (d *Daemon) crewAgentAvailable(agent string) bool {
+	if agentdriver.Get(agent) != nil {
+		return true
+	}
+	_, ok := d.ensurePluginRegistry().driver(agent)
+	return ok
 }
 
 // crewWakePrompt is the first thing a woken member is asked to do. Without it a
@@ -256,13 +268,13 @@ func (d *Daemon) crewWakeWithDelivery(name, agent string, autonomous bool, deliv
 			return awake, nil
 		}
 	}
+	// The wake's own flag wins for the day it starts; the member's record is
+	// what it lives on when nobody named one.
 	if agent == "" {
-		agent = crewWakeAgent
+		agent = member.LaunchAgent()
 	}
-	if driver := agentdriver.Get(agent); driver == nil {
-		if _, ok := d.ensurePluginRegistry().driver(agent); !ok {
-			return nil, fmt.Errorf("agent %q is not available", agent)
-		}
+	if !d.crewAgentAvailable(agent) {
+		return nil, fmt.Errorf("agent %q is not available", agent)
 	}
 	directory, err := d.crewLaunchDir(member)
 	if err != nil {
@@ -472,6 +484,15 @@ func (d *Daemon) handleCrewSet(conn net.Conn, msg *protocol.CrewSetMessage) {
 			return
 		}
 		member.CWD = cwd
+	}
+	if msg.Agent != nil {
+		// Empty clears it back to the crew default, the way an empty cwd does.
+		agent := strings.TrimSpace(strings.ToLower(*msg.Agent))
+		if agent != "" && !d.crewAgentAvailable(agent) {
+			d.sendCrewError(conn, "set", fmt.Errorf("agent %q is not available; `attn agent list` names the harnesses this daemon can launch", agent))
+			return
+		}
+		member.Agent = agent
 	}
 	// The way out arrives as its own flag: an empty list marshals away, so an
 	// empty AwarenessDirs is indistinguishable from "leave it alone" on the wire.

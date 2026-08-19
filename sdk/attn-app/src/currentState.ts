@@ -218,6 +218,7 @@ export interface Seed {
 }
 
 export interface CrewMember {
+  readonly agent?: string
   readonly awareness_dirs: readonly string[]
   readonly binding_session?: string
   readonly charter_path: string

@@ -552,9 +552,9 @@ A member's **home** is plain markdown on disk at `~/.attn/crew/<name>/`: a
 its successor at the end of a day. Files are canonical and hand-editable —
 which is what lets any agent be a member, claude or codex or something later.
 The **registry** is the daemon's index over those homes (member id, charter
-path, home dir, cwd, awareness dirs, active binding); it serves reads and is
-never a second authority for the prose. A home the user adds by hand joins the
-roster at the daemon's next start.
+path, home dir, cwd, harness, awareness dirs, active binding); it serves reads
+and is never a second authority for the prose. A home the user adds by hand
+joins the roster at the daemon's next start.
 
 **Identity is the invocation, never the files.** A session is a member because
 it was launched as one — the daemon stamps a **binding** at launch
@@ -573,9 +573,13 @@ the row and the second wakes, and an armed row that is not confirmed stands
 down. The command does not ask twice: typing it is already the deliberate act
 the clicks reconstruct. Either way the daemon binds the member, then launches
 a session in its recorded cwd — its own home when none is recorded — reaching
-its **awareness dirs**, the directories its charter is about. Every wake runs
-on the same pinned model, hardcoded rather than configurable: a member subtly
-wrong takes a read of its prose to notice. The launch carries **priming**:
+its **awareness dirs**, the directories its charter is about. A member lives on
+the harness its record names — `attn crew set <name> --agent codex`, claude
+when nothing says otherwise — and `attn crew wake <name> --agent <other>` picks
+one for a single day without moving the member. The default harness wakes on a
+pinned model, hardcoded rather than configurable: a member subtly wrong takes a
+read of its prose to notice. Any other harness takes its own default, because
+the pin names a Claude model. The launch carries **priming**:
 what a member is, where its charter is to be read, the freshest letter left
 for it inline, and how a day is closed. Skills retire into verbs and the verbs
 are taught, because an agent never told how to handoff cannot file one.
