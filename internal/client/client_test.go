@@ -450,10 +450,13 @@ func TestClientDelegateTicket(t *testing.T) {
 	}()
 
 	_, err = New(sockPath).Delegate("source-session", "", DelegateOptions{
-		RequestID:  "request-1",
-		TicketID:   "planned-work",
-		Confirm:    true,
-		NoWorktree: true,
+		RequestID:          "request-1",
+		TicketID:           "planned-work",
+		Confirm:            true,
+		Placement:          "existing_workspace",
+		WorkspaceID:        "workspace-mixed",
+		NoWorktree:         true,
+		AllowWorktreeReuse: true,
 	})
 	if err != nil {
 		t.Fatalf("Delegate error: %v", err)
@@ -464,6 +467,9 @@ func TestClientDelegateTicket(t *testing.T) {
 	}
 	if request.Brief != "" || protocol.Deref(request.TicketID) != "planned-work" || !protocol.Deref(request.Confirm) {
 		t.Fatalf("Delegate ticket source = %+v", request)
+	}
+	if protocol.Deref(request.Placement) != "existing_workspace" || protocol.Deref(request.WorkspaceID) != "workspace-mixed" || !protocol.Deref(request.AllowWorktreeReuse) {
+		t.Fatalf("Delegate workspace placement = %+v", request)
 	}
 }
 

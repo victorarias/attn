@@ -586,6 +586,22 @@ func TestParseDelegateArgsNoWorktree(t *testing.T) {
 	}
 }
 
+func TestParseDelegateArgsWorkspaceNoWorktreeKeepsConceptsSeparate(t *testing.T) {
+	parsed, err := parseDelegateArgs([]string{
+		"--source-session", "source-session",
+		"--brief", "Join this workspace from my current checkout",
+		"--workspace", "workspace-mixed",
+		"--no-worktree",
+		"--allow-worktree-reuse",
+	})
+	if err != nil {
+		t.Fatalf("parseDelegateArgs() error = %v", err)
+	}
+	if parsed.options.Placement != "existing_workspace" || parsed.options.WorkspaceID != "workspace-mixed" || !parsed.options.NoWorktree || !parsed.options.AllowWorktreeReuse {
+		t.Fatalf("options = %+v", parsed.options)
+	}
+}
+
 func TestParseDelegateArgsRejectsNoWorktreeOverrides(t *testing.T) {
 	for _, args := range [][]string{
 		{"--no-worktree", "--worktree", "feat/parser"},
