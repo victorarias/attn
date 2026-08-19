@@ -2,11 +2,105 @@ package store
 
 import (
 	"database/sql"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 )
+
+func baselineGitHubReviewAutomation(t *testing.T, s *Store, definitionID, host string, at time.Time) {
+	t.Helper()
+	if candidates, err := s.ReconcileAutomationReviewRequests(definitionID, host, nil, at); err != nil || len(candidates) != 0 {
+		t.Fatalf("establish review automation baseline: candidates=%#v err=%v", candidates, err)
+	}
+}
+
+func TestGitHubReviewActivationBaselinesExistingDemandPerHost(t *testing.T) {
+	s := New()
+	now := time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC)
+	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const subjectA = "github.com/owner/repo#1"
+	const subjectB = "ghe.example.com/owner/repo#2"
+	for _, observation := range []struct {
+		host    string
+		subject string
+	}{
+		{host: "github.com", subject: subjectA},
+		{host: "ghe.example.com", subject: subjectB},
+	} {
+		candidates, err := s.ReconcileAutomationReviewRequests(def.ID, observation.host, []string{observation.subject}, now)
+		if err != nil || len(candidates) != 0 {
+			t.Fatalf("first %s observation candidates=%#v err=%v", observation.host, candidates, err)
+		}
+		candidates, err = s.ReconcileAutomationReviewRequests(def.ID, observation.host, []string{observation.subject}, now.Add(time.Minute))
+		if err != nil || len(candidates) != 0 {
+			t.Fatalf("unchanged %s observation candidates=%#v err=%v", observation.host, candidates, err)
+		}
+	}
+	if needs, err := s.AutomationReviewRequestNeedsClaim(def.ID, subjectA, 1); err != nil || needs {
+		t.Fatalf("baselined request needs claim=%v err=%v", needs, err)
+	}
+	if _, err := s.ReconcileAutomationReviewRequests(def.ID, "github.com", nil, now.Add(2*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	candidates, err := s.ReconcileAutomationReviewRequests(def.ID, "github.com", []string{subjectA}, now.Add(3*time.Minute))
+	if err != nil || len(candidates) != 1 || candidates[0].Cycle != 2 {
+		t.Fatalf("later request candidates=%#v err=%v", candidates, err)
+	}
+}
+
+func TestGitHubReviewActivationBaselineSurvivesRestart(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "attn.db")
+	s, err := NewWithDB(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC)
+	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const subject = "github.com/owner/repo#42"
+	if candidates, err := s.ReconcileAutomationReviewRequests(def.ID, "github.com", []string{subject}, now); err != nil || len(candidates) != 0 {
+		t.Fatalf("activation candidates=%#v err=%v", candidates, err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s, err = NewWithDB(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	if candidates, err := s.ReconcileAutomationReviewRequests(def.ID, "github.com", []string{subject}, now.Add(time.Minute)); err != nil || len(candidates) != 0 {
+		t.Fatalf("post-restart candidates=%#v err=%v", candidates, err)
+	}
+}
+
+func TestGitHubReviewLiveReapplyDoesNotRearm(t *testing.T) {
+	s := New()
+	now := time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC)
+	const spec = `{"id":"review"}`
+	def, err := s.UpsertAutomationDefinition("review", "Review", spec, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	baselineGitHubReviewAutomation(t, s, def.ID, "github.com", now)
+	const subject = "github.com/owner/repo#42"
+	if candidates, err := s.ReconcileAutomationReviewRequests(def.ID, "github.com", []string{subject}, now.Add(time.Minute)); err != nil || len(candidates) != 1 {
+		t.Fatalf("new request candidates=%#v err=%v", candidates, err)
+	}
+	if _, err := s.UpsertAutomationDefinition(def.ID, def.Name, spec, now.Add(2*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if candidates, err := s.ReconcileAutomationReviewRequests(def.ID, "github.com", []string{subject}, now.Add(3*time.Minute)); err != nil || len(candidates) != 1 || candidates[0].Cycle != 1 {
+		t.Fatalf("live reapply swallowed request: candidates=%#v err=%v", candidates, err)
+	}
+}
 
 func TestAutomationClaimIsIdempotentAndSnapshotsRevision(t *testing.T) {
 	s := New()
@@ -359,6 +453,7 @@ func TestListWithdrawnGitHubReviewUndeliveredRunsIncludesCancelledReviewWithdraw
 	}
 	const subjectA = "github.com/owner/repo#1"
 	const subjectB = "github.com/owner/repo#2"
+	baselineGitHubReviewAutomation(t, s, def.ID, "github.com", now)
 	if _, err := s.ReconcileAutomationReviewRequests(def.ID, "github.com", []string{subjectA, subjectB}, now); err != nil {
 		t.Fatal(err)
 	}
@@ -610,6 +705,7 @@ func TestGitHubReviewEdgeRetriesThenReusesContinuityBinding(t *testing.T) {
 		t.Fatal(err)
 	}
 	subject := "github.com/owner/repo#42"
+	baselineGitHubReviewAutomation(t, s, def.ID, "github.com", now)
 	candidates, err := s.ReconcileAutomationReviewRequests(def.ID, "github.com", []string{subject}, now)
 	if err != nil || len(candidates) != 1 || candidates[0].Cycle != 1 {
 		t.Fatalf("first reconcile = %#v err=%v", candidates, err)
@@ -671,6 +767,7 @@ func TestGitHubReviewAcceptedPendingRunRemainsRetryableWhileDemandIsActive(t *te
 		t.Fatal(err)
 	}
 	subject := "github.com/owner/repo#42"
+	baselineGitHubReviewAutomation(t, s, def.ID, "github.com", now)
 	candidates, err := s.ReconcileAutomationReviewRequests(def.ID, "github.com", []string{subject}, now)
 	if err != nil || len(candidates) != 1 {
 		t.Fatalf("first reconcile = %#v err=%v", candidates, err)
@@ -711,6 +808,7 @@ func TestGitHubReviewReRequestDoesNotReuseWithdrawnUndeliveredBinding(t *testing
 		t.Fatal(err)
 	}
 	const subject = "github.com/owner/repo#42"
+	baselineGitHubReviewAutomation(t, s, def.ID, "github.com", now)
 	if _, err := s.ReconcileAutomationReviewRequests(def.ID, "github.com", []string{subject}, now); err != nil {
 		t.Fatal(err)
 	}
@@ -748,6 +846,7 @@ func TestGitHubReviewWithdrawalExposesPendingRunAndReleasesEmptyBinding(t *testi
 		t.Fatal(err)
 	}
 	const subject = "github.com/owner/repo#42"
+	baselineGitHubReviewAutomation(t, s, def.ID, "github.com", now)
 	if _, err := s.ReconcileAutomationReviewRequests(def.ID, "github.com", []string{subject}, now); err != nil {
 		t.Fatal(err)
 	}
@@ -814,6 +913,7 @@ func TestGitHubReviewClaimAndTicketEventAreIdempotent(t *testing.T) {
 		t.Fatal(err)
 	}
 	subject := "github.com/owner/repo#7"
+	baselineGitHubReviewAutomation(t, s, def.ID, "github.com", now)
 	if _, err := s.ReconcileAutomationReviewRequests(def.ID, "github.com", []string{subject}, now); err != nil {
 		t.Fatal(err)
 	}
@@ -881,13 +981,12 @@ func TestGitHubReviewClaimAndTicketEventAreIdempotent(t *testing.T) {
 	}
 }
 
-// TestReenabledGitHubAutomationCatchesUpCurrentReviewDemand pins that
+// TestReapplyWhileDisabledPreservesReviewActivationBaseline pins that
 // UpsertAutomationDefinition never disturbs the enabled column: a definition
 // disabled via SetAutomationEnabled stays disabled across an unrelated
 // re-apply of the same spec (enabled has exactly one authority — the
-// column), and re-enabling via SetAutomationEnabled still catches up current
-// review demand exactly as before.
-func TestReenabledGitHubAutomationCatchesUpCurrentReviewDemand(t *testing.T) {
+// column), and re-enabling via SetAutomationEnabled baselines current demand.
+func TestReapplyWhileDisabledPreservesReviewActivationBaseline(t *testing.T) {
 	s := New()
 	now := time.Date(2026, 7, 19, 12, 0, 0, 0, time.UTC)
 	const spec = `{"id":"review"}`
@@ -896,6 +995,7 @@ func TestReenabledGitHubAutomationCatchesUpCurrentReviewDemand(t *testing.T) {
 		t.Fatal(err)
 	}
 	const subject = "github.com/owner/repo#42"
+	baselineGitHubReviewAutomation(t, s, def.ID, "github.com", now)
 	if _, err := s.ReconcileAutomationReviewRequests(def.ID, "github.com", []string{subject}, now); err != nil {
 		t.Fatal(err)
 	}
@@ -921,8 +1021,19 @@ func TestReenabledGitHubAutomationCatchesUpCurrentReviewDemand(t *testing.T) {
 		t.Fatalf("pre-enable observation crossed enable fence: candidates=%#v err=%v", stale, err)
 	}
 	candidates, err := s.ReconcileAutomationReviewRequests(def.ID, "github.com", []string{subject}, now.Add(3*time.Minute))
-	if err != nil || len(candidates) != 1 || candidates[0].Cycle != 2 {
-		t.Fatalf("re-enabled latest catch-up candidates=%#v err=%v", candidates, err)
+	if err != nil || len(candidates) != 0 {
+		t.Fatalf("re-enabled baseline candidates=%#v err=%v", candidates, err)
+	}
+	candidates, err = s.ReconcileAutomationReviewRequests(def.ID, "github.com", []string{subject}, now.Add(4*time.Minute))
+	if err != nil || len(candidates) != 0 {
+		t.Fatalf("unchanged baseline candidates=%#v err=%v", candidates, err)
+	}
+	if _, err := s.ReconcileAutomationReviewRequests(def.ID, "github.com", nil, now.Add(5*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	candidates, err = s.ReconcileAutomationReviewRequests(def.ID, "github.com", []string{subject}, now.Add(6*time.Minute))
+	if err != nil || len(candidates) != 1 || candidates[0].Cycle != 3 {
+		t.Fatalf("post-enable re-request candidates=%#v err=%v", candidates, err)
 	}
 }
 
@@ -934,6 +1045,7 @@ func TestContinuationOccurrenceRecordsOnTerminalTicketExactlyOnce(t *testing.T) 
 		t.Fatal(err)
 	}
 	const subject = "github.com/owner/repo#42"
+	baselineGitHubReviewAutomation(t, s, def.ID, "github.com", now)
 	if _, err := s.ReconcileAutomationReviewRequests(def.ID, "github.com", []string{subject}, now); err != nil {
 		t.Fatal(err)
 	}
@@ -1051,12 +1163,9 @@ func TestSetAutomationEnabledFlipsStateAndIsIdempotent(t *testing.T) {
 	}
 }
 
-// TestSetAutomationEnabledReenableCatchesUpCurrentReviewDemand is the
-// SetAutomationEnabled parity of TestReenabledGitHubAutomationCatchesUpCurrentReviewDemand
-// above: the disable/re-enable cycle drives through SetAutomationEnabled
-// instead of UpsertAutomationDefinition, and must produce the identical
-// review-request-edge-clear + provider-cursor-fence side effects.
-func TestSetAutomationEnabledReenableCatchesUpCurrentReviewDemand(t *testing.T) {
+// TestSetAutomationEnabledReenableBaselinesCurrentReviewDemand proves the
+// disable/re-enable transition ignores demand already active at activation.
+func TestSetAutomationEnabledReenableBaselinesCurrentReviewDemand(t *testing.T) {
 	s := New()
 	now := time.Date(2026, 7, 19, 12, 0, 0, 0, time.UTC)
 	const spec = `{"id":"review"}`
@@ -1065,6 +1174,7 @@ func TestSetAutomationEnabledReenableCatchesUpCurrentReviewDemand(t *testing.T) 
 		t.Fatal(err)
 	}
 	const subject = "github.com/owner/repo#42"
+	baselineGitHubReviewAutomation(t, s, def.ID, "github.com", now)
 	if _, err := s.ReconcileAutomationReviewRequests(def.ID, "github.com", []string{subject}, now); err != nil {
 		t.Fatal(err)
 	}
@@ -1083,8 +1193,14 @@ func TestSetAutomationEnabledReenableCatchesUpCurrentReviewDemand(t *testing.T) 
 		t.Fatalf("pre-enable observation crossed enable fence: candidates=%#v err=%v", stale, err)
 	}
 	candidates, err := s.ReconcileAutomationReviewRequests(def.ID, "github.com", []string{subject}, now.Add(3*time.Minute))
-	if err != nil || len(candidates) != 1 || candidates[0].Cycle != 2 {
-		t.Fatalf("re-enabled latest catch-up candidates=%#v err=%v", candidates, err)
+	if err != nil || len(candidates) != 0 {
+		t.Fatalf("re-enabled baseline candidates=%#v err=%v", candidates, err)
+	}
+	if needs, err := s.AutomationReviewRequestNeedsClaim(def.ID, subject, 2); err != nil || needs {
+		t.Fatalf("baselined cycle needs claim=%v err=%v", needs, err)
+	}
+	if _, _, err := s.ClaimGitHubReviewAutomationRun(def.ID, subject, 2, def.Revision, `{}`, `{}`, now.Add(3*time.Minute), AutomationRunReservation{RunID: "suppressed"}); err == nil {
+		t.Fatal("direct claim accepted a baselined cycle")
 	}
 }
 

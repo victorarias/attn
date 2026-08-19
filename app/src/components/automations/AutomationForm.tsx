@@ -834,6 +834,7 @@ export function AutomationForm({
               </div>
 
               <span className="automation-form__fact-chip">One reviewer per PR — later request cycles return to it</span>
+              <span className="automation-form__fact-chip">Existing requests are left alone when enabled</span>
               <span className="automation-form__fact-chip">Missed while attn was off: latest request still runs</span>
               <p className="automation-form__invariant">
                 Reviews always run in a fresh worktree checked out at the PR&apos;s head commit — your existing clone

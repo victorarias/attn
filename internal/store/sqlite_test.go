@@ -95,6 +95,13 @@ func TestOpenDB_CreatesSchema(t *testing.T) {
 			t.Errorf("Table %q does not exist: %v", table, err)
 		}
 	}
+	var baselineDefault string
+	if err := db.QueryRow(`SELECT dflt_value FROM pragma_table_info('automation_review_request_edges') WHERE name='baseline_cycle'`).Scan(&baselineDefault); err != nil {
+		t.Fatalf("automation_review_request_edges.baseline_cycle does not exist: %v", err)
+	}
+	if baselineDefault != "0" {
+		t.Fatalf("baseline_cycle default=%q, want 0", baselineDefault)
+	}
 }
 
 func TestOpenDB_CreatesDirectory(t *testing.T) {

@@ -169,6 +169,7 @@ describe('AutomationForm', () => {
       'github.com/acme/widgets',
     );
     expect(screen.getByTestId('automation-form-model')).toHaveValue('sonnet');
+    expect(screen.getByText('Existing requests are left alone when enabled')).toBeInTheDocument();
 
     await user.click(screen.getByTestId('automation-form-save'));
     await waitFor(() => expect(props.applyDefinition).toHaveBeenCalledTimes(1));

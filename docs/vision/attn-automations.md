@@ -76,8 +76,10 @@ run, next run, current status, and the linked ticket/session.
 
 The two proving cases are intentionally different:
 
-- **PR pre-review** proves an observed event, `latest` catch-up, `per_subject`
-  continuity, repeat occurrences, and ticket-native chief awareness.
+- **PR pre-review** proves an observed event, `latest` catch-up after ordinary
+  daemon downtime, `per_subject` continuity, repeat occurrences, and
+  ticket-native chief awareness. Creating or re-enabling it first baselines
+  current demand, so existing outstanding requests do not launch reviews.
 - **Merged-worktree cleanup** proves a schedule, pinned harness authority, and a
   recurring prompt whose safety comes from the prompt plus harness rather than a
   bespoke cleanup engine.
