@@ -11,6 +11,8 @@ import { useDaemonApi } from '../../contexts/DaemonApiContext';
 import type { ResolvedTheme } from '../../hooks/useTheme';
 import type { UISessionState } from '../../types/sessionState';
 import { ToolCard } from './ToolCard';
+import { Markdown } from '../Markdown';
+import { MarkdownBoundary } from '../Markdown/MarkdownBoundary';
 import './ConversationPane.css';
 
 interface ConversationPaneProps {
@@ -275,7 +277,21 @@ export function ConversationPane({ sessionId, paneActive, sessionState, resolved
                 data-streaming={item.streaming ? 'true' : 'false'}
               >
                 <div className="conversation-message-role">{item.role}</div>
-                <div className="conversation-message-text">{item.text}</div>
+                {/* The agent writes markdown; the user writes into a textarea,
+                    where Enter is a line break the way it is in every other
+                    composer in this app. Hence `breaks` on one side only. */}
+                <MarkdownBoundary
+                  key={`md:${item.id}`}
+                  fallback={<div className="conversation-message-text conversation-message-text--raw">{item.text}</div>}
+                >
+                  <Markdown
+                    className="conversation-message-text"
+                    breaks={item.role === 'user'}
+                    streaming={item.streaming}
+                  >
+                    {item.text}
+                  </Markdown>
+                </MarkdownBoundary>
               </div>
             );
           })

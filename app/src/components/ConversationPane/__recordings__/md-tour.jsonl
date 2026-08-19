@@ -1,0 +1,325 @@
+{"at":215.2,"envelope":{"session_id":"rec-md-tour","seq":1,"kind":"session_ready","body":{"session_file":"/var/folders/ct/gz_wgq1s4mj_nmkcw86rcpzm0000gn/T/nisse-rec-TTHFWD/sessions/2026-08-19T19-24-07-430Z_01a01b7b-1986-74d9-9474-c7600f9c4da8.jsonl","model":"openai/gpt-5.6-luna","cwd":"/var/folders/ct/gz_wgq1s4mj_nmkcw86rcpzm0000gn/T/nisse-rec-TTHFWD","pi_version":"0.83.0","state":"idle","models":["google/deep-research-max-preview-04-2026","google/deep-research-preview-04-2026","google/gemini-2.0-flash","google/gemini-2.0-flash-lite","google/gemini-2.5-computer-use-preview-10-2025","google/gemini-2.5-flash","google/gemini-2.5-flash-lite","google/gemini-2.5-pro","google/gemini-3-flash-preview","google/gemini-3-pro-preview","google/gemini-3.1-flash-lite","google/gemini-3.1-flash-lite-image","google/gemini-3.1-flash-lite-preview","google/gemini-3.1-flash-live-preview","google/gemini-3.1-pro-preview","google/gemini-3.1-pro-preview-customtools","google/gemini-3.5-flash","google/gemini-3.5-flash-lite","google/gemini-3.6-flash","google/gemini-flash-latest","google/gemini-flash-lite-latest","google/gemini-robotics-er-1.6-preview","google/gemma-4-26b-a4b-it","google/gemma-4-31b-it","google/gemini-3.7-flash","openai/gpt-4","openai/gpt-4-turbo","openai/gpt-4.1","openai/gpt-4.1-mini","openai/gpt-4.1-nano","openai/gpt-4o","openai/gpt-4o-2024-05-13","openai/gpt-4o-2024-08-06","openai/gpt-4o-2024-11-20","openai/gpt-4o-mini","openai/gpt-5","openai/gpt-5-chat-latest","openai/gpt-5-mini","openai/gpt-5-nano","openai/gpt-5-pro","openai/gpt-5.1","openai/gpt-5.2","openai/gpt-5.2-chat-latest","openai/gpt-5.2-pro","openai/gpt-5.3-chat-latest","openai/gpt-5.3-codex","openai/gpt-5.3-codex-spark","openai/gpt-5.4","openai/gpt-5.4-mini","openai/gpt-5.4-nano","openai/gpt-5.4-pro","openai/gpt-5.5","openai/gpt-5.5-pro","openai/gpt-5.6-luna","openai/gpt-5.6-sol","openai/gpt-5.6-terra","openai/gpt-realtime-2.1","openai/o1","openai/o1-pro","openai/o3","openai/o3-mini","openai/o3-pro","openai/o4-mini","openai-codex/gpt-5.3-codex-spark","openai-codex/gpt-5.4","openai-codex/gpt-5.4-mini","openai-codex/gpt-5.5","openai-codex/gpt-5.6-luna","openai-codex/gpt-5.6-sol","openai-codex/gpt-5.6-terra","opencode-go/minimax-m3","opencode-go/qwen3.7-max","opencode-go/qwen3.7-plus","opencode-go/deepseek-v4-flash","opencode-go/deepseek-v4-pro","opencode-go/glm-5.1","opencode-go/glm-5.2","opencode-go/hy3","opencode-go/kimi-k2.6","opencode-go/kimi-k2.7-code","opencode-go/kimi-k3","opencode-go/mimo-v2.5","opencode-go/mimo-v2.5-pro","opencode-go/minimax-m2.7","opencode-go/qwen3.6-plus","opencode-go/grok-4.5","opencode-go/glm-5.3","opencode-go/gpt-5.6-luna","opencode-go/qwen3.8-max"]}}}
+{"at":216.3,"envelope":{"session_id":"rec-md-tour","seq":2,"kind":"conversation_snapshot","body":{"epoch":"8a44ed4e-fe27-4697-9ab7-c482915969b8","items":[],"total":0,"truncated":false,"has_more":false,"dropped":0,"running":false,"queue":{"steering":[],"followUp":[]}}}}
+{"at":217.8,"envelope":{"session_id":"rec-md-tour","seq":3,"kind":"run_started","body":{"state":"working"}}}
+{"at":219.1,"envelope":{"session_id":"rec-md-tour","seq":4,"kind":"message_start","body":{"id":"m1","role":"user"}}}
+{"at":219.1,"envelope":{"session_id":"rec-md-tour","seq":5,"kind":"message_end","body":{"id":"m1","role":"user","text":"Write a technical explainer about how a terminal emulator parses escape sequences. Use the full range of markdown: two levels of headings, a bulleted list, a numbered list, a GFM table with at least 4 rows comparing parser states, inline code spans, at least three fenced code blocks in different languages (typescript, go, and bash), a blockquote, a link to https://vt100.net, and one mermaid flowchart diagram showing the parser state machine. Aim for roughly 800 words. Do not use any tools."}}}
+{"at":2880.6,"envelope":{"session_id":"rec-md-tour","seq":6,"kind":"message_start","body":{"id":"m2","role":"assistant"}}}
+{"at":2912,"envelope":{"session_id":"rec-md-tour","seq":7,"kind":"message_delta","body":{"id":"m2","text":"## How a Terminal Emulator Parses Escape Sequences\n\nA terminal emulator is more than a window that displays text. It maintains a model of a virtual terminal: a grid of cells, a cursor position, text attributes, scroll regions, and modes such as insert mode or application cursor keys. Programs control this model by writing"}}}
+{"at":2942.9,"envelope":{"session_id":"rec-md-tour","seq":8,"kind":"message_delta","body":{"id":"m2","text":" ordinary characters mixed"}}}
+{"at":2977.3,"envelope":{"session_id":"rec-md-tour","seq":9,"kind":"message_delta","body":{"id":"m2","text":" with **"}}}
+{"at":3012.1,"envelope":{"session_id":"rec-md-tour","seq":10,"kind":"message_delta","body":{"id":"m2","text":"escape sequences**.\n\n"}}}
+{"at":3043,"envelope":{"session_id":"rec-md-tour","seq":11,"kind":"message_delta","body":{"id":"m2","text":"Escape sequences are byte-oriented protocols."}}}
+{"at":3083.2,"envelope":{"session_id":"rec-md-tour","seq":12,"kind":"message_delta","body":{"id":"m2","text":" Although modern terminals"}}}
+{"at":3121,"envelope":{"session_id":"rec-md-tour","seq":13,"kind":"message_delta","body":{"id":"m2","text":" support many"}}}
+{"at":3152.3,"envelope":{"session_id":"rec-md-tour","seq":14,"kind":"message_delta","body":{"id":"m2","text":" extensions, their"}}}
+{"at":3211.3,"envelope":{"session_id":"rec-md-tour","seq":15,"kind":"message_delta","body":{"id":"m2","text":" parsing foundations"}}}
+{"at":3247.5,"envelope":{"session_id":"rec-md-tour","seq":16,"kind":"message_delta","body":{"id":"m2","text":" come from standards"}}}
+{"at":3278.2,"envelope":{"session_id":"rec-md-tour","seq":17,"kind":"message_delta","body":{"id":"m2","text":" such as VT100"}}}
+{"at":3310.6,"envelope":{"session_id":"rec-md-tour","seq":18,"kind":"message_delta","body":{"id":"m2","text":". The [VT"}}}
+{"at":3359.1,"envelope":{"session_id":"rec-md-tour","seq":19,"kind":"message_delta","body":{"id":"m2","text":"100"}}}
+{"at":3432.3,"envelope":{"session_id":"rec-md-tour","seq":20,"kind":"message_delta","body":{"id":"m2","text":" reference](https://vt100.net) is an especially useful"}}}
+{"at":3471,"envelope":{"session_id":"rec-md-tour","seq":21,"kind":"message_delta","body":{"id":"m2","text":" historical resource for understanding how"}}}
+{"at":3519.8,"envelope":{"session_id":"rec-md-tour","seq":22,"kind":"message_delta","body":{"id":"m2","text":" these sequences"}}}
+{"at":3564.5,"envelope":{"session_id":"rec-md-tour","seq":23,"kind":"message_delta","body":{"id":"m2","text":" evolved.\n\nAt a high"}}}
+{"at":3595.6,"envelope":{"session_id":"rec-md-tour","seq":24,"kind":"message_delta","body":{"id":"m2","text":" level, a terminal"}}}
+{"at":3628.8,"envelope":{"session_id":"rec-md-tour","seq":25,"kind":"message_delta","body":{"id":"m2","text":" parser repeatedly:\n\n1."}}}
+{"at":3664.8,"envelope":{"session_id":"rec-md-tour","seq":26,"kind":"message_delta","body":{"id":"m2","text":" Reads the next byte from"}}}
+{"at":3958,"envelope":{"session_id":"rec-md-tour","seq":27,"kind":"message_delta","body":{"id":"m2","text":" a pseudoterminal or input stream"}}}
+{"at":3998.8,"envelope":{"session_id":"rec-md-tour","seq":28,"kind":"message_delta","body":{"id":"m2","text":".\n2"}}}
+{"at":4045.3,"envelope":{"session_id":"rec-md-tour","seq":29,"kind":"message_delta","body":{"id":"m2","text":"."}}}
+{"at":4088.1,"envelope":{"session_id":"rec-md-tour","seq":30,"kind":"message_delta","body":{"id":"m2","text":" Interpre"}}}
+{"at":4134,"envelope":{"session_id":"rec-md-tour","seq":31,"kind":"message_delta","body":{"id":"m2","text":"ts the byte"}}}
+{"at":4171.9,"envelope":{"session_id":"rec-md-tour","seq":32,"kind":"message_delta","body":{"id":"m2","text":" according to its current parser state.\n"}}}
+{"at":4212.3,"envelope":{"session_id":"rec-md-tour","seq":33,"kind":"message_delta","body":{"id":"m2","text":"3. Collects bytes"}}}
+{"at":4261.8,"envelope":{"session_id":"rec-md-tour","seq":34,"kind":"message_delta","body":{"id":"m2","text":" that form a control sequence.\n4."}}}
+{"at":4292.8,"envelope":{"session_id":"rec-md-tour","seq":35,"kind":"message_delta","body":{"id":"m2","text":" Emits an action when the"}}}
+{"at":4325.8,"envelope":{"session_id":"rec-md-tour","seq":36,"kind":"message_delta","body":{"id":"m2","text":" sequence is complete.\n5. Returns to a state where"}}}
+{"at":4361.1,"envelope":{"session_id":"rec-md-tour","seq":37,"kind":"message_delta","body":{"id":"m2","text":" it can parse the next byte.\n\nThe important detail is that the same byte can have different meanings depending on the current state.\n\n### Bytes, characters, and controls\n\nTerminal protocols traditionally"}}}
+{"at":4410.3,"envelope":{"session_id":"rec-md-tour","seq":38,"kind":"message_delta","body":{"id":"m2","text":" operate"}}}
+{"at":4484.1,"envelope":{"session_id":"rec-md-tour","seq":39,"kind":"message_delta","body":{"id":"m2","text":" on bytes, not Unicode characters. ASCII control bytes occupy the range"}}}
+{"at":4516.1,"envelope":{"session_id":"rec-md-tour","seq":40,"kind":"message_delta","body":{"id":"m2","text":" `0x00` through `0x"}}}
+{"at":4552.4,"envelope":{"session_id":"rec-md-tour","seq":41,"kind":"message_delta","body":{"id":"m2","text":"1F"}}}
+{"at":4585.5,"envelope":{"session_id":"rec-md-tour","seq":42,"kind":"message_delta","body":{"id":"m2","text":"`, while printable characters"}}}
+{"at":4624.4,"envelope":{"session_id":"rec-md-tour","seq":43,"kind":"message_delta","body":{"id":"m2","text":" generally occupy `0x20"}}}
+{"at":4657.2,"envelope":{"session_id":"rec-md-tour","seq":44,"kind":"message_delta","body":{"id":"m2","text":"` through `0x7E`. For"}}}
+{"at":4695,"envelope":{"session_id":"rec-md-tour","seq":45,"kind":"message_delta","body":{"id":"m2","text":" example:\n\n- `BEL"}}}
+{"at":4738.6,"envelope":{"session_id":"rec-md-tour","seq":46,"kind":"message_delta","body":{"id":"m2","text":"` (`0x07`)"}}}
+{"at":4783.2,"envelope":{"session_id":"rec-md-tour","seq":47,"kind":"message_delta","body":{"id":"m2","text":" requests an audible"}}}
+{"at":4818.6,"envelope":{"session_id":"rec-md-tour","seq":48,"kind":"message_delta","body":{"id":"m2","text":" or visual bell.\n- `"}}}
+{"at":4856.8,"envelope":{"session_id":"rec-md-tour","seq":49,"kind":"message_delta","body":{"id":"m2","text":"BS` (`0x08`) moves the"}}}
+{"at":4888.1,"envelope":{"session_id":"rec-md-tour","seq":50,"kind":"message_delta","body":{"id":"m2","text":" cursor backward.\n- `HT`"}}}
+{"at":4926.5,"envelope":{"session_id":"rec-md-tour","seq":51,"kind":"message_delta","body":{"id":"m2","text":" (`0x"}}}
+{"at":5005.4,"envelope":{"session_id":"rec-md-tour","seq":52,"kind":"message_delta","body":{"id":"m2","text":"09`) advances to the next tab stop.\n- `"}}}
+{"at":5049.2,"envelope":{"session_id":"rec-md-tour","seq":53,"kind":"message_delta","body":{"id":"m2","text":"LF` (`0x0A`) moves the"}}}
+{"at":5087,"envelope":{"session_id":"rec-md-tour","seq":54,"kind":"message_delta","body":{"id":"m2","text":" cursor down"}}}
+{"at":5119.8,"envelope":{"session_id":"rec-md-tour","seq":55,"kind":"message_delta","body":{"id":"m2","text":", possibly scrolling.\n- `"}}}
+{"at":5157.3,"envelope":{"session_id":"rec-md-tour","seq":56,"kind":"message_delta","body":{"id":"m2","text":"ESC` (`0x1B"}}}
+{"at":5206.7,"envelope":{"session_id":"rec-md-tour","seq":57,"kind":"message_delta","body":{"id":"m2","text":"`) begins"}}}
+{"at":5245.7,"envelope":{"session_id":"rec-md-tour","seq":58,"kind":"message_delta","body":{"id":"m2","text":" many escape sequences.\n\nA terminal"}}}
+{"at":5293.8,"envelope":{"session_id":"rec-md-tour","seq":59,"kind":"message_delta","body":{"id":"m2","text":" must usually process these"}}}
+{"at":5326.7,"envelope":{"session_id":"rec-md-tour","seq":60,"kind":"message_delta","body":{"id":"m2","text":" controls before"}}}
+{"at":5361.7,"envelope":{"session_id":"rec-md-tour","seq":61,"kind":"message_delta","body":{"id":"m2","text":" decoding UTF-8 text"}}}
+{"at":5402.2,"envelope":{"session_id":"rec-md-tour","seq":62,"kind":"message_delta","body":{"id":"m2","text":". Otherwise,"}}}
+{"at":5446.5,"envelope":{"session_id":"rec-md-tour","seq":63,"kind":"message_delta","body":{"id":"m2","text":" a control"}}}
+{"at":5529.5,"envelope":{"session_id":"rec-md-tour","seq":64,"kind":"message_delta","body":{"id":"m2","text":" byte embedded in a stream could be mistaken for"}}}
+{"at":5565.3,"envelope":{"session_id":"rec-md-tour","seq":65,"kind":"message_delta","body":{"id":"m2","text":" part of a character sequence.\n\n"}}}
+{"at":5613.3,"envelope":{"session_id":"rec-md-tour","seq":66,"kind":"message_delta","body":{"id":"m2","text":"The simplest"}}}
+{"at":5651.7,"envelope":{"session_id":"rec-md-tour","seq":67,"kind":"message_delta","body":{"id":"m2","text":" input is ordinary text. If"}}}
+{"at":5689.1,"envelope":{"session_id":"rec-md-tour","seq":68,"kind":"message_delta","body":{"id":"m2","text":" the parser receives `A`,"}}}
+{"at":5721.9,"envelope":{"session_id":"rec-md-tour","seq":69,"kind":"message_delta","body":{"id":"m2","text":" it asks the"}}}
+{"at":5758.1,"envelope":{"session_id":"rec-md-tour","seq":70,"kind":"message_delta","body":{"id":"m2","text":" screen model"}}}
+{"at":5789.1,"envelope":{"session_id":"rec-md-tour","seq":71,"kind":"message_delta","body":{"id":"m2","text":" to place `A`"}}}
+{"at":5820.4,"envelope":{"session_id":"rec-md-tour","seq":72,"kind":"message_delta","body":{"id":"m2","text":" at the cursor"}}}
+{"at":5870.9,"envelope":{"session_id":"rec-md-tour","seq":73,"kind":"message_delta","body":{"id":"m2","text":", applies"}}}
+{"at":5905.4,"envelope":{"session_id":"rec-md-tour","seq":74,"kind":"message_delta","body":{"id":"m2","text":" the current attributes, and advances the cursor"}}}
+{"at":5937.3,"envelope":{"session_id":"rec-md-tour","seq":75,"kind":"message_delta","body":{"id":"m2","text":". If it receives `ESC`,"}}}
+{"at":5973.4,"envelope":{"session_id":"rec-md-tour","seq":76,"kind":"message_delta","body":{"id":"m2","text":" it"}}}
+{"at":6053.7,"envelope":{"session_id":"rec-md-tour","seq":77,"kind":"message_delta","body":{"id":"m2","text":" cannot immediately perform an action because the next byte determines which escape sequence is"}}}
+{"at":6101.9,"envelope":{"session_id":"rec-md-tour","seq":78,"kind":"message_delta","body":{"id":"m2","text":" being requested.\n\n"}}}
+{"at":6132.8,"envelope":{"session_id":"rec-md-tour","seq":79,"kind":"message_delta","body":{"id":"m2","text":"## The parser as a"}}}
+{"at":6173.8,"envelope":{"session_id":"rec-md-tour","seq":80,"kind":"message_delta","body":{"id":"m2","text":" state machine\n\nA"}}}
+{"at":6227.7,"envelope":{"session_id":"rec-md-tour","seq":81,"kind":"message_delta","body":{"id":"m2","text":" robust implementation"}}}
+{"at":6294.9,"envelope":{"session_id":"rec-md-tour","seq":82,"kind":"message_delta","body":{"id":"m2","text":" uses a finite-state machine rather than a collection of ad hoc"}}}
+{"at":6325.4,"envelope":{"session_id":"rec-md-tour","seq":83,"kind":"message_delta","body":{"id":"m2","text":" string searches."}}}
+{"at":6368.8,"envelope":{"session_id":"rec-md-tour","seq":84,"kind":"message_delta","body":{"id":"m2","text":" Each incoming byte"}}}
+{"at":6404.2,"envelope":{"session_id":"rec-md-tour","seq":85,"kind":"message_delta","body":{"id":"m2","text":" causes a transition from"}}}
+{"at":6435.5,"envelope":{"session_id":"rec-md-tour","seq":86,"kind":"message_delta","body":{"id":"m2","text":" one state to another,"}}}
+{"at":6471.5,"envelope":{"session_id":"rec-md-tour","seq":87,"kind":"message_delta","body":{"id":"m2","text":" possibly updating"}}}
+{"at":6577.6,"envelope":{"session_id":"rec-md-tour","seq":88,"kind":"message_delta","body":{"id":"m2","text":" an intermediate buffer.\n\n| Parser state | Typical input | Meaning"}}}
+{"at":6616.6,"envelope":{"session_id":"rec-md-tour","seq":89,"kind":"message_delta","body":{"id":"m2","text":" | Possible"}}}
+{"at":6651.6,"envelope":{"session_id":"rec-md-tour","seq":90,"kind":"message_delta","body":{"id":"m2","text":" next state |\n|---|---"}}}
+{"at":6685.3,"envelope":{"session_id":"rec-md-tour","seq":91,"kind":"message_delta","body":{"id":"m2","text":"|---|---|\n| Ground"}}}
+{"at":6721,"envelope":{"session_id":"rec-md-tour","seq":92,"kind":"message_delta","body":{"id":"m2","text":" | Printable byte"}}}
+{"at":6761.8,"envelope":{"session_id":"rec-md-tour","seq":93,"kind":"message_delta","body":{"id":"m2","text":" | Render"}}}
+{"at":6794.4,"envelope":{"session_id":"rec-md-tour","seq":94,"kind":"message_delta","body":{"id":"m2","text":" a character |"}}}
+{"at":6831.2,"envelope":{"session_id":"rec-md-tour","seq":95,"kind":"message_delta","body":{"id":"m2","text":" Ground |\n| Ground |"}}}
+{"at":6864.3,"envelope":{"session_id":"rec-md-tour","seq":96,"kind":"message_delta","body":{"id":"m2","text":" `ESC` |"}}}
+{"at":6895.9,"envelope":{"session_id":"rec-md-tour","seq":97,"kind":"message_delta","body":{"id":"m2","text":" Start an escape sequence |"}}}
+{"at":6926.2,"envelope":{"session_id":"rec-md-tour","seq":98,"kind":"message_delta","body":{"id":"m2","text":" Escape |\n| Escape | `[` |"}}}
+{"at":6969.3,"envelope":{"session_id":"rec-md-tour","seq":99,"kind":"message_delta","body":{"id":"m2","text":" Begin a"}}}
+{"at":7001.6,"envelope":{"session_id":"rec-md-tour","seq":100,"kind":"message_delta","body":{"id":"m2","text":" CSI sequence |"}}}
+{"at":7105.3,"envelope":{"session_id":"rec-md-tour","seq":101,"kind":"message_delta","body":{"id":"m2","text":" CSI entry |\n| CSI | Digits"}}}
+{"at":7136.4,"envelope":{"session_id":"rec-md-tour","seq":102,"kind":"message_delta","body":{"id":"m2","text":", `;` | Collect"}}}
+{"at":7180.6,"envelope":{"session_id":"rec-md-tour","seq":103,"kind":"message_delta","body":{"id":"m2","text":" parameters | CSI parameter |\n|"}}}
+{"at":7211.3,"envelope":{"session_id":"rec-md-tour","seq":104,"kind":"message_delta","body":{"id":"m2","text":" CSI parameter | Final byte"}}}
+{"at":7257.1,"envelope":{"session_id":"rec-md-tour","seq":105,"kind":"message_delta","body":{"id":"m2","text":" | Dispatch an"}}}
+{"at":7291.4,"envelope":{"session_id":"rec-md-tour","seq":106,"kind":"message_delta","body":{"id":"m2","text":" operation | Ground |\n\nThe"}}}
+{"at":7332.9,"envelope":{"session_id":"rec-md-tour","seq":107,"kind":"message_delta","body":{"id":"m2","text":" **ground state** is the"}}}
+{"at":7369.5,"envelope":{"session_id":"rec-md-tour","seq":108,"kind":"message_delta","body":{"id":"m2","text":" normal operating state."}}}
+{"at":7404.9,"envelope":{"session_id":"rec-md-tour","seq":109,"kind":"message_delta","body":{"id":"m2","text":" Printable bytes"}}}
+{"at":7448.7,"envelope":{"session_id":"rec-md-tour","seq":110,"kind":"message_delta","body":{"id":"m2","text":" are rendered"}}}
+{"at":7479.5,"envelope":{"session_id":"rec-md-tour","seq":111,"kind":"message_delta","body":{"id":"m2","text":", while control characters are executed immediately."}}}
+{"at":7515.4,"envelope":{"session_id":"rec-md-tour","seq":112,"kind":"message_delta","body":{"id":"m2","text":" An `"}}}
+{"at":7550.8,"envelope":{"session_id":"rec-md-tour","seq":113,"kind":"message_delta","body":{"id":"m2","text":"ESC"}}}
+{"at":7626.1,"envelope":{"session_id":"rec-md-tour","seq":114,"kind":"message_delta","body":{"id":"m2","text":"` byte transitions the parser into an escape state.\n\nIn the **escape"}}}
+{"at":7658,"envelope":{"session_id":"rec-md-tour","seq":115,"kind":"message_delta","body":{"id":"m2","text":" state**, the parser examines the"}}}
+{"at":7692.6,"envelope":{"session_id":"rec-md-tour","seq":116,"kind":"message_delta","body":{"id":"m2","text":" next byte. A"}}}
+{"at":7734.5,"envelope":{"session_id":"rec-md-tour","seq":117,"kind":"message_delta","body":{"id":"m2","text":" `[` usually"}}}
+{"at":7778.8,"envelope":{"session_id":"rec-md-tour","seq":118,"kind":"message_delta","body":{"id":"m2","text":" starts a"}}}
+{"at":7811,"envelope":{"session_id":"rec-md-tour","seq":119,"kind":"message_delta","body":{"id":"m2","text":" Control Sequence"}}}
+{"at":7843.2,"envelope":{"session_id":"rec-md-tour","seq":120,"kind":"message_delta","body":{"id":"m2","text":" Introducer, commonly"}}}
+{"at":7880.2,"envelope":{"session_id":"rec-md-tour","seq":121,"kind":"message_delta","body":{"id":"m2","text":" called CSI."}}}
+{"at":7913.7,"envelope":{"session_id":"rec-md-tour","seq":122,"kind":"message_delta","body":{"id":"m2","text":" CSI sequences are responsible for many everyday"}}}
+{"at":7960.7,"envelope":{"session_id":"rec-md-tour","seq":123,"kind":"message_delta","body":{"id":"m2","text":" terminal operations"}}}
+{"at":7993.1,"envelope":{"session_id":"rec-md-tour","seq":124,"kind":"message_delta","body":{"id":"m2","text":", including"}}}
+{"at":8025.5,"envelope":{"session_id":"rec-md-tour","seq":125,"kind":"message_delta","body":{"id":"m2","text":" cursor movement, screen clearing, and"}}}
+{"at":8069.7,"envelope":{"session_id":"rec-md-tour","seq":126,"kind":"message_delta","body":{"id":"m2","text":" text styling"}}}
+{"at":8150.6,"envelope":{"session_id":"rec-md-tour","seq":127,"kind":"message_delta","body":{"id":"m2","text":".\n\nFor example:\n\n```text\nESC [ 3"}}}
+{"at":8192.4,"envelope":{"session_id":"rec-md-tour","seq":128,"kind":"message_delta","body":{"id":"m2","text":" 1 m"}}}
+{"at":8234.6,"envelope":{"session_id":"rec-md-tour","seq":129,"kind":"message_delta","body":{"id":"m2","text":"\n```\n\n"}}}
+{"at":8278.3,"envelope":{"session_id":"rec-md-tour","seq":130,"kind":"message_delta","body":{"id":"m2","text":"This is"}}}
+{"at":8315.3,"envelope":{"session_id":"rec-md-tour","seq":131,"kind":"message_delta","body":{"id":"m2","text":" commonly written as `\\x1"}}}
+{"at":8353.1,"envelope":{"session_id":"rec-md-tour","seq":132,"kind":"message_delta","body":{"id":"m2","text":"b[31m`. It selects"}}}
+{"at":8393.4,"envelope":{"session_id":"rec-md-tour","seq":133,"kind":"message_delta","body":{"id":"m2","text":" a red foreground color. The"}}}
+{"at":8452.6,"envelope":{"session_id":"rec-md-tour","seq":134,"kind":"message_delta","body":{"id":"m2","text":" parser sees:\n\n- `ESC"}}}
+{"at":8485,"envelope":{"session_id":"rec-md-tour","seq":135,"kind":"message_delta","body":{"id":"m2","text":"`: leave"}}}
+{"at":8520.7,"envelope":{"session_id":"rec-md-tour","seq":136,"kind":"message_delta","body":{"id":"m2","text":" ground state.\n- `["}}}
+{"at":8566.4,"envelope":{"session_id":"rec-md-tour","seq":137,"kind":"message_delta","body":{"id":"m2","text":"`: enter CSI"}}}
+{"at":8600.6,"envelope":{"session_id":"rec-md-tour","seq":138,"kind":"message_delta","body":{"id":"m2","text":" parsing.\n-"}}}
+{"at":8674.1,"envelope":{"session_id":"rec-md-tour","seq":139,"kind":"message_delta","body":{"id":"m2","text":" `31`: collect the parameter.\n- `m`:"}}}
+{"at":8718.7,"envelope":{"session_id":"rec-md-tour","seq":140,"kind":"message_delta","body":{"id":"m2","text":" recognize the final"}}}
+{"at":8761.1,"envelope":{"session_id":"rec-md-tour","seq":141,"kind":"message_delta","body":{"id":"m2","text":" byte and dispatch “"}}}
+{"at":8810.5,"envelope":{"session_id":"rec-md-tour","seq":142,"kind":"message_delta","body":{"id":"m2","text":"set graphics"}}}
+{"at":8849.3,"envelope":{"session_id":"rec-md-tour","seq":143,"kind":"message_delta","body":{"id":"m2","text":" rendition.”\n\nThe parser"}}}
+{"at":8894.6,"envelope":{"session_id":"rec-md-tour","seq":144,"kind":"message_delta","body":{"id":"m2","text":" must distinguish"}}}
+{"at":8931.8,"envelope":{"session_id":"rec-md-tour","seq":145,"kind":"message_delta","body":{"id":"m2","text":" **parameter bytes** from"}}}
+{"at":8962.5,"envelope":{"session_id":"rec-md-tour","seq":146,"kind":"message_delta","body":{"id":"m2","text":" the **final byte**. In"}}}
+{"at":9015,"envelope":{"session_id":"rec-md-tour","seq":147,"kind":"message_delta","body":{"id":"m2","text":" CSI syntax,"}}}
+{"at":9100.9,"envelope":{"session_id":"rec-md-tour","seq":148,"kind":"message_delta","body":{"id":"m2","text":" digits and semicolons usually form a parameter string, while"}}}
+{"at":9202.3,"envelope":{"session_id":"rec-md-tour","seq":149,"kind":"message_delta","body":{"id":"m2","text":" a byte in the final-byte range identifies the command"}}}
+{"at":9260.2,"envelope":{"session_id":"rec-md-tour","seq":150,"kind":"message_delta","body":{"id":"m2","text":". Thus, `ESC"}}}
+{"at":9332.9,"envelope":{"session_id":"rec-md-tour","seq":151,"kind":"message_delta","body":{"id":"m2","text":"[2J`"}}}
+{"at":9375.6,"envelope":{"session_id":"rec-md-tour","seq":152,"kind":"message_delta","body":{"id":"m2","text":" means “erase the display,” whereas"}}}
+{"at":9412.4,"envelope":{"session_id":"rec-md-tour","seq":153,"kind":"message_delta","body":{"id":"m2","text":" `ESC[H"}}}
+{"at":9452.2,"envelope":{"session_id":"rec-md-tour","seq":154,"kind":"message_delta","body":{"id":"m2","text":"` means “move the cursor"}}}
+{"at":9501.2,"envelope":{"session_id":"rec-md-tour","seq":155,"kind":"message_delta","body":{"id":"m2","text":",” even though both"}}}
+{"at":9537.7,"envelope":{"session_id":"rec-md-tour","seq":156,"kind":"message_delta","body":{"id":"m2","text":" use the same"}}}
+{"at":9577.9,"envelope":{"session_id":"rec-md-tour","seq":157,"kind":"message_delta","body":{"id":"m2","text":" general structure.\n\n### A simplified"}}}
+{"at":9615,"envelope":{"session_id":"rec-md-tour","seq":158,"kind":"message_delta","body":{"id":"m2","text":" implementation\n\nA parser often stores its state"}}}
+{"at":9647.1,"envelope":{"session_id":"rec-md-tour","seq":159,"kind":"message_delta","body":{"id":"m2","text":", parameters"}}}
+{"at":9723.8,"envelope":{"session_id":"rec-md-tour","seq":160,"kind":"message_delta","body":{"id":"m2","text":", and any intermediate text in a small object. The"}}}
+{"at":9761.1,"envelope":{"session_id":"rec-md-tour","seq":161,"kind":"message_delta","body":{"id":"m2","text":" following TypeScript example omits"}}}
+{"at":9804.1,"envelope":{"session_id":"rec-md-tour","seq":162,"kind":"message_delta","body":{"id":"m2","text":" many real-world details but"}}}
+{"at":9835.5,"envelope":{"session_id":"rec-md-tour","seq":163,"kind":"message_delta","body":{"id":"m2","text":" demonstrates the"}}}
+{"at":9867.9,"envelope":{"session_id":"rec-md-tour","seq":164,"kind":"message_delta","body":{"id":"m2","text":" central transition logic:\n\n```"}}}
+{"at":9902.1,"envelope":{"session_id":"rec-md-tour","seq":165,"kind":"message_delta","body":{"id":"m2","text":"typescript\ntype State = \""}}}
+{"at":9941.7,"envelope":{"session_id":"rec-md-tour","seq":166,"kind":"message_delta","body":{"id":"m2","text":"ground\" | \"escape\" |"}}}
+{"at":9981.1,"envelope":{"session_id":"rec-md-tour","seq":167,"kind":"message_delta","body":{"id":"m2","text":" \"csi\";\n\nclass TerminalParser {\n"}}}
+{"at":10018.7,"envelope":{"session_id":"rec-md-tour","seq":168,"kind":"message_delta","body":{"id":"m2","text":"  private state: State = \"ground\";\n "}}}
+{"at":10051.8,"envelope":{"session_id":"rec-md-tour","seq":169,"kind":"message_delta","body":{"id":"m2","text":" private params = \"\";\n\n"}}}
+{"at":10088.8,"envelope":{"session_id":"rec-md-tour","seq":170,"kind":"message_delta","body":{"id":"m2","text":"  feed(bytes"}}}
+{"at":10127.3,"envelope":{"session_id":"rec-md-tour","seq":171,"kind":"message_delta","body":{"id":"m2","text":": Uint8Array) {\n   "}}}
+{"at":10160.1,"envelope":{"session_id":"rec-md-tour","seq":172,"kind":"message_delta","body":{"id":"m2","text":" for (const byte"}}}
+{"at":10248.5,"envelope":{"session_id":"rec-md-tour","seq":173,"kind":"message_delta","body":{"id":"m2","text":" of bytes) {\n      if (this.state === \"ground\") {\n        if (byte === 0x1b"}}}
+{"at":10280.3,"envelope":{"session_id":"rec-md-tour","seq":174,"kind":"message_delta","body":{"id":"m2","text":") this.state = \"escape\";\n"}}}
+{"at":10313,"envelope":{"session_id":"rec-md-tour","seq":175,"kind":"message_delta","body":{"id":"m2","text":"        else if (byte >="}}}
+{"at":10345.2,"envelope":{"session_id":"rec-md-tour","seq":176,"kind":"message_delta","body":{"id":"m2","text":" 0x20 && byte <="}}}
+{"at":10377.3,"envelope":{"session_id":"rec-md-tour","seq":177,"kind":"message_delta","body":{"id":"m2","text":" 0x7e)"}}}
+{"at":10409.4,"envelope":{"session_id":"rec-md-tour","seq":178,"kind":"message_delta","body":{"id":"m2","text":" this.print(byte);\n        else this"}}}
+{"at":10447.8,"envelope":{"session_id":"rec-md-tour","seq":179,"kind":"message_delta","body":{"id":"m2","text":".executeControl(byte);\n     "}}}
+{"at":10479.2,"envelope":{"session_id":"rec-md-tour","seq":180,"kind":"message_delta","body":{"id":"m2","text":" } else if (this.state === \"escape\")"}}}
+{"at":10519.5,"envelope":{"session_id":"rec-md-tour","seq":181,"kind":"message_delta","body":{"id":"m2","text":" {\n        if (byte ==="}}}
+{"at":10551.1,"envelope":{"session_id":"rec-md-tour","seq":182,"kind":"message_delta","body":{"id":"m2","text":" 0x5b"}}}
+{"at":10581.9,"envelope":{"session_id":"rec-md-tour","seq":183,"kind":"message_delta","body":{"id":"m2","text":") {\n          this.params = \"\";\n"}}}
+{"at":10613.3,"envelope":{"session_id":"rec-md-tour","seq":184,"kind":"message_delta","body":{"id":"m2","text":"          this.state = \"c"}}}
+{"at":10648.3,"envelope":{"session_id":"rec-md-tour","seq":185,"kind":"message_delta","body":{"id":"m2","text":"si\";\n        } else {\n         "}}}
+{"at":10685.5,"envelope":{"session_id":"rec-md-tour","seq":186,"kind":"message_delta","body":{"id":"m2","text":" this.dispatch"}}}
+{"at":10772.8,"envelope":{"session_id":"rec-md-tour","seq":187,"kind":"message_delta","body":{"id":"m2","text":"Escape(byte);\n          this.state = \"ground\";\n        }\n      } else {\n        this.parseCsi"}}}
+{"at":10806,"envelope":{"session_id":"rec-md-tour","seq":188,"kind":"message_delta","body":{"id":"m2","text":"Byte(byte);\n      }\n    }\n "}}}
+{"at":10838.9,"envelope":{"session_id":"rec-md-tour","seq":189,"kind":"message_delta","body":{"id":"m2","text":" }\n\n  private print(byte"}}}
+{"at":10879.3,"envelope":{"session_id":"rec-md-tour","seq":190,"kind":"message_delta","body":{"id":"m2","text":": number) {}\n"}}}
+{"at":10910.3,"envelope":{"session_id":"rec-md-tour","seq":191,"kind":"message_delta","body":{"id":"m2","text":"  private executeControl(byte"}}}
+{"at":10940.6,"envelope":{"session_id":"rec-md-tour","seq":192,"kind":"message_delta","body":{"id":"m2","text":": number) {}\n  private dispatchEscape"}}}
+{"at":10974.7,"envelope":{"session_id":"rec-md-tour","seq":193,"kind":"message_delta","body":{"id":"m2","text":"(byte: number) {}\n  private parse"}}}
+{"at":11009.9,"envelope":{"session_id":"rec-md-tour","seq":194,"kind":"message_delta","body":{"id":"m2","text":"CsiByte(byte: number) {}\n}\n```\n\n"}}}
+{"at":11045.6,"envelope":{"session_id":"rec-md-tour","seq":195,"kind":"message_delta","body":{"id":"m2","text":"A production"}}}
+{"at":11089.6,"envelope":{"session_id":"rec-md-tour","seq":196,"kind":"message_delta","body":{"id":"m2","text":" parser must also handle malformed"}}}
+{"at":11128.6,"envelope":{"session_id":"rec-md-tour","seq":197,"kind":"message_delta","body":{"id":"m2","text":" sequences. It should"}}}
+{"at":11173.3,"envelope":{"session_id":"rec-md-tour","seq":198,"kind":"message_delta","body":{"id":"m2","text":" avoid getting"}}}
+{"at":11210.8,"envelope":{"session_id":"rec-md-tour","seq":199,"kind":"message_delta","body":{"id":"m2","text":" permanently stuck"}}}
+{"at":11296.1,"envelope":{"session_id":"rec-md-tour","seq":200,"kind":"message_delta","body":{"id":"m2","text":" if an application writes an incomplete escape sequence, and it must"}}}
+{"at":11332.7,"envelope":{"session_id":"rec-md-tour","seq":201,"kind":"message_delta","body":{"id":"m2","text":" cope with"}}}
+{"at":11365.8,"envelope":{"session_id":"rec-md-tour","seq":202,"kind":"message_delta","body":{"id":"m2","text":" sequences split across multiple"}}}
+{"at":11403.6,"envelope":{"session_id":"rec-md-tour","seq":203,"kind":"message_delta","body":{"id":"m2","text":" reads. The operating system may"}}}
+{"at":11444.6,"envelope":{"session_id":"rec-md-tour","seq":204,"kind":"message_delta","body":{"id":"m2","text":" deliver `ESC[`,"}}}
+{"at":11483.1,"envelope":{"session_id":"rec-md-tour","seq":205,"kind":"message_delta","body":{"id":"m2","text":" `31`, and `m`"}}}
+{"at":11521.2,"envelope":{"session_id":"rec-md-tour","seq":206,"kind":"message_delta","body":{"id":"m2","text":" in three separate chunks.\n\n"}}}
+{"at":11570.8,"envelope":{"session_id":"rec-md-tour","seq":207,"kind":"message_delta","body":{"id":"m2","text":"## CSI parameters"}}}
+{"at":11613,"envelope":{"session_id":"rec-md-tour","seq":208,"kind":"message_delta","body":{"id":"m2","text":" and dispatch\n\nCSI commands"}}}
+{"at":11649.8,"envelope":{"session_id":"rec-md-tour","seq":209,"kind":"message_delta","body":{"id":"m2","text":" can have"}}}
+{"at":11691.9,"envelope":{"session_id":"rec-md-tour","seq":210,"kind":"message_delta","body":{"id":"m2","text":" several"}}}
+{"at":11731.8,"envelope":{"session_id":"rec-md-tour","seq":211,"kind":"message_delta","body":{"id":"m2","text":" parameters."}}}
+{"at":11823,"envelope":{"session_id":"rec-md-tour","seq":212,"kind":"message_delta","body":{"id":"m2","text":" `ESC[10;20"}}}
+{"at":11853.9,"envelope":{"session_id":"rec-md-tour","seq":213,"kind":"message_delta","body":{"id":"m2","text":"H`, for example, typically moves"}}}
+{"at":11889.6,"envelope":{"session_id":"rec-md-tour","seq":214,"kind":"message_delta","body":{"id":"m2","text":" the cursor to row 10"}}}
+{"at":11925.2,"envelope":{"session_id":"rec-md-tour","seq":215,"kind":"message_delta","body":{"id":"m2","text":" and column 20. The"}}}
+{"at":11959.5,"envelope":{"session_id":"rec-md-tour","seq":216,"kind":"message_delta","body":{"id":"m2","text":" parser should"}}}
+{"at":11996.1,"envelope":{"session_id":"rec-md-tour","seq":217,"kind":"message_delta","body":{"id":"m2","text":" not interpret `10"}}}
+{"at":12044,"envelope":{"session_id":"rec-md-tour","seq":218,"kind":"message_delta","body":{"id":"m2","text":";20`"}}}
+{"at":12097.4,"envelope":{"session_id":"rec-md-tour","seq":219,"kind":"message_delta","body":{"id":"m2","text":" as an"}}}
+{"at":12135,"envelope":{"session_id":"rec-md-tour","seq":220,"kind":"message_delta","body":{"id":"m2","text":" operation until it"}}}
+{"at":12192.5,"envelope":{"session_id":"rec-md-tour","seq":221,"kind":"message_delta","body":{"id":"m2","text":" reaches the"}}}
+{"at":12232.6,"envelope":{"session_id":"rec-md-tour","seq":222,"kind":"message_delta","body":{"id":"m2","text":" final byte `"}}}
+{"at":12268.1,"envelope":{"session_id":"rec-md-tour","seq":223,"kind":"message_delta","body":{"id":"m2","text":"H`.\n\n"}}}
+{"at":12344.4,"envelope":{"session_id":"rec-md-tour","seq":224,"kind":"message_delta","body":{"id":"m2","text":"A Go-style parameter parser might look like this"}}}
+{"at":12389.6,"envelope":{"session_id":"rec-md-tour","seq":225,"kind":"message_delta","body":{"id":"m2","text":":\n\n```go\n"}}}
+{"at":12422.3,"envelope":{"session_id":"rec-md-tour","seq":226,"kind":"message_delta","body":{"id":"m2","text":"func parseParams"}}}
+{"at":12461.7,"envelope":{"session_id":"rec-md-tour","seq":227,"kind":"message_delta","body":{"id":"m2","text":"(raw string) []"}}}
+{"at":12500,"envelope":{"session_id":"rec-md-tour","seq":228,"kind":"message_delta","body":{"id":"m2","text":"int {\n    if"}}}
+{"at":12535.3,"envelope":{"session_id":"rec-md-tour","seq":229,"kind":"message_delta","body":{"id":"m2","text":" raw == \"\""}}}
+{"at":12567.8,"envelope":{"session_id":"rec-md-tour","seq":230,"kind":"message_delta","body":{"id":"m2","text":" {\n        return []int"}}}
+{"at":12605.4,"envelope":{"session_id":"rec-md-tour","seq":231,"kind":"message_delta","body":{"id":"m2","text":"{0"}}}
+{"at":12648.9,"envelope":{"session_id":"rec-md-tour","seq":232,"kind":"message_delta","body":{"id":"m2","text":"} // Command-specific"}}}
+{"at":12683.1,"envelope":{"session_id":"rec-md-tour","seq":233,"kind":"message_delta","body":{"id":"m2","text":" defaults are applied later"}}}
+{"at":12714,"envelope":{"session_id":"rec-md-tour","seq":234,"kind":"message_delta","body":{"id":"m2","text":".\n   "}}}
+{"at":12745.8,"envelope":{"session_id":"rec-md-tour","seq":235,"kind":"message_delta","body":{"id":"m2","text":" }\n\n    fields := strings"}}}
+{"at":12782.2,"envelope":{"session_id":"rec-md-tour","seq":236,"kind":"message_delta","body":{"id":"m2","text":".Split(raw, \";"}}}
+{"at":12868.8,"envelope":{"session_id":"rec-md-tour","seq":237,"kind":"message_delta","body":{"id":"m2","text":"\")\n    result := make"}}}
+{"at":12899.7,"envelope":{"session_id":"rec-md-tour","seq":238,"kind":"message_delta","body":{"id":"m2","text":"([]int, len(fields))\n\n"}}}
+{"at":12945.7,"envelope":{"session_id":"rec-md-tour","seq":239,"kind":"message_delta","body":{"id":"m2","text":"    for i, field"}}}
+{"at":12977.5,"envelope":{"session_id":"rec-md-tour","seq":240,"kind":"message_delta","body":{"id":"m2","text":" := range fields {\n       "}}}
+{"at":13014.2,"envelope":{"session_id":"rec-md-tour","seq":241,"kind":"message_delta","body":{"id":"m2","text":" if field"}}}
+{"at":13044.9,"envelope":{"session_id":"rec-md-tour","seq":242,"kind":"message_delta","body":{"id":"m2","text":" == \"\" {\n"}}}
+{"at":13077.9,"envelope":{"session_id":"rec-md-tour","seq":243,"kind":"message_delta","body":{"id":"m2","text":"            result[i] = "}}}
+{"at":13123.1,"envelope":{"session_id":"rec-md-tour","seq":244,"kind":"message_delta","body":{"id":"m2","text":"0\n            continue"}}}
+{"at":13165,"envelope":{"session_id":"rec-md-tour","seq":245,"kind":"message_delta","body":{"id":"m2","text":"\n"}}}
+{"at":13204.3,"envelope":{"session_id":"rec-md-tour","seq":246,"kind":"message_delta","body":{"id":"m2","text":"        }\n\n        value, err := strconv.Atoi(field)\n"}}}
+{"at":13236.7,"envelope":{"session_id":"rec-md-tour","seq":247,"kind":"message_delta","body":{"id":"m2","text":"        if err != nil {\n            return nil // Mark the sequence malformed.\n        }\n        result[i] = value\n    }\n\n    return result\n}\n```\n\nParsing and execution should be separate phases. First, the parser recognizes syntax and produces an event"}}}
+{"at":13267.2,"envelope":{"session_id":"rec-md-tour","seq":248,"kind":"message_delta","body":{"id":"m2","text":" such as `Cursor"}}}
+{"at":13318.4,"envelope":{"session_id":"rec-md-tour","seq":249,"kind":"message_delta","body":{"id":"m2","text":"Position"}}}
+{"at":13393,"envelope":{"session_id":"rec-md-tour","seq":250,"kind":"message_delta","body":{"id":"m2","text":"{Row: 10, Column: 20}`"}}}
+{"at":13423.6,"envelope":{"session_id":"rec-md-tour","seq":251,"kind":"message_delta","body":{"id":"m2","text":". Then the screen model applies that event"}}}
+{"at":13473.8,"envelope":{"session_id":"rec-md-tour","seq":252,"kind":"message_delta","body":{"id":"m2","text":" while enforcing"}}}
+{"at":13508.8,"envelope":{"session_id":"rec-md-tour","seq":253,"kind":"message_delta","body":{"id":"m2","text":" boundaries, scrolling behavior,"}}}
+{"at":13540.9,"envelope":{"session_id":"rec-md-tour","seq":254,"kind":"message_delta","body":{"id":"m2","text":" and terminal"}}}
+{"at":13571.4,"envelope":{"session_id":"rec-md-tour","seq":255,"kind":"message_delta","body":{"id":"m2","text":" modes.\n\n##"}}}
+{"at":13628.4,"envelope":{"session_id":"rec-md-tour","seq":256,"kind":"message_delta","body":{"id":"m2","text":" Operating and"}}}
+{"at":13666.1,"envelope":{"session_id":"rec-md-tour","seq":257,"kind":"message_delta","body":{"id":"m2","text":" testing a parser\n\n"}}}
+{"at":13710.4,"envelope":{"session_id":"rec-md-tour","seq":258,"kind":"message_delta","body":{"id":"m2","text":"Terminal emulators"}}}
+{"at":13754.3,"envelope":{"session_id":"rec-md-tour","seq":259,"kind":"message_delta","body":{"id":"m2","text":" commonly receive data through a pseud"}}}
+{"at":13790.2,"envelope":{"session_id":"rec-md-tour","seq":260,"kind":"message_delta","body":{"id":"m2","text":"oterminal. A shell"}}}
+{"at":13835.7,"envelope":{"session_id":"rec-md-tour","seq":261,"kind":"message_delta","body":{"id":"m2","text":" or"}}}
+{"at":13917.8,"envelope":{"session_id":"rec-md-tour","seq":262,"kind":"message_delta","body":{"id":"m2","text":" full-screen application writes bytes to the master side, and the emulator reads them from the"}}}
+{"at":13963.4,"envelope":{"session_id":"rec-md-tour","seq":263,"kind":"message_delta","body":{"id":"m2","text":" corresponding stream"}}}
+{"at":14013.6,"envelope":{"session_id":"rec-md-tour","seq":264,"kind":"message_delta","body":{"id":"m2","text":". A simple"}}}
+{"at":14045.8,"envelope":{"session_id":"rec-md-tour","seq":265,"kind":"message_delta","body":{"id":"m2","text":" Bash command can"}}}
+{"at":14078.3,"envelope":{"session_id":"rec-md-tour","seq":266,"kind":"message_delta","body":{"id":"m2","text":" produce a"}}}
+{"at":14113.6,"envelope":{"session_id":"rec-md-tour","seq":267,"kind":"message_delta","body":{"id":"m2","text":" colored message:\n\n```bash\nprintf"}}}
+{"at":14161.4,"envelope":{"session_id":"rec-md-tour","seq":268,"kind":"message_delta","body":{"id":"m2","text":" '\\033[1;32"}}}
+{"at":14192,"envelope":{"session_id":"rec-md-tour","seq":269,"kind":"message_delta","body":{"id":"m2","text":"mready\\033[0"}}}
+{"at":14232.8,"envelope":{"session_id":"rec-md-tour","seq":270,"kind":"message_delta","body":{"id":"m2","text":"m\\n'\n```\n\nTesting"}}}
+{"at":14265.8,"envelope":{"session_id":"rec-md-tour","seq":271,"kind":"message_delta","body":{"id":"m2","text":" should cover"}}}
+{"at":14297.1,"envelope":{"session_id":"rec-md-tour","seq":272,"kind":"message_delta","body":{"id":"m2","text":" both valid"}}}
+{"at":14337.5,"envelope":{"session_id":"rec-md-tour","seq":273,"kind":"message_delta","body":{"id":"m2","text":" and hostile input"}}}
+{"at":14442.3,"envelope":{"session_id":"rec-md-tour","seq":274,"kind":"message_delta","body":{"id":"m2","text":":\n\n1. Render ordinary ASCII and UTF-8 text.\n2"}}}
+{"at":14475.5,"envelope":{"session_id":"rec-md-tour","seq":275,"kind":"message_delta","body":{"id":"m2","text":". Verify cursor movement"}}}
+{"at":14530.4,"envelope":{"session_id":"rec-md-tour","seq":276,"kind":"message_delta","body":{"id":"m2","text":" and line wrapping.\n3."}}}
+{"at":14565.4,"envelope":{"session_id":"rec-md-tour","seq":277,"kind":"message_delta","body":{"id":"m2","text":" Test sequences split"}}}
+{"at":14598,"envelope":{"session_id":"rec-md-tour","seq":278,"kind":"message_delta","body":{"id":"m2","text":" at every possible byte"}}}
+{"at":14631.6,"envelope":{"session_id":"rec-md-tour","seq":279,"kind":"message_delta","body":{"id":"m2","text":" boundary.\n4."}}}
+{"at":14673.3,"envelope":{"session_id":"rec-md-tour","seq":280,"kind":"message_delta","body":{"id":"m2","text":" Send unknown"}}}
+{"at":14711.1,"envelope":{"session_id":"rec-md-tour","seq":281,"kind":"message_delta","body":{"id":"m2","text":", incomplete, and excessively"}}}
+{"at":14744.6,"envelope":{"session_id":"rec-md-tour","seq":282,"kind":"message_delta","body":{"id":"m2","text":" long sequences.\n5. Confirm that"}}}
+{"at":14784.3,"envelope":{"session_id":"rec-md-tour","seq":283,"kind":"message_delta","body":{"id":"m2","text":" reset sequences"}}}
+{"at":14822.5,"envelope":{"session_id":"rec-md-tour","seq":284,"kind":"message_delta","body":{"id":"m2","text":" restore the expected state.\n\n"}}}
+{"at":14858,"envelope":{"session_id":"rec-md-tour","seq":285,"kind":"message_delta","body":{"id":"m2","text":"> A"}}}
+{"at":14891.5,"envelope":{"session_id":"rec-md-tour","seq":286,"kind":"message_delta","body":{"id":"m2","text":" terminal"}}}
+{"at":14966.1,"envelope":{"session_id":"rec-md-tour","seq":287,"kind":"message_delta","body":{"id":"m2","text":" parser should treat input as an un"}}}
+{"at":14998.7,"envelope":{"session_id":"rec-md-tour","seq":288,"kind":"message_delta","body":{"id":"m2","text":"trusted protocol"}}}
+{"at":15044.1,"envelope":{"session_id":"rec-md-tour","seq":289,"kind":"message_delta","body":{"id":"m2","text":" stream:"}}}
+{"at":15091.6,"envelope":{"session_id":"rec-md-tour","seq":290,"kind":"message_delta","body":{"id":"m2","text":" correct output"}}}
+{"at":15129,"envelope":{"session_id":"rec-md-tour","seq":291,"kind":"message_delta","body":{"id":"m2","text":" matters, but bounded memory"}}}
+{"at":15177,"envelope":{"session_id":"rec-md-tour","seq":292,"kind":"message_delta","body":{"id":"m2","text":" use and"}}}
+{"at":15211.8,"envelope":{"session_id":"rec-md-tour","seq":293,"kind":"message_delta","body":{"id":"m2","text":" recovery from malformed input"}}}
+{"at":15243.4,"envelope":{"session_id":"rec-md-tour","seq":294,"kind":"message_delta","body":{"id":"m2","text":" matter just as much.\n\n"}}}
+{"at":15288.1,"envelope":{"session_id":"rec-md-tour","seq":295,"kind":"message_delta","body":{"id":"m2","text":"## State"}}}
+{"at":15355.1,"envelope":{"session_id":"rec-md-tour","seq":296,"kind":"message_delta","body":{"id":"m2","text":"-machine overview\n\n"}}}
+{"at":15393.2,"envelope":{"session_id":"rec-md-tour","seq":297,"kind":"message_delta","body":{"id":"m2","text":"```mermaid\nflowchart"}}}
+{"at":15490.4,"envelope":{"session_id":"rec-md-tour","seq":298,"kind":"message_delta","body":{"id":"m2","text":" LR\n    G[Ground] -->|printable byte| G\n"}}}
+{"at":15524.5,"envelope":{"session_id":"rec-md-tour","seq":299,"kind":"message_delta","body":{"id":"m2","text":"    G -->|control byte"}}}
+{"at":15559.4,"envelope":{"session_id":"rec-md-tour","seq":300,"kind":"message_delta","body":{"id":"m2","text":"| G\n    G -->|ESC"}}}
+{"at":15594.8,"envelope":{"session_id":"rec-md-tour","seq":301,"kind":"message_delta","body":{"id":"m2","text":"| E"}}}
+{"at":15626.3,"envelope":{"session_id":"rec-md-tour","seq":302,"kind":"message_delta","body":{"id":"m2","text":"[Escape]\n    E -->|["}}}
+{"at":15682,"envelope":{"session_id":"rec-md-tour","seq":303,"kind":"message_delta","body":{"id":"m2","text":"| C[CSI Entry]\n    E -->"}}}
+{"at":15717.1,"envelope":{"session_id":"rec-md-tour","seq":304,"kind":"message_delta","body":{"id":"m2","text":"|other final"}}}
+{"at":15748.2,"envelope":{"session_id":"rec-md-tour","seq":305,"kind":"message_delta","body":{"id":"m2","text":" byte| G\n    C -->"}}}
+{"at":15784.7,"envelope":{"session_id":"rec-md-tour","seq":306,"kind":"message_delta","body":{"id":"m2","text":"|digit or semicolon| P"}}}
+{"at":15818.3,"envelope":{"session_id":"rec-md-tour","seq":307,"kind":"message_delta","body":{"id":"m2","text":"[CSI Parameters]\n   "}}}
+{"at":15849.4,"envelope":{"session_id":"rec-md-tour","seq":308,"kind":"message_delta","body":{"id":"m2","text":" P -->|digit or"}}}
+{"at":15882.1,"envelope":{"session_id":"rec-md-tour","seq":309,"kind":"message_delta","body":{"id":"m2","text":" semicolon| P\n    C -->"}}}
+{"at":15943.7,"envelope":{"session_id":"rec-md-tour","seq":310,"kind":"message_delta","body":{"id":"m2","text":"|final byte| D"}}}
+{"at":16015.7,"envelope":{"session_id":"rec-md-tour","seq":311,"kind":"message_delta","body":{"id":"m2","text":"[Dispatch]\n    P -->|final byte| D\n    D --> G\n"}}}
+{"at":16060.2,"envelope":{"session_id":"rec-md-tour","seq":312,"kind":"message_delta","body":{"id":"m2","text":"    E -->|"}}}
+{"at":16135.5,"envelope":{"session_id":"rec-md-tour","seq":313,"kind":"message_delta","body":{"id":"m2","text":"CAN or SUB| G\n"}}}
+{"at":16194.4,"envelope":{"session_id":"rec-md-tour","seq":314,"kind":"message_delta","body":{"id":"m2","text":"    P -->|CAN or"}}}
+{"at":16236.3,"envelope":{"session_id":"rec-md-tour","seq":315,"kind":"message_delta","body":{"id":"m2","text":" SUB| G\n```\n\nThe essential design"}}}
+{"at":16276.4,"envelope":{"session_id":"rec-md-tour","seq":316,"kind":"message_delta","body":{"id":"m2","text":" is therefore simple:"}}}
+{"at":16330.7,"envelope":{"session_id":"rec-md-tour","seq":317,"kind":"message_delta","body":{"id":"m2","text":" maintain explicit state, consume"}}}
+{"at":16392.2,"envelope":{"session_id":"rec-md-tour","seq":318,"kind":"message_delta","body":{"id":"m2","text":" bytes incrementally, recognize sequence"}}}
+{"at":16441.6,"envelope":{"session_id":"rec-md-tour","seq":319,"kind":"message_delta","body":{"id":"m2","text":" boundaries accurately, and dispatch operations only after a"}}}
+{"at":16563.3,"envelope":{"session_id":"rec-md-tour","seq":320,"kind":"message_delta","body":{"id":"m2","text":" complete sequence has been validated"}}}
+{"at":16596.4,"envelope":{"session_id":"rec-md-tour","seq":321,"kind":"message_delta","body":{"id":"m2","text":". The complexity lies in compatibility—terminals have accumulated decades of"}}}
+{"at":16645.9,"envelope":{"session_id":"rec-md-tour","seq":322,"kind":"message_delta","body":{"id":"m2","text":" extensions—but the same"}}}
+{"at":16699,"envelope":{"session_id":"rec-md-tour","seq":323,"kind":"message_delta","body":{"id":"m2","text":" state-machine discipline remains the foundation."}}}
+{"at":16866.4,"envelope":{"session_id":"rec-md-tour","seq":324,"kind":"message_end","body":{"id":"m2","role":"assistant","text":"## How a Terminal Emulator Parses Escape Sequences\n\nA terminal emulator is more than a window that displays text. It maintains a model of a virtual terminal: a grid of cells, a cursor position, text attributes, scroll regions, and modes such as insert mode or application cursor keys. Programs control this model by writing ordinary characters mixed with **escape sequences**.\n\nEscape sequences are byte-oriented protocols. Although modern terminals support many extensions, their parsing foundations come from standards such as VT100. The [VT100 reference](https://vt100.net) is an especially useful historical resource for understanding how these sequences evolved.\n\nAt a high level, a terminal parser repeatedly:\n\n1. Reads the next byte from a pseudoterminal or input stream.\n2. Interprets the byte according to its current parser state.\n3. Collects bytes that form a control sequence.\n4. Emits an action when the sequence is complete.\n5. Returns to a state where it can parse the next byte.\n\nThe important detail is that the same byte can have different meanings depending on the current state.\n\n### Bytes, characters, and controls\n\nTerminal protocols traditionally operate on bytes, not Unicode characters. ASCII control bytes occupy the range `0x00` through `0x1F`, while printable characters generally occupy `0x20` through `0x7E`. For example:\n\n- `BEL` (`0x07`) requests an audible or visual bell.\n- `BS` (`0x08`) moves the cursor backward.\n- `HT` (`0x09`) advances to the next tab stop.\n- `LF` (`0x0A`) moves the cursor down, possibly scrolling.\n- `ESC` (`0x1B`) begins many escape sequences.\n\nA terminal must usually process these controls before decoding UTF-8 text. Otherwise, a control byte embedded in a stream could be mistaken for part of a character sequence.\n\nThe simplest input is ordinary text. If the parser receives `A`, it asks the screen model to place `A` at the cursor, applies the current attributes, and advances the cursor. If it receives `ESC`, it cannot immediately perform an action because the next byte determines which escape sequence is being requested.\n\n## The parser as a state machine\n\nA robust implementation uses a finite-state machine rather than a collection of ad hoc string searches. Each incoming byte causes a transition from one state to another, possibly updating an intermediate buffer.\n\n| Parser state | Typical input | Meaning | Possible next state |\n|---|---|---|---|\n| Ground | Printable byte | Render a character | Ground |\n| Ground | `ESC` | Start an escape sequence | Escape |\n| Escape | `[` | Begin a CSI sequence | CSI entry |\n| CSI | Digits, `;` | Collect parameters | CSI parameter |\n| CSI parameter | Final byte | Dispatch an operation | Ground |\n\nThe **ground state** is the normal operating state. Printable bytes are rendered, while control characters are executed immediately. An `ESC` byte transitions the parser into an escape state.\n\nIn the **escape state**, the parser examines the next byte. A `[` usually starts a Control Sequence Introducer, commonly called CSI. CSI sequences are responsible for many everyday terminal operations, including cursor movement, screen clearing, and text styling.\n\nFor example:\n\n```text\nESC [ 3 1 m\n```\n\nThis is commonly written as `\\x1b[31m`. It selects a red foreground color. The parser sees:\n\n- `ESC`: leave ground state.\n- `[`: enter CSI parsing.\n- `31`: collect the parameter.\n- `m`: recognize the final byte and dispatch “set graphics rendition.”\n\nThe parser must distinguish **parameter bytes** from the **final byte**. In CSI syntax, digits and semicolons usually form a parameter string, while a byte in the final-byte range identifies the command. Thus, `ESC[2J` means “erase the display,” whereas `ESC[H` means “move the cursor,” even though both use the same general structure.\n\n### A simplified implementation\n\nA parser often stores its state, parameters, and any intermediate text in a small object. The following TypeScript example omits many real-world details but demonstrates the central transition logic:\n\n```typescript\ntype State = \"ground\" | \"escape\" | \"csi\";\n\nclass TerminalParser {\n  private state: State = \"ground\";\n  private params = \"\";\n\n  feed(bytes: Uint8Array) {\n    for (const byte of bytes) {\n      if (this.state === \"ground\") {\n        if (byte === 0x1b) this.state = \"escape\";\n        else if (byte >= 0x20 && byte <= 0x7e) this.print(byte);\n        else this.executeControl(byte);\n      } else if (this.state === \"escape\") {\n        if (byte === 0x5b) {\n          this.params = \"\";\n          this.state = \"csi\";\n        } else {\n          this.dispatchEscape(byte);\n          this.state = \"ground\";\n        }\n      } else {\n        this.parseCsiByte(byte);\n      }\n    }\n  }\n\n  private print(byte: number) {}\n  private executeControl(byte: number) {}\n  private dispatchEscape(byte: number) {}\n  private parseCsiByte(byte: number) {}\n}\n```\n\nA production parser must also handle malformed sequences. It should avoid getting permanently stuck if an application writes an incomplete escape sequence, and it must cope with sequences split across multiple reads. The operating system may deliver `ESC[`, `31`, and `m` in three separate chunks.\n\n## CSI parameters and dispatch\n\nCSI commands can have several parameters. `ESC[10;20H`, for example, typically moves the cursor to row 10 and column 20. The parser should not interpret `10;20` as an operation until it reaches the final byte `H`.\n\nA Go-style parameter parser might look like this:\n\n```go\nfunc parseParams(raw string) []int {\n    if raw == \"\" {\n        return []int{0} // Command-specific defaults are applied later.\n    }\n\n    fields := strings.Split(raw, \";\")\n    result := make([]int, len(fields))\n\n    for i, field := range fields {\n        if field == \"\" {\n            result[i] = 0\n            continue\n        }\n\n        value, err := strconv.Atoi(field)\n        if err != nil {\n            return nil // Mark the sequence malformed.\n        }\n        result[i] = value\n    }\n\n    return result\n}\n```\n\nParsing and execution should be separate phases. First, the parser recognizes syntax and produces an event such as `CursorPosition{Row: 10, Column: 20}`. Then the screen model applies that event while enforcing boundaries, scrolling behavior, and terminal modes.\n\n## Operating and testing a parser\n\nTerminal emulators commonly receive data through a pseudoterminal. A shell or full-screen application writes bytes to the master side, and the emulator reads them from the corresponding stream. A simple Bash command can produce a colored message:\n\n```bash\nprintf '\\033[1;32mready\\033[0m\\n'\n```\n\nTesting should cover both valid and hostile input:\n\n1. Render ordinary ASCII and UTF-8 text.\n2. Verify cursor movement and line wrapping.\n3. Test sequences split at every possible byte boundary.\n4. Send unknown, incomplete, and excessively long sequences.\n5. Confirm that reset sequences restore the expected state.\n\n> A terminal parser should treat input as an untrusted protocol stream: correct output matters, but bounded memory use and recovery from malformed input matter just as much.\n\n## State-machine overview\n\n```mermaid\nflowchart LR\n    G[Ground] -->|printable byte| G\n    G -->|control byte| G\n    G -->|ESC| E[Escape]\n    E -->|[| C[CSI Entry]\n    E -->|other final byte| G\n    C -->|digit or semicolon| P[CSI Parameters]\n    P -->|digit or semicolon| P\n    C -->|final byte| D[Dispatch]\n    P -->|final byte| D\n    D --> G\n    E -->|CAN or SUB| G\n    P -->|CAN or SUB| G\n```\n\nThe essential design is therefore simple: maintain explicit state, consume bytes incrementally, recognize sequence boundaries accurately, and dispatch operations only after a complete sequence has been validated. The complexity lies in compatibility—terminals have accumulated decades of extensions—but the same state-machine discipline remains the foundation."}}}
+{"at":16869.7,"envelope":{"session_id":"rec-md-tour","seq":325,"kind":"run_settled","body":{"state":"idle"}}}

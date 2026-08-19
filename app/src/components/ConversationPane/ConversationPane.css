@@ -124,11 +124,125 @@
 .conversation-message-text {
   color: var(--color-text-primary);
   font-size: var(--font-size-sm);
-  /* The host sends the agent's text verbatim, newlines and all. Markdown
-     rendering is a later slice; until then, preserve what it actually said. */
-  white-space: pre-wrap;
   word-break: break-word;
 }
+
+/* What the boundary falls back to when a message will not render: the text as
+   it arrived, newlines and all. */
+.conversation-message-text--raw {
+  white-space: pre-wrap;
+}
+
+/* Every rule below is theme-token only — the pane sits in the same light and
+   dark themes as the ticket and reader surfaces and must not invent its own
+   colors. */
+.conversation-message-text > :first-child { margin-top: 0; }
+.conversation-message-text > :last-child { margin-bottom: 0; }
+
+.conversation-message-text p {
+  margin: 0 0 8px 0;
+  line-height: 1.55;
+}
+
+.conversation-message-text h1,
+.conversation-message-text h2,
+.conversation-message-text h3,
+.conversation-message-text h4,
+.conversation-message-text h5,
+.conversation-message-text h6 {
+  margin: 16px 0 6px 0;
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--color-text-primary);
+}
+
+.conversation-message-text h1 { font-size: var(--font-size-lg); }
+.conversation-message-text h2 { font-size: var(--font-size-md); }
+.conversation-message-text h3,
+.conversation-message-text h4,
+.conversation-message-text h5,
+.conversation-message-text h6 { font-size: var(--font-size-sm); }
+
+.conversation-message-text ul,
+.conversation-message-text ol {
+  margin: 0 0 8px 0;
+  padding-left: 20px;
+}
+
+.conversation-message-text li { margin: 2px 0; }
+.conversation-message-text li > p { margin: 0; }
+
+.conversation-message-text blockquote {
+  margin: 0 0 8px 0;
+  padding-left: 10px;
+  border-left: 2px solid var(--color-border);
+  color: var(--color-text-secondary);
+}
+
+.conversation-message-text code {
+  font-family: 'JetBrains Mono', 'SF Mono', Monaco, Menlo, monospace;
+  font-size: var(--font-size-xs);
+  padding: 0.1em 0.3em;
+  border-radius: 3px;
+  background: var(--color-bg-input);
+}
+
+.conversation-message-text pre {
+  margin: 0 0 8px 0;
+  padding: 8px 10px;
+  border-radius: 4px;
+  background: var(--color-bg-input);
+  /* A code block wider than the pane scrolls inside itself; the transcript
+     never scrolls sideways. */
+  overflow-x: auto;
+}
+
+.conversation-message-text pre code {
+  padding: 0;
+  background: none;
+}
+
+/* The diagram a fence has not closed yet. Same box as a code block, dimmed, so
+   the reader sees the source arriving and the picture replaces it in place. */
+.markdown-diagram-pending {
+  opacity: 0.65;
+}
+
+.conversation-message-text table {
+  margin: 0 0 8px 0;
+  border-collapse: collapse;
+  display: block;
+  width: max-content;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.conversation-message-text th,
+.conversation-message-text td {
+  border: 1px solid var(--color-border);
+  padding: 4px 8px;
+  text-align: left;
+}
+
+.conversation-message-text th {
+  background: var(--color-bg-input);
+  font-weight: 600;
+}
+
+.conversation-message-text a {
+  color: var(--color-accent, #5b8cff);
+  text-decoration: none;
+}
+
+.conversation-message-text a:hover { text-decoration: underline; }
+
+.conversation-message-text hr {
+  margin: 12px 0;
+  border: 0;
+  border-top: 1px solid var(--color-border);
+}
+
+.conversation-message-text img { max-width: 100%; }
 
 .conversation-message--user .conversation-message-text {
   color: var(--color-text-secondary);
