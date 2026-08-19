@@ -149,6 +149,14 @@ const (
 	StateDiscarded = "discarded"
 )
 
+// The two pattern lists a human edits directly in the app. They name Config's
+// fields on the wire; a proposal names a Kind instead, because a proposal is a
+// change somebody asked for rather than a list somebody is editing.
+const (
+	ListAllow    = "allow"
+	ListHardDeny = "hard_deny"
+)
+
 // IsBroadPattern reports whether a pattern names nothing: with the wildcards and
 // whitespace removed there is no literal left, so it matches every call it is
 // asked about. Mirrors isBroadPattern in config.ts.
@@ -176,6 +184,29 @@ func ValidateAllowPattern(pattern string) error {
 				"A blanket allow is what the classifier exists to replace", pattern)
 	}
 	return nil
+}
+
+// ValidateDenyPattern refuses a hard-deny entry that names nothing. A broad
+// deny is safe — it refuses everything — so only an empty one is rejected, and
+// the direct editor and the proposal path refuse it for the same reason.
+func ValidateDenyPattern(pattern string) error {
+	if strings.TrimSpace(pattern) == "" {
+		return fmt.Errorf("deny pattern is empty")
+	}
+	return nil
+}
+
+// ValidatePattern dispatches to the validator for one of the two editable
+// lists, so a caller holding a list name does not have to switch on it.
+func ValidatePattern(list, pattern string) error {
+	switch list {
+	case ListAllow:
+		return ValidateAllowPattern(pattern)
+	case ListHardDeny:
+		return ValidateDenyPattern(pattern)
+	default:
+		return fmt.Errorf("unknown pattern list %q (want %s or %s)", list, ListAllow, ListHardDeny)
+	}
 }
 
 // ModelListSeparator is how a model proposal writes an ordered list into its
@@ -220,6 +251,8 @@ func FormatModelList(models []string) string {
 
 // ValidateProposal checks one proposed change before it is recorded. Refusing at
 // submission is what keeps an unpromotable entry out of the app's review list.
+// It shares ValidateAllowPattern and ValidateDenyPattern with the app's direct
+// editor, so the two paths refuse the same entries with the same words.
 func ValidateProposal(kind, target, value string) error {
 	value = strings.TrimSpace(value)
 	switch kind {
@@ -232,10 +265,7 @@ func ValidateProposal(kind, target, value string) error {
 		if target != "" {
 			return fmt.Errorf("a %s proposal takes no target", kind)
 		}
-		if value == "" {
-			return fmt.Errorf("deny pattern is empty")
-		}
-		return nil
+		return ValidateDenyPattern(value)
 	case KindModel:
 		if target != TargetClassifier && target != TargetEscalation {
 			return fmt.Errorf("model target must be %q or %q, got %q", TargetClassifier, TargetEscalation, target)

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/victorarias/attn/internal/automode"
+	"github.com/victorarias/attn/internal/config"
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/store"
 )
@@ -380,5 +381,143 @@ func TestAutoModeDenialFromAnUnownedRunIsRefused(t *testing.T) {
 	}
 	if len(denials) != 0 {
 		t.Fatalf("refused denials reached the log: %+v", denials)
+	}
+}
+
+// The app's direct edits, over the same wire the settings section uses.
+
+func automodePatternAdd(t *testing.T, d *Daemon, list, pattern string) protocol.AutoModePatternResultMessage {
+	t.Helper()
+	client := busTestClient()
+	d.handleAutoModePatternAdd(client, &protocol.AutoModePatternAddMessage{
+		Cmd: protocol.CmdAutoModePatternAdd, List: list, Pattern: pattern, RequestID: "r1",
+	})
+	var result protocol.AutoModePatternResultMessage
+	nextBusMessage(t, client, &result)
+	return result
+}
+
+func automodePatternRemove(t *testing.T, d *Daemon, list, pattern string) protocol.AutoModePatternResultMessage {
+	t.Helper()
+	client := busTestClient()
+	d.handleAutoModePatternRemove(client, &protocol.AutoModePatternRemoveMessage{
+		Cmd: protocol.CmdAutoModePatternRemove, List: list, Pattern: pattern, RequestID: "r1",
+	})
+	var result protocol.AutoModePatternResultMessage
+	nextBusMessage(t, client, &result)
+	return result
+}
+
+func TestAutoModePatternEditFromTheAppRoundTrips(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "daemon.sock"))
+
+	added := automodePatternAdd(t, d, automode.ListAllow, "git status*")
+	if !added.Success || added.Config == nil {
+		t.Fatalf("add failed: %q", protocol.Deref(added.Error))
+	}
+	if len(added.Config.Allow) != 1 || added.Config.Allow[0] != "git status*" {
+		t.Fatalf("allow after add = %v", added.Config.Allow)
+	}
+	// The CLI's read sees it, so `attn automode show` explains what a session
+	// launches with however the entry got there.
+	if got := automodeShow(t, d); len(got.Config.Allow) != 1 || got.Config.Allow[0] != "git status*" {
+		t.Fatalf("show after a direct add: %v", got.Config.Allow)
+	}
+
+	removed := automodePatternRemove(t, d, automode.ListAllow, "git status*")
+	if !removed.Success || removed.Config == nil {
+		t.Fatalf("remove failed: %q", protocol.Deref(removed.Error))
+	}
+	if len(removed.Config.Allow) != 0 {
+		t.Fatalf("allow after remove = %v", removed.Config.Allow)
+	}
+}
+
+// The client cannot derive the shipped list — it names this daemon's own port —
+// so the wire has to say which entries are built-in.
+func TestAutoModeStateNamesTheShippedHardDenies(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "daemon.sock"))
+	added := automodePatternAdd(t, d, automode.ListHardDeny, "*terraform apply*")
+	if !added.Success {
+		t.Fatalf("add hard deny: %q", protocol.Deref(added.Error))
+	}
+	shipped := automode.ShippedHardDeny(config.WSPort())
+	if len(added.Config.ShippedHardDeny) != len(shipped) {
+		t.Fatalf("shipped_hard_deny = %v, want %v", added.Config.ShippedHardDeny, shipped)
+	}
+	if len(added.Config.HardDeny) != len(shipped)+1 {
+		t.Fatalf("hard_deny = %v, want the shipped list plus one", added.Config.HardDeny)
+	}
+
+	client := busTestClient()
+	d.handleAutoModeGet(client, &protocol.AutoModeGetMessage{
+		Cmd: protocol.CmdAutoModeGet, RequestID: "r2",
+	})
+	var read protocol.AutoModeStateResultMessage
+	nextBusMessage(t, client, &read)
+	if !read.Success || len(read.Config.ShippedHardDeny) != len(shipped) {
+		t.Fatalf("automode_get shipped_hard_deny = %v", read.Config.ShippedHardDeny)
+	}
+}
+
+func TestAutoModePatternEditRefusalsReachTheApp(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "daemon.sock"))
+
+	broad := automodePatternAdd(t, d, automode.ListAllow, "*")
+	if broad.Success {
+		t.Fatal("a broad allow was accepted from the app")
+	}
+	if !strings.Contains(protocol.Deref(broad.Error), "must name something") {
+		t.Fatalf("broad allow refusal = %q", protocol.Deref(broad.Error))
+	}
+
+	shipped := automode.ShippedHardDeny(config.WSPort())[0]
+	refused := automodePatternRemove(t, d, automode.ListHardDeny, shipped)
+	if refused.Success {
+		t.Fatal("a shipped hard deny was removed from the app")
+	}
+	if !strings.Contains(protocol.Deref(refused.Error), "built-in") {
+		t.Fatalf("shipped removal refusal = %q", protocol.Deref(refused.Error))
+	}
+	// And it is still in force: the read resolves it back in whatever happened.
+	found := false
+	for _, pattern := range automodeShow(t, d).Config.HardDeny {
+		if pattern == shipped {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("%q left the hard deny list after a refused removal", shipped)
+	}
+}
+
+// Direct editing changes where a human writes, never who may write. A future
+// change that registers a unix-socket case for either verb fails here.
+func TestPatternEditingIsNotReachableOverTheUnixSocket(t *testing.T) {
+	d := newDaemonForTest(t)
+	for _, cmd := range []string{protocol.CmdAutoModePatternAdd, protocol.CmdAutoModePatternRemove} {
+		client, server := net.Pipe()
+		go func() {
+			d.handleConnection(server)
+		}()
+		payload := `{"cmd":"` + cmd + `","list":"allow","pattern":"git status*","request_id":"r1"}`
+		if _, err := client.Write([]byte(payload)); err != nil {
+			t.Fatalf("write %s: %v", cmd, err)
+		}
+		var resp protocol.Response
+		if err := json.NewDecoder(client).Decode(&resp); err != nil {
+			t.Fatalf("decode %s response: %v", cmd, err)
+		}
+		client.Close()
+		if resp.Ok {
+			t.Fatalf("%s was answered over the unix socket", cmd)
+		}
+		if got := protocol.Deref(resp.Error); !strings.Contains(got, "unknown command") {
+			t.Fatalf("%s was refused for the wrong reason: %q", cmd, got)
+		}
+	}
+	// And the config it could not reach is untouched.
+	if got := automodeShow(t, d); len(got.Config.Allow) != 0 {
+		t.Fatalf("allow = %v after a socket edit attempt", got.Config.Allow)
 	}
 }

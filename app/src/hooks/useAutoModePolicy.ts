@@ -9,7 +9,7 @@
 // Design: docs/plans/2026-08-16-pi-auto-mode.md.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { AutoModePromotion, AutoModeState } from './daemonAutoModeEvents';
+import type { AutoModePatternEdit, AutoModePromotion, AutoModeState } from './daemonAutoModeEvents';
 
 export interface AutoModePolicy {
   state: AutoModeState | null;
@@ -23,7 +23,19 @@ export interface AutoModePolicy {
   refresh: () => Promise<void>;
   promote: (id: number) => Promise<void>;
   discard: (id: number) => Promise<void>;
+  /**
+   * Direct list editing. These reject with the daemon's own refusal text — a
+   * broad allow, a duplicate, a shipped hard deny — so the section can print it
+   * beside the input rather than folding it into the section-wide error.
+   */
+  addPattern: (list: AutoModePatternList, pattern: string) => Promise<void>;
+  removePattern: (list: AutoModePatternList, pattern: string) => Promise<void>;
+  /** The list a direct edit is in flight for, so its controls can go quiet. */
+  editingList: AutoModePatternList | null;
 }
+
+/** The two editable lists, named as AutoModeConfigInfo names them. */
+export type AutoModePatternList = 'allow' | 'hard_deny';
 
 interface AutoModePolicyOptions {
   /** False while the surface is closed: nothing is read and nothing is held. */
@@ -31,17 +43,22 @@ interface AutoModePolicyOptions {
   getState: () => Promise<AutoModeState>;
   promoteProposal: (id: number) => Promise<AutoModePromotion>;
   discardProposal: (id: number) => Promise<AutoModePromotion>;
+  addPattern: (list: string, pattern: string) => Promise<AutoModePatternEdit>;
+  removePattern: (list: string, pattern: string) => Promise<AutoModePatternEdit>;
 }
 
 const message = (err: unknown, fallback: string): string =>
   err instanceof Error ? err.message : fallback;
 
 export function useAutoModePolicy(options: AutoModePolicyOptions): AutoModePolicy {
-  const { enabled, getState, promoteProposal, discardProposal } = options;
+  const {
+    enabled, getState, promoteProposal, discardProposal, addPattern, removePattern,
+  } = options;
   const [state, setState] = useState<AutoModeState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [resolvingID, setResolvingID] = useState<number | null>(null);
+  const [editingList, setEditingList] = useState<AutoModePatternList | null>(null);
   // Guards against an older answer landing after a newer one.
   const seqRef = useRef(0);
 
@@ -88,6 +105,34 @@ export function useAutoModePolicy(options: AutoModePolicyOptions): AutoModePolic
     [resolve, discardProposal],
   );
 
+  // A refusal is the caller's to show — it belongs beside the input that caused
+  // it, not in the section-wide error that survives a re-read. So this rethrows
+  // rather than parking the message in state, and only refreshes on success.
+  const edit = useCallback(async (
+    list: AutoModePatternList,
+    pattern: string,
+    action: (list: string, pattern: string) => Promise<AutoModePatternEdit>,
+  ) => {
+    setEditingList(list);
+    try {
+      await action(list, pattern);
+      // The daemon is authoritative about what the list now holds, the same way
+      // it is after a promotion.
+      await refresh();
+    } finally {
+      setEditingList(null);
+    }
+  }, [refresh]);
+
+  const add = useCallback(
+    (list: AutoModePatternList, pattern: string) => edit(list, pattern, addPattern),
+    [edit, addPattern],
+  );
+  const remove = useCallback(
+    (list: AutoModePatternList, pattern: string) => edit(list, pattern, removePattern),
+    [edit, removePattern],
+  );
+
   useEffect(() => {
     if (!enabled) {
       // Drop the snapshot on close: reopening reads a fresh one, and a stale
@@ -96,6 +141,7 @@ export function useAutoModePolicy(options: AutoModePolicyOptions): AutoModePolic
       setState(null);
       setError(null);
       setLoading(false);
+      setEditingList(null);
       return;
     }
     void refresh();
@@ -110,5 +156,8 @@ export function useAutoModePolicy(options: AutoModePolicyOptions): AutoModePolic
     refresh,
     promote,
     discard,
+    addPattern: add,
+    removePattern: remove,
+    editingList,
   };
 }

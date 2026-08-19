@@ -1,4 +1,4 @@
-// pi auto mode: the three results the auto mode settings section waits on.
+// pi auto mode: the four results the auto mode settings section waits on.
 //
 // Its own module rather than a case in the hook's switch, for the same reason
 // daemonBusEvents.ts is one — the domain is self-contained. Reached from the
@@ -23,6 +23,11 @@ export interface AutoModeState {
   denials: AutoModeDenialInfo[];
 }
 
+/** What a direct list edit answers with: the config it produced. */
+export interface AutoModePatternEdit {
+  config: AutoModeConfigInfo;
+}
+
 /** What a promote answers with: the resolved proposal and the config it produced. */
 export interface AutoModePromotion {
   proposal: AutoModeProposalInfo | null;
@@ -45,6 +50,7 @@ const emptyConfig = (): AutoModeConfigInfo => ({
   environment: [],
   allow: [],
   hard_deny: [],
+  shipped_hard_deny: [],
   classifier_models: [],
   escalation_models: [],
 });
@@ -57,6 +63,7 @@ const toConfig = (value: unknown): AutoModeConfigInfo => {
     environment: list<string>(raw.environment),
     allow: list<string>(raw.allow),
     hard_deny: list<string>(raw.hard_deny),
+    shipped_hard_deny: list<string>(raw.shipped_hard_deny),
     classifier_models: list<string>(raw.classifier_models),
     escalation_models: list<string>(raw.escalation_models),
   };
@@ -67,6 +74,9 @@ const toState = (event: AutoModeDaemonEvent): AutoModeState => ({
   proposals: list<AutoModeProposalInfo>(event.proposals),
   denials: list<AutoModeDenialInfo>(event.denials),
 });
+
+const toPatternEdit = (event: AutoModeDaemonEvent): AutoModePatternEdit | undefined =>
+  event.config === undefined ? undefined : { config: toConfig(event.config) };
 
 const toPromotion = (event: AutoModeDaemonEvent): AutoModePromotion => ({
   proposal: (event.proposal as AutoModeProposalInfo | undefined) ?? null,
@@ -100,6 +110,28 @@ export function handleAutoModeDaemonEvent(
         'Promoting the proposal failed',
       );
       return true;
+    // One event answers both edits, so the settle is tried under each command's
+    // key; only the one actually in flight has a waiter, and settlePendingRequest
+    // reports a miss rather than treating it as a failure.
+    case 'automode_pattern_result': {
+      const settled = settlePendingRequest(
+        pending,
+        'automode_pattern_add',
+        event,
+        toPatternEdit,
+        'Adding the pattern failed',
+      );
+      if (!settled) {
+        settlePendingRequest(
+          pending,
+          'automode_pattern_remove',
+          event,
+          toPatternEdit,
+          'Removing the pattern failed',
+        );
+      }
+      return true;
+    }
     case 'automode_discard_result':
       settlePendingRequest(
         pending,

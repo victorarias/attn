@@ -1,0 +1,8 @@
+kind: added
+area: automode
+change: >
+  Auto mode's allow and hard-deny lists are editable by hand in Settings.
+  Add or remove a pattern in the same place proposals get promoted; the
+  built-in hard denies that stop a session from rewriting its own policy
+  are marked as such and cannot be removed. Agents still cannot touch the
+  lists — proposing one and having a person promote it is unchanged.

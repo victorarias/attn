@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/victorarias/attn/internal/automode"
+	"github.com/victorarias/attn/internal/config"
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/store"
 )
@@ -254,6 +255,7 @@ func autoModeConfigInfo(cfg automode.Config) protocol.AutoModeConfigInfo {
 		Environment:      nonNilStrings(cfg.Environment),
 		Allow:            nonNilStrings(cfg.Allow),
 		HardDeny:         nonNilStrings(cfg.HardDeny),
+		ShippedHardDeny:  nonNilStrings(automode.ShippedHardDeny(config.WSPort())),
 		ClassifierModels: nonNilStrings(cfg.ClassifierModels),
 		EscalationModels: nonNilStrings(cfg.EscalationModels),
 	}

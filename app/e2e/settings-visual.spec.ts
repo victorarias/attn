@@ -7,7 +7,7 @@ const viewports = [
   { name: 'mobile', width: 430, height: 860 },
 ] as const;
 
-const sections = ['general', 'connectivity', 'plugins', 'agents', 'review', 'hygiene'] as const;
+const sections = ['general', 'workspace', 'connectivity', 'plugins', 'agents', 'keeper', 'hygiene'] as const;
 
 test.describe('Settings visual harness', () => {
   for (const viewport of viewports) {
