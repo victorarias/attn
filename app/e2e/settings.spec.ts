@@ -23,7 +23,7 @@ test.describe('Settings', () => {
 
     // Verify workbench navigation exposes separated settings areas
     await expect(modal.locator('h3', { hasText: 'Mobile Web Client' })).toBeVisible();
-    await modal.getByTestId('settings-nav-general').click();
+    await modal.getByTestId('settings-nav-workspace').click();
     await expect(modal.locator('h3', { hasText: 'Projects Directory' })).toBeVisible();
     await modal.getByTestId('settings-nav-hygiene').click();
     await expect(modal.locator('h3', { hasText: 'Muted Repositories' })).toBeVisible();
@@ -64,7 +64,7 @@ test.describe('Settings', () => {
     await page.getByTestId('settings-button').click();
     const modal = page.getByTestId('settings-modal');
     await expect(modal).toBeVisible();
-    await modal.getByTestId('settings-nav-general').click();
+    await modal.getByTestId('settings-nav-workspace').click();
 
     // Type a projects directory
     const projectsDir = '/tmp/attn-e2e-projects-manual';
@@ -79,7 +79,7 @@ test.describe('Settings', () => {
     // Reopen settings
     await page.getByTestId('settings-button').click();
     await expect(modal).toBeVisible();
-    await modal.getByTestId('settings-nav-general').click();
+    await modal.getByTestId('settings-nav-workspace').click();
 
     // Value should be preserved
     await expect(input).toHaveValue(projectsDir);
