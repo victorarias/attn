@@ -1362,7 +1362,17 @@ func (d *Daemon) handleSeedTransition(conn net.Conn, msg *protocol.SeedTransitio
 		d.sendGardenError(conn, string(verb), err)
 		return
 	}
-	result := &protocol.SeedTransitionResult{Seed: seedToProtocol(seed, doc, d.gardenReady()[seed.ID])}
+	result := &protocol.SeedTransitionResult{Seed: seedToProtocol(seed, doc, false)}
+	// One read answers both readiness and plot progress. Progress rides on the
+	// moved seed so the caller can see what its move left behind — the CLI warns
+	// on a close that strands open children — and a failed read leaves both
+	// empty rather than failing a move that committed.
+	if read, err := d.readGarden(); err == nil {
+		result.Seed.Ready = read.ready[seed.ID]
+		if progress, ok := read.progress(seed.ID); ok {
+			result.Seed.PlotProgress = progress
+		}
+	}
 	// Tending is the pickup, so it is the move that primes: whoever just claimed
 	// the seed reads what the last tender wrote to them before doing any work.
 	if verb == garden.VerbTend {
