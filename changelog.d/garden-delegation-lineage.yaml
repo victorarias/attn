@@ -1,4 +1,4 @@
-kind: improvement
+kind: changed
 area: garden
 change: >
   Delegation lineage is visible by construction: a delegation launched from a
