@@ -1216,6 +1216,14 @@ CREATE TABLE IF NOT EXISTS app_reconcile_progress (
 		CREATE INDEX IF NOT EXISTS idx_automation_runs_ticket_created
 			ON automation_runs(ticket_id, created_at DESC, id DESC);
 	`},
+	// The garden replaced the ticket board; the independent font scale moved
+	// with it. Carry the stored value over rather than resetting anyone who
+	// had set one, and only when the new key is not already written.
+	{118, "the ticket board's font scale becomes the garden's", `
+		INSERT OR IGNORE INTO settings (key, value)
+			SELECT 'gardenScale', value FROM settings WHERE key = 'ticketBoardScale';
+		DELETE FROM settings WHERE key = 'ticketBoardScale';
+	`},
 }
 
 // migration99SQL is everything migration 99 does after its guarded ALTER.

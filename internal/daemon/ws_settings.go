@@ -22,9 +22,10 @@ import (
 const (
 	SettingProjectsDirectory = "projects_directory"
 	SettingUIScale           = "uiScale"
-	// SettingTicketBoardScale scales ticket-board fonts independently of
-	// uiScale; empty => follows uiScale.
-	SettingTicketBoardScale  = "ticketBoardScale"
+	// SettingGardenScale scales garden fonts independently of uiScale;
+	// empty => follows uiScale. Stored as "ticketBoardScale" before the
+	// garden replaced the ticket board; migration 118 carries those over.
+	SettingGardenScale       = "gardenScale"
 	SettingClaudeExecutable  = "claude_executable"
 	SettingCodexExecutable   = "codex_executable"
 	SettingCopilotExecutable = "copilot_executable"
@@ -544,7 +545,7 @@ func (d *Daemon) validateSetting(key, value string) error {
 		return validateProjectsDirectory(value)
 	case SettingUIScale:
 		return validateUIScale(value)
-	case SettingTicketBoardScale:
+	case SettingGardenScale:
 		if strings.TrimSpace(value) == "" {
 			return nil
 		}

@@ -1,0 +1,8 @@
+kind: fixed
+area: garden
+change: >
+  Settings → The garden → font size sticks across a restart. The garden
+  inherited its independent font scale from the ticket board it replaced, but
+  kept writing under a new name the daemon did not accept, so every change was
+  refused and quietly forgotten on the next launch. A scale saved under the old
+  ticket-board name carries over.
