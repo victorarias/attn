@@ -282,6 +282,10 @@ button.automations-panel__run-row-main {
   font-size: var(--font-size-xs);
 }
 
+.automations-panel__run-row-main > .automation-provenance {
+  width: 100%;
+}
+
 .automations-panel__run-error {
   color: var(--color-error);
   font-family: var(--font-mono, monospace);

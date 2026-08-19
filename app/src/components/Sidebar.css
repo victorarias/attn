@@ -472,6 +472,22 @@
   white-space: nowrap;
 }
 
+.sidebar-session-identity {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.sidebar-session-identity > .session-label {
+  flex: initial;
+}
+
+.sidebar-session-identity > .automation-provenance {
+  max-width: 100%;
+}
+
 .session-endpoint-badge {
   align-self: flex-start;
   border: 1px solid rgba(255, 255, 255, 0.08);

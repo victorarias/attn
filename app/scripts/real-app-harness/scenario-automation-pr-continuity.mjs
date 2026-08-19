@@ -200,6 +200,11 @@ function invocations(log) {
   return fs.readFileSync(log, 'utf8').trim().split('\n').filter(Boolean).map(JSON.parse);
 }
 
+async function captureDOM(client, selector, target) {
+  const screenshot = await client.request('capture_screenshot_data', { selector });
+  fs.writeFileSync(target, Buffer.from(screenshot.pngBase64, 'base64'));
+}
+
 async function main() {
   const { options, help } = parseArgs(process.argv.slice(2));
   if (help) {
@@ -261,9 +266,67 @@ async function main() {
       sessionID = runRow.session_id;
       ticketID = runRow.ticket_id;
       worktree = observer.getSession(sessionID)?.directory || path.join(dataDirForProfile(profile), 'automation', 'worktrees', sessionID, 'repo');
-      await poll(() => invocations(probe.log).length >= 1 ? invocations(probe.log)[0] : null, 'first Codex launch');
+      const firstLaunch = await poll(() => invocations(probe.log).length >= 1 ? invocations(probe.log)[0] : null, 'first Codex launch');
+      const prompt = firstLaunch.argv.at(-1) || '';
+      runner.assert(
+        prompt.includes('Repository: mock.github.local/owner/repo')
+          && prompt.includes('Pull request: #42')
+          && prompt.includes('URL: https://mock.github.local/owner/repo/pull/42')
+          && prompt.includes(`Checked-out head: ${fixture.sha}`),
+        'agent prompt names the exact review target',
+      );
+      runner.assert(
+        !prompt.includes('Automation live-test review')
+          && !prompt.includes('Untrusted provider payload'),
+        'provider-authored title and body stay out of the instruction block',
+      );
       runner.assert(fs.existsSync(worktree), 'initial exact-SHA worktree exists', { worktree });
       runner.assert(execFileSync('git', ['rev-parse', 'HEAD'], { cwd: worktree, encoding: 'utf8' }).trim() === fixture.sha, 'initial worktree is pinned to provider SHA');
+    });
+    await runner.step('assert_visible_provenance', async () => {
+      await client.request('select_session', { sessionId: sessionID });
+      const sessionUi = await poll(async () => {
+        const state = await client.request('get_session_ui_state', { sessionId: sessionID });
+        return state.sidebarItem?.automation && state.paneAutomation ? state : null;
+      }, 'session provenance in sidebar and pane header');
+      runner.assert(
+        sessionUi.sidebarItem.automation.includes('Slice 4 packaged continuity proof')
+          && sessionUi.sidebarItem.automation.includes('#42'),
+        'sidebar identifies the automation and pull request',
+        { automation: sessionUi.sidebarItem.automation },
+      );
+      runner.assert(
+        sessionUi.paneAutomation.includes('Slice 4 packaged continuity proof')
+          && sessionUi.paneAutomation.includes('repo#42'),
+        'pane header identifies the automation and pull request',
+        { automation: sessionUi.paneAutomation },
+      );
+      await captureDOM(client, '.sidebar', path.join(runner.runDir, 'sidebar-provenance.png'));
+      await captureDOM(client, '.workspace-pane-header', path.join(runner.runDir, 'pane-provenance.png'));
+
+      const ticketUi = await client.request('ticket_open_detail', { ticketId: ticketID });
+      runner.assert(
+        ticketUi.automation.includes('Slice 4 packaged continuity proof')
+          && ticketUi.automation.includes('repo#42')
+          && ticketUi.automation.includes('Automation live-test review'),
+        'ticket detail shows full automation and pull-request provenance',
+        { automation: ticketUi.automation },
+      );
+      await captureDOM(client, '[data-testid="ticket-detail-panel"]', path.join(runner.runDir, 'ticket-provenance.png'));
+      await client.request('ticket_close_detail');
+
+      await client.request('automations_open_panel');
+      const automationsUi = await client.request('automations_select_definition', { definitionId: definitionID });
+      const initialRun = automationsUi.runs.find((run) => run.id === (observer.getSession(sessionID)?.automation?.run_id || ''))
+        || automationsUi.runs[0];
+      runner.assert(
+        initialRun?.automation.includes('Slice 4 packaged continuity proof')
+          && initialRun.automation.includes('repo#42'),
+        'automation run history names the target instead of exposing only an occurrence key',
+        { automation: initialRun?.automation || '' },
+      );
+      await captureDOM(client, '[data-testid="automations-panel"]', path.join(runner.runDir, 'run-provenance.png'));
+      await client.request('dom_click', { selector: '.automations-panel__close' });
     });
     await runner.step('seed_resume_and_stop_origin', async () => {
       await socketRequest(resources.socket, { cmd: 'set_session_resume_id', id: sessionID, resume_session_id: seed.id });

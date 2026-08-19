@@ -59,6 +59,34 @@ describe('SessionTerminalWorkspace pane header', () => {
     expect(container.querySelector('.workspace-pane-title')?.textContent).toBe(GENERATED_NAME);
   });
 
+  it('keeps automation and PR provenance visible below the session name', () => {
+    renderLonePane({
+      workspaceSessions: [{
+        id: 'sess-1',
+        label: 'feed-nexus-web#101 · gpt-5.6-sol',
+        agent: 'claude',
+        cwd: '/tmp/project',
+        automation: {
+          run_id: 'run-1',
+          definition_id: 'review-sol',
+          definition_name: 'Requested PR review - GPT Sol medium',
+          trigger_type: 'github_review_requested',
+          pull_request: {
+            repository: 'ghe.spotify.net/audiobook-feed-mgmt/feed-nexus-web',
+            number: 101,
+            url: 'https://ghe.spotify.net/audiobook-feed-mgmt/feed-nexus-web/pull/101',
+            title: 'Fix validation race',
+            head_sha: '82f1c7a000000000000000000000000000000000',
+          },
+        },
+      }],
+    });
+
+    expect(screen.getByText('GPT Sol medium')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'feed-nexus-web#101 ↗' })).toBeInTheDocument();
+    expect(screen.getByText('Fix validation race')).toBeInTheDocument();
+  });
+
   it('is not a drag handle on a lone tile, which has nowhere to move to', () => {
     const { container } = renderLonePane();
 

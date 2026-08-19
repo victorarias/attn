@@ -620,6 +620,7 @@ function collectSessionUiState(
       ? {
           text: sidebarItem.textContent || '',
           bounds: rectSnapshot(sidebarItem),
+          automation: sidebarItem.querySelector('.automation-provenance')?.textContent?.trim() || '',
         }
       : null,
     workspaceBounds: workspaceDom.workspaceRoot?.bounds ?? null,
@@ -630,6 +631,7 @@ function collectSessionUiState(
       splits: collectSplitDomMetrics(workspaceId),
     },
     agentPaneBounds: rectSnapshot(firstAgentPane),
+    paneAutomation: firstAgentPane?.querySelector('.automation-provenance')?.textContent?.trim() || '',
     settling: settlingChip instanceof HTMLElement
       ? {
           text: settlingChip.textContent?.trim() || '',
@@ -1418,6 +1420,7 @@ function collectTicketDetailUiState() {
     present: true,
     ticketId: text('.ticket-detail-id'),
     title: text('.ticket-detail-title'),
+    automation: text('.automation-provenance'),
     // The raw status comes from the select; the badge is the human label.
     status: statusSelect ? statusSelect.value : '',
     statusBadge: text('.ticket-status-badge'),
@@ -1482,6 +1485,7 @@ function collectAutomationsUiState() {
         id: row.getAttribute('data-run-id') ?? '',
         state: row.getAttribute('data-state') ?? '',
         navigable: Boolean(row.querySelector('button.automations-panel__run-row-main')),
+        automation: row.querySelector('.automation-provenance')?.textContent?.trim() ?? '',
         lastError: row.querySelector('.automations-panel__run-error')?.textContent?.trim() ?? '',
       }))
     : [];

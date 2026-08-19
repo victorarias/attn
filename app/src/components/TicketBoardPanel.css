@@ -222,6 +222,10 @@
   overflow: hidden;
 }
 
+.tb-card > .automation-provenance--compact {
+  max-width: 100%;
+}
+
 .tb-card-meta {
   display: flex;
   align-items: center;

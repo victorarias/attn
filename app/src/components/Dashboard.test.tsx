@@ -37,6 +37,42 @@ vi.mock('@tauri-apps/plugin-opener', () => ({
 }));
 
 describe('Dashboard sessions', () => {
+  it('shows automation and pull-request provenance on Home', () => {
+    render(
+      <Dashboard
+        sessions={[{
+          id: 'review-1',
+          label: 'feed-nexus-web#101 · gpt-5.6-sol',
+          state: 'working',
+          cwd: '/repo/feed-nexus-web',
+          automation: {
+            run_id: 'run-1',
+            definition_id: 'review-sol',
+            definition_name: 'Requested PR review - GPT Sol medium',
+            trigger_type: 'github_review_requested',
+            pull_request: {
+              repository: 'ghe.spotify.net/audiobook-feed-mgmt/feed-nexus-web',
+              number: 101,
+              url: 'https://ghe.spotify.net/audiobook-feed-mgmt/feed-nexus-web/pull/101',
+              title: 'Fix validation race',
+              head_sha: '82f1c7a000000000000000000000000000000000',
+            },
+          },
+        }]}
+        prs={[]}
+        isLoading={false}
+        onSelectSession={vi.fn()}
+        onNewSession={vi.fn()}
+        onOpenSettings={vi.fn()}
+      />
+    );
+
+    const row = screen.getByTestId('session-review-1');
+    expect(row).toHaveTextContent('GPT Sol medium');
+    expect(row).toHaveTextContent('feed-nexus-web#101');
+    expect(row).toHaveTextContent('Fix validation race');
+  });
+
   it('shows pending approval sessions on home screen', () => {
     render(
       <Dashboard

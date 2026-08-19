@@ -13,6 +13,8 @@ import { compareTurnOrder, compareWakeOrder, formatTurnAge } from '../utils/queu
 import { formatWakeTime, isSnoozed } from '../utils/snoozeDurations';
 import { useNow, TURN_AGE_TICK_MS } from '../hooks/useNow';
 import appIcon from '../assets/icon.png';
+import type { AutomationProvenance as AutomationProvenanceValue } from '../types/generated';
+import { AutomationProvenance } from './AutomationProvenance';
 import './Dashboard.css';
 
 type DashboardSession = {
@@ -38,6 +40,7 @@ type DashboardSession = {
   // turned the feature on and the agent has written something since.
   activity?: string;
   activityAt?: string;
+  automation?: AutomationProvenanceValue;
 };
 
 /**
@@ -256,6 +259,7 @@ export function Dashboard({
       <StateIndicator state={s.state} size="sm" seed={s.id} />
       <div className="session-row-main">
         <span className="session-name">{s.label}</span>
+        <AutomationProvenance provenance={s.automation} interactive />
         {renderActivityLine(s)}
       </div>
       {s.chiefOfStaff && <ChiefOfStaffBadge compact />}

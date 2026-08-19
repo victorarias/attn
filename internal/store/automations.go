@@ -87,6 +87,16 @@ type AutomationOccurrence struct {
 	ObservedAt, CreatedAt                                              time.Time
 }
 
+// AutomationProvenanceRecord is the store-side material needed to build the
+// protocol's derived automation provenance. Definition and occurrence data stay
+// canonical in their own tables; callers render this joined read model.
+type AutomationProvenanceRecord struct {
+	RunID, DefinitionID, DefinitionName, DefinitionSpecJSON string
+	SessionID, TicketID                                     string
+	Provider, SubjectKey, PayloadJSON                       string
+	CreatedAt                                               time.Time
+}
+
 type AutomationRunReservation struct {
 	RunID, OccurrenceID, TicketID, SessionID, WorkspaceID, PaneID string
 }
@@ -1164,6 +1174,7 @@ func (s *Store) ListAutomationRuns(definitionID string) ([]AutomationRun, error)
 type AutomationRunWithOccurrenceKey struct {
 	AutomationRun
 	OccurrenceKey string
+	Provenance    AutomationProvenanceRecord
 }
 
 // ListAutomationRunsWithOccurrenceKeys returns up to limit runs for
@@ -1176,9 +1187,11 @@ func (s *Store) ListAutomationRunsWithOccurrenceKeys(definitionID string, limit 
 		return nil, nil
 	}
 	rows, err := s.db.Query(`
-		SELECT `+automationRunColumnsQualified+`,o.occurrence_key
+		SELECT `+automationRunColumnsQualified+`,o.occurrence_key,
+			d.name,d.spec_json,o.provider,o.subject_key,o.payload_json
 		FROM automation_runs r
 		JOIN automation_occurrences o ON o.id=r.occurrence_id
+		JOIN automation_definitions d ON d.id=r.definition_id
 		WHERE r.definition_id=?
 		ORDER BY r.created_at DESC
 		LIMIT ?
@@ -1191,13 +1204,19 @@ func (s *Store) ListAutomationRunsWithOccurrenceKeys(definitionID string, limit 
 	for rows.Next() {
 		var r AutomationRun
 		var created, updated, delivered, occurrenceKey string
-		if err := rows.Scan(&r.ID, &r.DefinitionID, &r.OccurrenceID, &r.DefinitionRevision, &r.SnapshotJSON, &r.State, &r.CancelReason, &r.Attempts, &r.LastError, &r.TicketID, &r.SessionID, &r.WorkspaceID, &r.PaneID, &r.ResolvedLocationJSON, &created, &updated, &delivered, &occurrenceKey); err != nil {
+		var provenance AutomationProvenanceRecord
+		if err := rows.Scan(&r.ID, &r.DefinitionID, &r.OccurrenceID, &r.DefinitionRevision, &r.SnapshotJSON, &r.State, &r.CancelReason, &r.Attempts, &r.LastError, &r.TicketID, &r.SessionID, &r.WorkspaceID, &r.PaneID, &r.ResolvedLocationJSON, &created, &updated, &delivered, &occurrenceKey, &provenance.DefinitionName, &provenance.DefinitionSpecJSON, &provenance.Provider, &provenance.SubjectKey, &provenance.PayloadJSON); err != nil {
 			return nil, err
 		}
 		r.CreatedAt = parseTicketTime(created)
 		r.UpdatedAt = parseTicketTime(updated)
 		r.DeliveredAt = parseOptionalAutomationTime(delivered)
-		out = append(out, AutomationRunWithOccurrenceKey{AutomationRun: r, OccurrenceKey: occurrenceKey})
+		provenance.RunID = r.ID
+		provenance.DefinitionID = r.DefinitionID
+		provenance.SessionID = r.SessionID
+		provenance.TicketID = r.TicketID
+		provenance.CreatedAt = r.CreatedAt
+		out = append(out, AutomationRunWithOccurrenceKey{AutomationRun: r, OccurrenceKey: occurrenceKey, Provenance: provenance})
 	}
 	return out, rows.Err()
 }
@@ -1215,9 +1234,11 @@ func (s *Store) LatestAutomationRunPerDefinition() (map[string]AutomationRunWith
 		return nil, nil
 	}
 	rows, err := s.db.Query(`
-		SELECT ` + automationRunColumnsQualified + `,o.occurrence_key
+		SELECT ` + automationRunColumnsQualified + `,o.occurrence_key,
+			d.name,d.spec_json,o.provider,o.subject_key,o.payload_json
 		FROM automation_runs r
 		JOIN automation_occurrences o ON o.id=r.occurrence_id
+		JOIN automation_definitions d ON d.id=r.definition_id
 		WHERE r.id IN (
 			SELECT id FROM (
 				SELECT id, definition_id,
@@ -1234,15 +1255,125 @@ func (s *Store) LatestAutomationRunPerDefinition() (map[string]AutomationRunWith
 	for rows.Next() {
 		var r AutomationRun
 		var created, updated, delivered, occurrenceKey string
-		if err := rows.Scan(&r.ID, &r.DefinitionID, &r.OccurrenceID, &r.DefinitionRevision, &r.SnapshotJSON, &r.State, &r.CancelReason, &r.Attempts, &r.LastError, &r.TicketID, &r.SessionID, &r.WorkspaceID, &r.PaneID, &r.ResolvedLocationJSON, &created, &updated, &delivered, &occurrenceKey); err != nil {
+		var provenance AutomationProvenanceRecord
+		if err := rows.Scan(&r.ID, &r.DefinitionID, &r.OccurrenceID, &r.DefinitionRevision, &r.SnapshotJSON, &r.State, &r.CancelReason, &r.Attempts, &r.LastError, &r.TicketID, &r.SessionID, &r.WorkspaceID, &r.PaneID, &r.ResolvedLocationJSON, &created, &updated, &delivered, &occurrenceKey, &provenance.DefinitionName, &provenance.DefinitionSpecJSON, &provenance.Provider, &provenance.SubjectKey, &provenance.PayloadJSON); err != nil {
 			return nil, err
 		}
 		r.CreatedAt = parseTicketTime(created)
 		r.UpdatedAt = parseTicketTime(updated)
 		r.DeliveredAt = parseOptionalAutomationTime(delivered)
-		out[r.DefinitionID] = AutomationRunWithOccurrenceKey{AutomationRun: r, OccurrenceKey: occurrenceKey}
+		provenance.RunID = r.ID
+		provenance.DefinitionID = r.DefinitionID
+		provenance.SessionID = r.SessionID
+		provenance.TicketID = r.TicketID
+		provenance.CreatedAt = r.CreatedAt
+		out[r.DefinitionID] = AutomationRunWithOccurrenceKey{AutomationRun: r, OccurrenceKey: occurrenceKey, Provenance: provenance}
 	}
 	return out, rows.Err()
+}
+
+// ListLatestAutomationProvenanceRecords returns the newest joined provenance
+// per session or ticket. A continuity thread therefore exposes its latest
+// accepted occurrence without every session snapshot scanning retained history.
+func (s *Store) ListLatestAutomationProvenanceRecords() ([]AutomationProvenanceRecord, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.db == nil {
+		return nil, nil
+	}
+	rows, err := s.db.Query(`
+		SELECT r.id,r.definition_id,d.name,d.spec_json,r.session_id,r.ticket_id,
+			o.provider,o.subject_key,o.payload_json,r.created_at
+		FROM automation_runs r
+		JOIN automation_occurrences o ON o.id=r.occurrence_id
+		JOIN automation_definitions d ON d.id=r.definition_id
+		WHERE r.id IN (
+			SELECT id FROM (
+				SELECT id,
+					ROW_NUMBER() OVER (PARTITION BY session_id ORDER BY created_at DESC,id DESC) AS session_rank,
+					ROW_NUMBER() OVER (PARTITION BY ticket_id ORDER BY created_at DESC,id DESC) AS ticket_rank
+				FROM automation_runs
+			) WHERE session_rank=1 OR ticket_rank=1
+		)
+		ORDER BY r.created_at DESC,r.id DESC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []AutomationProvenanceRecord
+	for rows.Next() {
+		var record AutomationProvenanceRecord
+		var created string
+		if err := rows.Scan(&record.RunID, &record.DefinitionID, &record.DefinitionName, &record.DefinitionSpecJSON, &record.SessionID, &record.TicketID, &record.Provider, &record.SubjectKey, &record.PayloadJSON, &created); err != nil {
+			return nil, err
+		}
+		record.CreatedAt = parseTicketTime(created)
+		out = append(out, record)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) GetAutomationProvenanceRecord(runID string) (*AutomationProvenanceRecord, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.db == nil {
+		return nil, nil
+	}
+	var record AutomationProvenanceRecord
+	var created string
+	err := s.db.QueryRow(`
+		SELECT r.id,r.definition_id,d.name,d.spec_json,r.session_id,r.ticket_id,
+			o.provider,o.subject_key,o.payload_json,r.created_at
+		FROM automation_runs r
+		JOIN automation_occurrences o ON o.id=r.occurrence_id
+		JOIN automation_definitions d ON d.id=r.definition_id
+		WHERE r.id=?
+	`, runID).Scan(&record.RunID, &record.DefinitionID, &record.DefinitionName, &record.DefinitionSpecJSON, &record.SessionID, &record.TicketID, &record.Provider, &record.SubjectKey, &record.PayloadJSON, &created)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	record.CreatedAt = parseTicketTime(created)
+	return &record, nil
+}
+
+func (s *Store) GetLatestAutomationProvenanceRecordForSession(sessionID string) (*AutomationProvenanceRecord, error) {
+	return s.getLatestAutomationProvenanceRecord(`r.session_id=?`, sessionID)
+}
+
+func (s *Store) GetLatestAutomationProvenanceRecordForTicket(ticketID string) (*AutomationProvenanceRecord, error) {
+	return s.getLatestAutomationProvenanceRecord(`r.ticket_id=?`, ticketID)
+}
+
+func (s *Store) getLatestAutomationProvenanceRecord(where, id string) (*AutomationProvenanceRecord, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.db == nil || id == "" {
+		return nil, nil
+	}
+	var record AutomationProvenanceRecord
+	var created string
+	err := s.db.QueryRow(`
+		SELECT r.id,r.definition_id,d.name,d.spec_json,r.session_id,r.ticket_id,
+			o.provider,o.subject_key,o.payload_json,r.created_at
+		FROM automation_runs r
+		JOIN automation_occurrences o ON o.id=r.occurrence_id
+		JOIN automation_definitions d ON d.id=r.definition_id
+		WHERE `+where+`
+		ORDER BY r.created_at DESC,r.id DESC
+		LIMIT 1
+	`, id).Scan(&record.RunID, &record.DefinitionID, &record.DefinitionName, &record.DefinitionSpecJSON, &record.SessionID, &record.TicketID, &record.Provider, &record.SubjectKey, &record.PayloadJSON, &created)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	record.CreatedAt = parseTicketTime(created)
+	return &record, nil
 }
 
 func (s *Store) ListPendingAutomationRuns() ([]AutomationRun, error) {

@@ -29,6 +29,7 @@ interface TestSession {
   endpointStatus?: string;
   chiefOfStaff?: boolean;
   delegatedFromChief?: boolean;
+  automation?: import('../types/generated').AutomationProvenance;
 }
 
 function buildSidebarData(sessions: TestSession[]) {
@@ -129,6 +130,35 @@ describe('Sidebar', () => {
     );
     expect(container.querySelector('.state-indicator--working')).toBeTruthy();
     expect(container.querySelector('.state-indicator--unknown')).toBeFalsy();
+  });
+
+  it('shows automation name and PR number without requiring hover', () => {
+    const sessions: TestSession[] = [{
+      id: 's1',
+      label: 'feed-nexus-web',
+      state: 'working',
+      agent: 'codex',
+      automation: {
+        run_id: 'run-1',
+        definition_id: 'review-sol',
+        definition_name: 'Requested PR review - GPT Sol medium',
+        trigger_type: 'github_review_requested',
+        pull_request: {
+          repository: 'ghe.spotify.net/audiobook-feed-mgmt/feed-nexus-web',
+          number: 101,
+          url: 'https://ghe.spotify.net/audiobook-feed-mgmt/feed-nexus-web/pull/101',
+          title: 'Fix validation race',
+          head_sha: '82f1c7a000000000000000000000000000000000',
+        },
+      },
+    }];
+
+    render(<Sidebar {...baseProps} {...buildSidebarData(sessions)} />);
+
+    const row = screen.getByTestId('sidebar-session-s1');
+    expect(row).toHaveTextContent('feed-nexus-web');
+    expect(row).toHaveTextContent('GPT Sol medium');
+    expect(row).toHaveTextContent('#101');
   });
 
   it('shows waiting badge in collapsed sidebar', () => {

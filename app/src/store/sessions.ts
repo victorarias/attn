@@ -4,6 +4,7 @@ import { normalizeSessionState } from '../types/sessionState';
 import type { SessionAgent } from '../types/sessionAgent';
 import { normalizeSessionAgent } from '../types/sessionAgent';
 import type { DaemonWorkspace } from '../hooks/useDaemonSocket';
+import type { AutomationProvenance } from '../types/generated';
 import { listenPtyEvents, ptyReload, type PtySpawnArgs } from '../pty/bridge';
 import {
   createDefaultWorkspaceState,
@@ -49,6 +50,7 @@ export interface Session {
   transcriptMatched: boolean;
   branch?: string;
   isWorktree?: boolean;
+  automation?: AutomationProvenance;
   workspace: TerminalWorkspaceState;
   daemonActivePaneId: string;
 }
@@ -63,6 +65,7 @@ export interface DaemonSessionSnapshot {
   state: string;
   branch?: string;
   is_worktree?: boolean;
+  automation?: AutomationProvenance;
 }
 
 interface LauncherConfig {
@@ -361,7 +364,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
           existing.endpointId === nextEndpointId &&
           existing.state === normalizedState &&
           existing.branch === nextBranch &&
-          existing.isWorktree === nextIsWorktree
+          existing.isWorktree === nextIsWorktree &&
+          existing.automation?.run_id === daemonSession.automation?.run_id
         ) {
           return existing;
         }
@@ -378,6 +382,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
           transcriptMatched: existing?.transcriptMatched ?? nextAgent !== 'codex',
           branch: nextBranch,
           isWorktree: nextIsWorktree,
+          automation: daemonSession.automation,
           workspace: existing?.workspace ?? createDefaultWorkspaceState(),
           daemonActivePaneId: existing?.daemonActivePaneId ?? '',
         } satisfies Session;

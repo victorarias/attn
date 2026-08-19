@@ -4,6 +4,7 @@ import type { Ticket, TicketRow } from '../hooks/useDaemonSocket';
 import { isTicketOrphaned } from '../utils/ticketOrphan';
 import { writeClipboardText } from '../utils/clipboardBridge';
 import { Markdown } from './Markdown';
+import { AutomationProvenance } from './AutomationProvenance';
 import './TicketDetailPanel.css';
 
 interface TicketDetailPanelProps {
@@ -279,6 +280,7 @@ export function TicketDetailPanel({
 
       {fullTicket && (
         <div className="ticket-detail-body">
+          <AutomationProvenance provenance={fullTicket.automation} density="detail" interactive />
           {onChangeStatus && (
             <div className="ticket-action-row">
               <label className="ticket-action-label" htmlFor="ticket-status-select">
