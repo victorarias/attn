@@ -29,6 +29,10 @@ func callTicketAttach(t *testing.T, d *Daemon, msg *protocol.TicketAttachMessage
 	if err := json.NewDecoder(client).Decode(&resp); err != nil {
 		t.Fatalf("decode ticket attach response: %v", err)
 	}
+	// net.Pipe writes block until read, and the decoder can finish the JSON
+	// value without consuming the encoder's trailing newline — close the pipe
+	// so the handler's Encode returns before we wait on it.
+	_ = client.Close()
 	<-done
 	return resp
 }
