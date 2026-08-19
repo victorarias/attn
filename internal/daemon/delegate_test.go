@@ -2418,3 +2418,106 @@ func TestDelegateRollsBackSpawnedSessionWhenTicketCreationFails(t *testing.T) {
 		t.Fatalf("source workspace layout after rollback = %+v", layout)
 	}
 }
+
+// A bare delegation from a non-repository source used to silently launch with no
+// checkout at all. It now refuses and names the flags that place it.
+func TestDelegateRefusesDefaultWorktreeFromNonRepoSource(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	backend := &fakeSpawnBackend{}
+	_, sourceSessionID, cwd := setupDelegationSource(t, d, backend)
+	consumeDelegatedPrompt(t, backend)
+
+	_, err := d.delegate(&protocol.DelegateMessage{
+		Cmd:             protocol.CmdDelegate,
+		SourceSessionID: sourceSessionID,
+		Brief:           "Fix the parser.",
+		Label:           protocol.Ptr("parser"),
+		Worktree:        &protocol.DelegateWorktreeRequest{},
+	})
+	if err == nil {
+		t.Fatal("delegate() error = nil, want refusal")
+	}
+	for _, want := range []string{cwd, "not a git repository", "--cwd", "--workspace", "--no-worktree"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("delegate() error = %q, want it to mention %q", err, want)
+		}
+	}
+}
+
+// Every explicit placement flag is consent to the target it names, so none of
+// them meets the gate — even when the target has no repository.
+func TestDelegateExplicitPlacementBypassesNonRepoGate(t *testing.T) {
+	nonRepo := t.TempDir()
+	otherWorkspaceDir := t.TempDir()
+
+	cases := []struct {
+		name    string
+		mutate  func(msg *protocol.DelegateMessage)
+		prepare func(t *testing.T, d *Daemon)
+	}{
+		{
+			name: "no-worktree",
+			mutate: func(msg *protocol.DelegateMessage) {
+				msg.Worktree = nil
+			},
+		},
+		{
+			name: "cwd",
+			mutate: func(msg *protocol.DelegateMessage) {
+				msg.Placement = protocol.Ptr(delegationPlacementNew)
+				msg.Cwd = protocol.Ptr(otherWorkspaceDir)
+			},
+		},
+		{
+			name: "new-workspace",
+			mutate: func(msg *protocol.DelegateMessage) {
+				msg.Placement = protocol.Ptr(delegationPlacementNew)
+			},
+		},
+		{
+			name: "workspace",
+			prepare: func(t *testing.T, d *Daemon) {
+				client := newWorkspaceProtocolTestClient()
+				d.handleRegisterWorkspace(client, &protocol.RegisterWorkspaceMessage{
+					Cmd:       protocol.CmdRegisterWorkspace,
+					ID:        "workspace-target",
+					Title:     "Target",
+					Directory: otherWorkspaceDir,
+				})
+			},
+			mutate: func(msg *protocol.DelegateMessage) {
+				msg.Placement = protocol.Ptr(delegationPlacementExisting)
+				msg.WorkspaceID = protocol.Ptr("workspace-target")
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+			backend := &fakeSpawnBackend{}
+			_, sourceSessionID, _ := setupDelegationSourceAt(t, d, backend, nonRepo)
+			consumeDelegatedPrompt(t, backend)
+			if tc.prepare != nil {
+				tc.prepare(t, d)
+			}
+
+			msg := &protocol.DelegateMessage{
+				Cmd:             protocol.CmdDelegate,
+				SourceSessionID: sourceSessionID,
+				Brief:           "Fix the parser.",
+				Label:           protocol.Ptr("parser"),
+				Worktree:        &protocol.DelegateWorktreeRequest{},
+			}
+			tc.mutate(msg)
+
+			result, err := d.delegate(msg)
+			if err != nil {
+				t.Fatalf("delegate() error = %v, want the explicit placement to proceed", err)
+			}
+			if protocol.Deref(result.WorktreeCreated) {
+				t.Fatalf("result = %+v, want no worktree from a non-repository target", result)
+			}
+		})
+	}
+}

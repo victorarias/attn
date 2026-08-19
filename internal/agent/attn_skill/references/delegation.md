@@ -100,6 +100,12 @@ default branch. Pass `--no-worktree` only when the user asks to reuse the curren
 checkout, the delegation clearly continues work already happening there, or more
 specific repository or agent guidance requires it.
 
+When the source directory is not a Git repository (a crew home, for instance),
+the flag-free default is refused rather than launching the delegate with no
+checkout. Place it with `--cwd <repo>` or `--workspace <id>`, or pass
+`--no-worktree` to delegate without one. Any explicit placement flag is taken as
+consent, so none of them is refused.
+
 Before creating a new workspace, check whether an existing one already fits the
 work. `attn list` returns sessions grouped by `workspace_id`; use the session
 labels, directories, and workspace IDs to identify domain workspaces the user

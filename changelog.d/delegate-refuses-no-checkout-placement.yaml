@@ -1,0 +1,8 @@
+kind: changed
+area: delegation
+change: >
+  A flag-free `attn delegate` from a directory that is not a Git repository
+  now refuses instead of quietly launching the delegated agent with no
+  checkout, and the error names the flags that place it: `--cwd`,
+  `--workspace`, or `--no-worktree`. Any explicit placement flag is consent
+  and still proceeds.

@@ -456,6 +456,15 @@ func (d *Daemon) applyDefaultDelegationWorktree(msg *protocol.DelegateMessage, p
 			if configuredWorktree {
 				return fmt.Errorf("workspace directory is not in a git repository; pass --repo")
 			}
+			// Bare flags promise a worktree; a non-repository source silently
+			// degraded that into no checkout at all, and the delegate woke in a
+			// directory where its brief's paths do not exist. Every other
+			// placement flag is the caller's explicit consent to that target, so
+			// only the default refuses. A confusing error beats a silent
+			// misplacement.
+			if placement == delegationPlacementCurrent {
+				return fmt.Errorf("source directory %s is not a git repository, so this delegate would launch with no checkout; place it with --cwd <repo> or --workspace <id>, or pass --no-worktree to delegate without one", directory)
+			}
 			msg.Worktree = nil
 			return nil
 		}
