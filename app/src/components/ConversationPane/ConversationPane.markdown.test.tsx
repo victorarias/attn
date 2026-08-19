@@ -7,6 +7,16 @@ import { useConversationsStore } from '../../store/conversations';
 import mdTour from './__recordings__/md-tour.jsonl?raw';
 import mdLong from './__recordings__/md-long.jsonl?raw';
 
+// These tests are about STRUCTURE — what the parser made of the text — so the
+// lazy shiki import is intercepted with a mock that never answers: no highlight
+// state is ever written, and a replay of 1,364 deltas neither pays for
+// highlighting nor resolves promises outside act(). Markdown.highlight.test.tsx
+// is where highlighting itself is tested.
+const shikiMock = vi.hoisted(() => ({
+  codeToHtml: vi.fn(() => new Promise<string>(() => {})),
+}));
+vi.mock('shiki', () => shikiMock);
+
 /**
  * The pane, driven by envelope streams RECORDED FROM REAL nisse SESSIONS.
  *
@@ -18,6 +28,11 @@ import mdLong from './__recordings__/md-long.jsonl?raw';
  */
 
 const SESSION = 'sess-md';
+
+// Each test below replays a whole recording delta by delta — 317 or 1,364 of
+// them through the real pane. Vitest's 5s default is a fixture-size limit here,
+// and one these clear alone but not beside 278 other files on a loaded machine.
+const REPLAY_TIMEOUT_MS = 60_000;
 
 interface Recorded { at: number; envelope: { seq: number; kind: string; body: Record<string, unknown> } }
 
@@ -90,12 +105,10 @@ describe('ConversationPane markdown, replayed from real recordings', () => {
       });
       expect(markdownHtml(id)).toBe(streamed);
     },
-    // md-long is 1,364 deltas re-parsed against a happy-dom tree; the default
-    // 5 s is a limit on the fixture's size, not on anything under test.
-    60_000,
+    REPLAY_TIMEOUT_MS,
   );
 
-  it('renders structure, not the markdown source', () => {
+  it('renders structure, not the markdown source', { timeout: REPLAY_TIMEOUT_MS }, () => {
     const rows = recording('md-tour');
     renderPane();
     for (const row of rows) apply(row);
@@ -112,7 +125,7 @@ describe('ConversationPane markdown, replayed from real recordings', () => {
     expect(visible).not.toContain('](');
   });
 
-  it('never shows raw markdown syntax mid-stream', () => {
+  it('never shows raw markdown syntax mid-stream', { timeout: REPLAY_TIMEOUT_MS }, () => {
     const rows = recording('md-tour');
     renderPane();
     const leaks: string[] = [];
@@ -138,7 +151,7 @@ describe('ConversationPane markdown, replayed from real recordings', () => {
     expect(leaks).toEqual([]);
   });
 
-  it('holds a diagram until its fence closes', () => {
+  it('holds a diagram until its fence closes', { timeout: REPLAY_TIMEOUT_MS }, () => {
     renderPane();
     apply({ at: 0, envelope: { seq: 1, kind: 'message_start', body: { id: 'd1', role: 'assistant' } } });
     apply({ at: 1, envelope: { seq: 2, kind: 'message_delta', body: { id: 'd1', text: '```mermaid\nflowchart TD\n  A --> ' } } });
@@ -152,7 +165,7 @@ describe('ConversationPane markdown, replayed from real recordings', () => {
     expect(document.querySelector('.markdown-mermaid-loading, .markdown-mermaid')).not.toBeNull();
   });
 
-  it('reuse-as-is baseline: what the shared component leaks without the tail pass', () => {
+  it('reuse-as-is baseline: what the shared component leaks without the tail pass', { timeout: REPLAY_TIMEOUT_MS }, () => {
     // The same recording rendered the way a straight reuse would: no streaming
     // flag, so every prefix is parsed verbatim. This is the defect the tail
     // completion exists to remove, kept as a receipt rather than a claim.
@@ -181,7 +194,7 @@ describe('ConversationPane markdown, replayed from real recordings', () => {
     expect(leaks.size).toBeGreaterThan(0);
   });
 
-  it('per-delta render cost, replaying md-long at its recorded sizes', () => {
+  it('per-delta render cost, replaying md-long at its recorded sizes', { timeout: REPLAY_TIMEOUT_MS }, () => {
     const rows = recording('md-long');
     renderPane();
     const samples: Array<{ chars: number; ms: number }> = [];

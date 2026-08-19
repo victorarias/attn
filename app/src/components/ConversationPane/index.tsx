@@ -11,7 +11,7 @@ import { useDaemonApi } from '../../contexts/DaemonApiContext';
 import type { ResolvedTheme } from '../../hooks/useTheme';
 import type { UISessionState } from '../../types/sessionState';
 import { ToolCard } from './ToolCard';
-import { Markdown } from '../Markdown';
+import { Markdown, ReaderDiagramPresentation } from '../Markdown';
 import { MarkdownBoundary } from '../Markdown/MarkdownBoundary';
 import './ConversationPane.css';
 
@@ -100,6 +100,14 @@ export function ConversationPane({ sessionId, paneActive, sessionState, resolved
     if (!list) return;
     if (followingRef.current) list.scrollTop = list.scrollHeight;
   }, [lastLength, items.length]);
+
+  // A mermaid diagram appears one frame AFTER the text that carried it — its
+  // fence settles, then mermaid draws, and the document grows with no delta to
+  // notice. A follower would be left the diagram's height off the bottom.
+  const followDiagramGrowth = useCallback(() => {
+    const list = listRef.current;
+    if (list && followingRef.current) list.scrollTop = list.scrollHeight;
+  }, []);
 
   // Paging older history in puts content ABOVE what the reader is looking at,
   // and the browser keeps scrollTop — so the page they were reading slides down
@@ -291,13 +299,19 @@ export function ConversationPane({ sessionId, paneActive, sessionState, resolved
                   key={`md:${item.id}`}
                   fallback={<div className="conversation-message-text conversation-message-text--raw">{item.text}</div>}
                 >
+                  {/* A transcript is read, not glanced at: a diagram too wide for
+                      the column gets the reader's own size detection, focus view
+                      and zoom rather than being silently squeezed. */}
+                  <ReaderDiagramPresentation>
                   <Markdown
                     className="conversation-message-text"
                     breaks={item.role === 'user'}
                     streaming={item.streaming}
+                    onDiagramLayoutChange={followDiagramGrowth}
                   >
                     {item.text}
                   </Markdown>
+                  </ReaderDiagramPresentation>
                 </MarkdownBoundary>
               </div>
             );

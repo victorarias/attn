@@ -16,6 +16,31 @@
   gap: 12px;
 }
 
+/* One centred reading column, at the same measure MarkdownReader uses (832px):
+   a conversation and a document are the same act of reading, and a pane docked
+   at half a 6K display otherwise runs prose the full width of the glass.
+   Everything in the transcript shares it, so the left edge never moves between
+   a message, a tool card and a notice.
+
+   `align-self` rather than a wrapper element: the list is the scroll container
+   and the flex parent, and an extra div between them would have to re-declare
+   both. */
+.conversation-pane-messages > * {
+  width: 100%;
+  max-width: 832px;
+  align-self: center;
+}
+
+/* What the reader types sits under what they read, on the same column: a
+   composer running the full width of a wide pane while the transcript is a
+   narrow ribbon reads as two unrelated panels. */
+.conversation-pane-queue,
+.conversation-pane-composer {
+  width: 100%;
+  max-width: 832px;
+  margin-inline: auto;
+}
+
 /* The model this conversation runs on, and the way to change it. A thin strip
    rather than a dialog: switching model mid-conversation is a thing done in
    passing, and it takes effect on the next run either way. */
@@ -200,6 +225,29 @@
 .conversation-message-text pre code {
   padding: 0;
   background: none;
+}
+
+/* Shiki dual-theme: every span carries --shiki-light and --shiki-dark and the
+   theme picks one. attn defaults dark, so the bare rule is dark and the light
+   cases override it — the structure App.css and MarkdownReader.css both use.
+   Highlighting only ever reaches SETTLED text (see VolatileTextContext), so a
+   block colours when its fence closes and never repaints mid-stream. */
+.conversation-message-text .markdown-shiki span {
+  color: var(--shiki-dark);
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme]) .conversation-message-text .markdown-shiki span {
+    color: var(--shiki-light);
+  }
+}
+
+:root[data-theme='light'] .conversation-message-text .markdown-shiki span {
+  color: var(--shiki-light);
+}
+
+:root[data-theme='dark'] .conversation-message-text .markdown-shiki span {
+  color: var(--shiki-dark);
 }
 
 /* The diagram a fence has not closed yet. Same box as a code block, dimmed, so

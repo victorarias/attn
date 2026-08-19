@@ -3,6 +3,7 @@ import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkBreaks from 'remark-breaks';
 import remarkGfm from 'remark-gfm';
 import { MermaidDiagram } from './MermaidDiagram';
+import { useShikiHighlight } from './shiki';
 import { PENDING_DIAGRAM_LANGUAGE, prepareStreamingMarkdown, splitStreamingMarkdown } from './streaming';
 
 // Read by the module-level CodeRenderer below. A context (rather than a
@@ -12,6 +13,10 @@ import { PENDING_DIAGRAM_LANGUAGE, prepareStreamingMarkdown, splitStreamingMarkd
 // bump) never remounts an in-flight MermaidDiagram.
 const DiagramLayoutChangeContext = createContext<(() => void) | undefined>(undefined);
 const DiagramPresentationContext = createContext<'static' | 'reader'>('static');
+// True only inside the tail document of a message still being written. Its text
+// can still change meaning, so anything whose cost is paid per render — today,
+// syntax highlighting — waits until the settled half catches up.
+const VolatileTextContext = createContext(false);
 
 /** Opts a full document reader into progressive controls for oversized diagrams. */
 export function ReaderDiagramPresentation({ children }: { children: ReactNode }) {
@@ -22,6 +27,14 @@ export function ReaderDiagramPresentation({ children }: { children: ReactNode })
   );
 }
 
+// Diagrams are drawn, not highlighted, and inline code carries no language.
+function highlightableLanguage(className: string | undefined): string | undefined {
+  const found = /language-([\w-]+)/.exec(className ?? '');
+  const language = found?.[1];
+  if (!language || language === 'mermaid' || language === PENDING_DIAGRAM_LANGUAGE) return undefined;
+  return language;
+}
+
 // react-markdown v10's `code` component gets no `inline` flag; a fenced block
 // carries a `language-*` className, inline code carries none.
 // Exported so MarkdownReader reuses the exact mermaid path (and its stable
@@ -29,6 +42,13 @@ export function ReaderDiagramPresentation({ children }: { children: ReactNode })
 export const CodeRenderer: Components['code'] = ({ className, children, ...props }) => {
   const onDiagramLayoutChange = useContext(DiagramLayoutChangeContext);
   const presentation = useContext(DiagramPresentationContext);
+  const volatile = useContext(VolatileTextContext);
+  // Hooks run before any of the early returns below can skip them. Inline code
+  // has no language and is by far the most common `code` element in a
+  // transcript, so it must not pay to join the children on every render.
+  const language = highlightableLanguage(className);
+  const code = language ? String(children) : '';
+  const highlighted = useShikiHighlight(code, language, !volatile);
   // A diagram whose fence has not closed yet. prepareStreamingMarkdown renames
   // the language so half a graph never reaches mermaid, which would draw its
   // parse error where the picture goes.
@@ -45,6 +65,17 @@ export const CodeRenderer: Components['code'] = ({ className, children, ...props
         code={String(children).trimEnd()}
         onLayoutChange={onDiagramLayoutChange}
         presentation={presentation}
+      />
+    );
+  }
+  if (highlighted) {
+    return (
+      <code
+        className={`${className ?? ''} markdown-shiki`.trim()}
+        {...props}
+        // eslint-disable-next-line react/no-danger -- shiki output is
+        // library-generated spans over the code text, not document HTML.
+        dangerouslySetInnerHTML={{ __html: highlighted.html }}
       />
     );
   }
@@ -116,7 +147,9 @@ export function Markdown({ children, className, components, breaks, onDiagramLay
         {settled !== '' && (
           <MarkdownDocument source={settled} remarkPlugins={remarkPlugins} components={merged} />
         )}
-        <MarkdownDocument source={tail} remarkPlugins={remarkPlugins} components={merged} />
+        <VolatileTextContext.Provider value={Boolean(streaming)}>
+          <MarkdownDocument source={tail} remarkPlugins={remarkPlugins} components={merged} />
+        </VolatileTextContext.Provider>
       </DiagramLayoutChangeContext.Provider>
     </div>
   );

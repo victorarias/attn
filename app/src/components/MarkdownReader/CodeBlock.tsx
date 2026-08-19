@@ -1,18 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { HTMLAttributes } from 'react';
-
-// Shiki is loaded lazily so the tile paints immediately with plain text and
-// hydrates highlights async; the dynamic import also keeps shiki out of the
-// main bundle. The `shiki` shorthand bundle manages its own highlighter
-// singleton and loads languages/themes on demand.
-let shikiModule: Promise<typeof import('shiki') | null> | null = null;
-function loadShiki() {
-  shikiModule ??= import('shiki').catch((error) => {
-    console.warn('[MarkdownReader] Failed to load shiki:', error);
-    return null;
-  });
-  return shikiModule;
-}
+import { useShikiHighlight } from '../Markdown/shiki';
 
 const COPY_ICON_PATH =
   'M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z';
@@ -30,56 +18,10 @@ interface CodeBlockProps {
  * button) + shiki dual-theme highlighting. Unknown languages fall back to
  * plain text with the same chrome.
  */
-interface HighlightedState {
-  /** The inputs the html was generated from — stale results never render. */
-  code: string;
-  language: string;
-  html: string;
-}
-
 export function CodeBlock({ code, language, preProps }: CodeBlockProps) {
-  const [highlighted, setHighlighted] = useState<HighlightedState | null>(null);
+  const highlighted = useShikiHighlight(code, language);
   const [copied, setCopied] = useState(false);
   const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => {
-    if (!language) {
-      setHighlighted(null);
-      return;
-    }
-    let cancelled = false;
-    void loadShiki().then(async (shiki) => {
-      if (!shiki || cancelled) {
-        return;
-      }
-      try {
-        const raw = await shiki.codeToHtml(code, {
-          lang: language,
-          themes: { light: 'github-light-default', dark: 'github-dark-default' },
-          defaultColor: false,
-          structure: 'inline',
-        });
-        // Shiki's inline structure renders line breaks as <br> ELEMENTS, so
-        // the hydrated DOM would contain no '\n' text — shifting every
-        // anchoring offset past line 1 (see anchoring/domRange.ts, which
-        // requires DOM text-node parity with extractBlockTexts). Restore real
-        // newline text nodes; <pre> renders them identically. Code content is
-        // HTML-escaped by shiki, so a literal `<br` in code can't match.
-        const html = raw.replace(/<br\s*\/?>/g, '\n');
-        if (!cancelled) {
-          setHighlighted({ code, language, html });
-        }
-      } catch {
-        // Unknown language: keep plain text, same chrome.
-        if (!cancelled) {
-          setHighlighted(null);
-        }
-      }
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [code, language]);
 
   useEffect(() => () => {
     if (copyTimerRef.current !== null) {
@@ -126,11 +68,7 @@ export function CodeBlock({ code, language, preProps }: CodeBlockProps) {
         </svg>
       </button>
       <pre {...preProps}>
-        {/* Only render html generated from the CURRENT props: on a content
-            reload the component re-renders in place with new code, and the
-            previous file version's highlight must not linger while the async
-            re-highlight is in flight. */}
-        {highlighted !== null && highlighted.code === code && highlighted.language === language ? (
+        {highlighted !== null ? (
           <code
             className="md-shiki"
             // eslint-disable-next-line react/no-danger -- shiki output is

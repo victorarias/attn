@@ -1,7 +1,18 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, render } from '@testing-library/react';
 import { Markdown } from './index';
 import mdLong from '../ConversationPane/__recordings__/md-long.jsonl?raw';
+
+// What is being timed here is the PARSE, which is the bill (see streaming.ts).
+// Highlighting is not part of it, so this mock never settles: shiki is asked
+// and never answers, no highlight state is written, and both legs are timed on
+// the same work. A resolving mock instead charges the naive leg one highlight
+// per code block per delta — ~8,000 of them across this recording — and times
+// the harness rather than the split.
+const shikiMock = vi.hoisted(() => ({
+  codeToHtml: vi.fn(() => new Promise<string>(() => {})),
+}));
+vi.mock('shiki', () => shikiMock);
 
 /**
  * What the settled/tail split buys, measured on the real recording.
@@ -39,7 +50,7 @@ describe('streaming markdown cost', () => {
   afterEach(cleanup);
 
   // Two full replays of a 1,364-delta recording; the naive leg alone is ~12s.
-  it('reparses only the open tail', { timeout: 120_000 }, () => {
+  it('reparses only the open tail', { timeout: 300_000 }, () => {
     const texts = prefixes();
     const quantile = (s: number[], p: number) => s[Math.min(s.length - 1, Math.floor(s.length * p))];
     const report = (label: string, s: number[]) =>
