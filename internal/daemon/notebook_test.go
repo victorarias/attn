@@ -505,7 +505,7 @@ func TestNotebookGuideChiefVsNonChief(t *testing.T) {
 		t.Fatalf("chief guide = %+v, want root=%q and non-empty guidance", chief.NotebookGuide, wantRoot)
 	}
 	if !strings.Contains(chief.NotebookGuide.Guidance, "Never park a blocking Monitor on attn activity") {
-		t.Fatalf("Claude chief guide should carry nudge-only attn guidance: %q", chief.NotebookGuide.Guidance)
+		t.Fatalf("Claude chief guide should carry the do-not-hover attn guidance: %q", chief.NotebookGuide.Guidance)
 	}
 
 	// The chief request ensured the scaffold exists, including the reserved files.
@@ -529,7 +529,8 @@ func TestNotebookGuideChiefVsNonChief(t *testing.T) {
 	}
 }
 
-func TestNotebookGuideUsesCodexTicketNudgeGuidance(t *testing.T) {
+// Every runtime gets the same waiting guidance: read the seed, do not hover.
+func TestNotebookGuideUsesTheSameSeedWaitingGuidanceOnCodex(t *testing.T) {
 	d := newNotebookDaemon(t)
 	addIdleNotebookSession(d, "chief", protocol.SessionStateIdle)
 	session := d.store.Get("chief")
@@ -544,11 +545,11 @@ func TestNotebookGuideUsesCodexTicketNudgeGuidance(t *testing.T) {
 		t.Fatal("missing notebook guide")
 	}
 	guidance := response.NotebookGuide.Guidance
-	if !strings.Contains(guidance, "Rely on attn's ticket nudges") {
-		t.Fatalf("Codex chief guide should carry nudge guidance: %q", guidance)
+	if !strings.Contains(guidance, "`attn seed show <seed-id>`") {
+		t.Fatalf("Codex chief guide should carry the seed waiting guidance: %q", guidance)
 	}
-	if strings.Contains(guidance, "ticket inbox --watch") {
-		t.Fatalf("Codex chief guide should not carry watch guidance: %q", guidance)
+	if strings.Contains(guidance, "attn ticket inbox") {
+		t.Fatalf("Codex chief guide should not send the chief to a retired verb: %q", guidance)
 	}
 }
 

@@ -227,7 +227,7 @@ func TestSeedResumeValidation(t *testing.T) {
 				addGardenSession(t, d, "ghost")
 				move(t, d, "ghost", seed.ID, garden.VerbTend, "", "")
 				d.store.Remove("ghost")
-				if err := d.recordGardenDispatch("ghost", seed.ID, filepath.Join(t.TempDir(), "does-not-exist"), "codex"); err != nil {
+				if err := d.recordGardenDispatch("ghost", seed.ID, filepath.Join(t.TempDir(), "does-not-exist"), "codex", false); err != nil {
 					t.Fatalf("recordGardenDispatch: %v", err)
 				}
 				return seed.ID, "ghost"
@@ -259,7 +259,7 @@ func TestSeedResumeRollsBackPaneWhenSpawnFails(t *testing.T) {
 	addGardenSession(t, d, "ghost-session")
 	move(t, d, "ghost-session", seed.ID, garden.VerbTend, "", "")
 	d.store.Remove("ghost-session")
-	if err := d.recordGardenDispatch("ghost-session", seed.ID, t.TempDir(), "codex"); err != nil {
+	if err := d.recordGardenDispatch("ghost-session", seed.ID, t.TempDir(), "codex", false); err != nil {
 		t.Fatalf("recordGardenDispatch: %v", err)
 	}
 	d.ptyBackend = &failingSpawnBackend{err: syscall.EPERM}

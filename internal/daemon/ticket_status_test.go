@@ -32,7 +32,59 @@ func delegateBoundSession(t *testing.T, d *Daemon) string {
 	if err != nil {
 		t.Fatalf("delegate(): %v", err)
 	}
+	bindLegacyTicket(t, d, result.SessionID, chiefSessionID)
 	return result.SessionID
+}
+
+// bindLegacyTicket puts a ticket on an already-delegated session the way the
+// daemon did before tickets retired. Delegation binds a seed alone now, so this
+// is how the tests that cover the ticket machinery still standing — status,
+// crash stamping, revive, take, subscribe — build the one case that still
+// reaches it: work that was already in flight and ticket-bound at the cutover.
+func bindLegacyTicket(t *testing.T, d *Daemon, sessionID, delegatorSessionID string) string {
+	t.Helper()
+	return bindLegacyTicketTitled(t, d, sessionID, delegatorSessionID, "Migrate the store to X")
+}
+
+// bindLegacyTicketTitled is bindLegacyTicket for a fixture that needs the
+// ticket's title to match the brief its session was delegated with.
+func bindLegacyTicketTitled(t *testing.T, d *Daemon, sessionID, delegatorSessionID, title string) string {
+	t.Helper()
+	return bindLegacyTicketAs(t, d, sessionID, delegatorSessionID, title, true)
+}
+
+// bindLegacyTicketAs is bindLegacyTicketTitled for a fixture that cares which
+// side dispatched: a chief delegation attached the ROLE and nothing else, and
+// any other delegator attached personally and pulled the chief role in as a
+// subscriber. The rule lived on the delegation path that retired with tickets,
+// so it is reproduced here — the tickets that still carry it are the ones that
+// were in flight at the cutover.
+func bindLegacyTicketAs(t *testing.T, d *Daemon, sessionID, delegatorSessionID, title string, ownedByChiefRole bool) string {
+	t.Helper()
+	author := delegatorSessionID
+	ownerRole := store.TicketRoleChiefOfStaff
+	var subscribers []string
+	if !ownedByChiefRole {
+		author = d.ticketActorIdentity(delegatorSessionID)
+		ownerRole = ""
+		subscribers = []string{author, store.TicketRoleIdentity(store.TicketRoleChiefOfStaff)}
+	}
+	session := d.store.Get(sessionID)
+	if session == nil {
+		t.Fatalf("session %s was not persisted", sessionID)
+	}
+	created, err := d.createTicketWithUniqueSlug(store.Ticket{
+		Title:       title,
+		Description: title,
+		Status:      store.TicketStatusWorking,
+		Assignee:    sessionID,
+		Cwd:         session.Directory,
+		LastAgentID: "codex",
+	}, ticketSlug(title), author, ownerRole, subscribers, time.Now())
+	if err != nil {
+		t.Fatalf("bind legacy ticket: %v", err)
+	}
+	return created.ID
 }
 
 func callSetTicketStatus(t *testing.T, d *Daemon, sessionID, workState, comment string) protocol.Response {

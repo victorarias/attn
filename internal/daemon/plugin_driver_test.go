@@ -125,7 +125,7 @@ func TestHandleSpawnSession_PluginDriverLaunchesReturnedCommand(t *testing.T) {
 			t.Error("spawn run_id is empty, want daemon-assigned run identity")
 			return
 		}
-		if params.Instructions == nil || params.Instructions.Kind != pluginInstructionKindWorkspace || !strings.Contains(params.Instructions.Content, "attn tracks work as tickets") {
+		if params.Instructions == nil || params.Instructions.Kind != pluginInstructionKindWorkspace || !strings.Contains(params.Instructions.Content, "attn keeps work in the garden") {
 			t.Errorf("spawn instructions=%+v, want workspace guidance", params.Instructions)
 			return
 		}

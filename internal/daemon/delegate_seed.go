@@ -32,8 +32,8 @@ import (
 // log is the wrong way round. A delegation that explicitly named a crown is the
 // exception and keeps failing outright, because it asked to be aimed and a
 // silently unaimed delegate is not what was asked for.
-func (d *Daemon) bindDelegationSeed(sessionID, plannerSessionID, brief, name, crown, cwd, agent string) (string, error) {
-	seedID, err := d.bindDelegatedSeed(sessionID, plannerSessionID, brief, name, crown, cwd, agent)
+func (d *Daemon) bindDelegationSeed(sessionID, plannerSessionID, brief, name, crown, cwd, agent string, fromChief bool) (string, error) {
+	seedID, err := d.bindDelegatedSeed(sessionID, plannerSessionID, brief, name, crown, cwd, agent, fromChief)
 	switch {
 	case err == nil:
 		d.logf("delegate: bound seed %q to session %s", seedID, sessionID)
@@ -50,7 +50,7 @@ func (d *Daemon) bindDelegationSeed(sessionID, plannerSessionID, brief, name, cr
 // bindDelegatedSeed is the bind itself. It is idempotent through the dispatch
 // record, so a delegation resumed after a daemon crash re-binds what it already
 // planted instead of planting a second seed for the same session.
-func (d *Daemon) bindDelegatedSeed(sessionID, plannerSessionID, brief, name, crown, cwd, agent string) (string, error) {
+func (d *Daemon) bindDelegatedSeed(sessionID, plannerSessionID, brief, name, crown, cwd, agent string, fromChief bool) (string, error) {
 	if err := d.requireHome(garden.Surface); err != nil {
 		return "", err
 	}
@@ -65,7 +65,7 @@ func (d *Daemon) bindDelegatedSeed(sessionID, plannerSessionID, brief, name, cro
 		}
 		seedID = seed.ID
 	}
-	if err := d.recordGardenDispatch(sessionID, seedID, cwd, agent); err != nil {
+	if err := d.recordGardenDispatch(sessionID, seedID, cwd, agent, fromChief); err != nil {
 		return "", fmt.Errorf("bind %s to session %s: %w", seedID, sessionID, err)
 	}
 	return seedID, nil

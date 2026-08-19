@@ -293,7 +293,7 @@ renaming the other.
   gets the PTY path's **identity block** too (`ATTN_SESSION_ID`, `ATTN_AGENT`,
   `ATTN_DAEMON_MANAGED`, `ATTN_INSIDE_APP`, and the active attn first on PATH),
   and that half is not cosmetic: the agent's tools shell out to `attn` to report,
-  so without it a delegated agent's `attn ticket comment` is attributed to
+  so without it a delegated agent's `attn seed note` is attributed to
   whichever session the daemon inherited its own environment from, and bare
   `attn` resolves to whichever install is on the login shell's PATH rather than
   to the profile that spawned the session. Both were observed, not theorized.

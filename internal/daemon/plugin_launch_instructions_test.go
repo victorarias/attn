@@ -27,7 +27,7 @@ func TestPreparePluginLaunchInstructionsBeforeSessionPersistence(t *testing.T) {
 	if instructions.Kind != pluginInstructionKindWorkspace || instructions.ContextRevision != 1 {
 		t.Fatalf("instructions = %+v, want workspace revision 1", instructions)
 	}
-	if !strings.Contains(instructions.Content, instructions.ContextPath) || !strings.Contains(instructions.Content, "attn tracks work as tickets") {
+	if !strings.Contains(instructions.Content, instructions.ContextPath) || !strings.Contains(instructions.Content, "attn keeps work in the garden") {
 		t.Fatalf("instructions content did not compose existing guidance: %q", instructions.Content)
 	}
 	if got, err := os.ReadFile(instructions.ContextPath); err != nil || string(got) != "# Shared\ncurrent decision\n" {

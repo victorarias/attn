@@ -44,6 +44,7 @@ func delegateForNotify(t *testing.T, d *Daemon, agent string) (chiefID, agentID 
 	if err != nil {
 		t.Fatalf("delegate(): %v", err)
 	}
+	bindLegacyTicket(t, d, result.SessionID, chiefID)
 	inputs = func(id string) []string {
 		mu.Lock()
 		defer mu.Unlock()
@@ -94,6 +95,7 @@ func delegateMany(t *testing.T, d *Daemon, agent string, briefs ...string) (chie
 		if err != nil {
 			t.Fatalf("delegate(%d, %q): %v", i, brief, err)
 		}
+		bindLegacyTicketTitled(t, d, result.SessionID, chiefID, brief)
 		agentIDs = append(agentIDs, result.SessionID)
 	}
 	inputs = func(id string) []string {

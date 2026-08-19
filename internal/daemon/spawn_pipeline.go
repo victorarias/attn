@@ -199,11 +199,17 @@ func (d *Daemon) resolveSpawnIntent(req *spawnRequest) (*spawnPlan, *spawnReject
 	} else if !req.hasPluginDriver && req.resumeSessionID == "" && protocol.Deref(msg.ResumePicker) {
 		// Seed "Resume": the bound session's row (and its resume_session_id) was
 		// deleted on close, so the session-keyed lookup above is skipped. The
-		// resume key was mirrored under the same session id, so resolve it here to
+		// resume key was mirrored under the same session id — on its dispatch
+		// record, or on a ticket for work bound before tickets retired — so
+		// resolve it here to
 		// resume the prior conversation directly instead of dropping the user into
 		// the agent's resume picker. Falls back to the picker (resumeSessionID
 		// stays "") when no mirrored resume key exists.
-		if ticketResumeID := d.store.GetTicketResumeSessionID(msg.ID); ticketResumeID != "" {
+		mirroredResumeID := d.gardenDispatchResume(msg.ID)
+		if mirroredResumeID == "" {
+			mirroredResumeID = d.store.GetTicketResumeSessionID(msg.ID)
+		}
+		if ticketResumeID := mirroredResumeID; ticketResumeID != "" {
 			// Only adopt the mirrored id when it is actually resumable. Claude writes
 			// its transcript lazily, so a session closed before it ever took a turn has
 			// a mirrored id pointing at a transcript that does not exist; `claude -r

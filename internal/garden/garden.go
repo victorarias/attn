@@ -160,6 +160,16 @@ type Dispatch struct {
 	Crown     string `json:"crown"`
 	Cwd       string `json:"cwd,omitempty"`
 	Agent     string `json:"agent,omitempty"`
+	// FromChief records that the chief of staff started this delegation. The
+	// board used to carry it as the ticket's owning role; the dispatch record is
+	// where it lives now, and it stays true through a role transfer for the same
+	// reason the role attachment did — it says who dispatched, not who is chief.
+	FromChief bool `json:"from_chief,omitempty"`
+	// Resume is the agent-native conversation id this session was last seen on.
+	// A session row is deleted on close and takes its own copy with it, so this
+	// is what lets a seed's Resume reattach the prior conversation instead of
+	// dropping into the agent's picker.
+	Resume string `json:"resume,omitempty"`
 }
 
 // DispatchesSchema declares the dispatch collection. `crown` is declared so

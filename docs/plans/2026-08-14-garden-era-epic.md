@@ -175,7 +175,7 @@ events.
       steering — the weight transfer.
 - [x] App ticket surfaces → garden surfaces; this step moves the wire
       and carries the ProtocolVersion bump in every lockstep spot.
-- [ ] Ticket write verbs → permanent CLI signposts; read verbs keep
+- [x] Ticket write verbs → permanent CLI signposts; read verbs keep
       the archived store; bulk-convert backlog todos.
 - [ ] Victor lives on the branch for days without tickets.
 - [ ] Epic merge to main on his explicit OK.

@@ -32,7 +32,7 @@ func TestWriteSkillPrintsOneReference(t *testing.T) {
 	if code := writeSkill(&stdout, &stderr, []string{"--reference", "tickets"}); code != 0 {
 		t.Fatalf("writeSkill --reference tickets exit code = %d, stderr: %q", code, stderr.String())
 	}
-	if !strings.Contains(stdout.String(), "# Writing a good ticket") {
+	if !strings.Contains(stdout.String(), "# Tickets retired") {
 		t.Fatalf("tickets reference output unexpected: %q", stdout.String()[:200])
 	}
 
@@ -40,7 +40,7 @@ func TestWriteSkillPrintsOneReference(t *testing.T) {
 	if code := writeSkill(&stdout, &stderr, []string{"--reference", "tickets.md"}); code != 0 {
 		t.Fatalf("writeSkill --reference tickets.md exit code = %d, stderr: %q", code, stderr.String())
 	}
-	if !strings.Contains(stdout.String(), "# Writing a good ticket") {
+	if !strings.Contains(stdout.String(), "# Tickets retired") {
 		t.Fatalf("tickets.md reference output unexpected: %q", stdout.String()[:200])
 	}
 }

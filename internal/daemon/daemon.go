@@ -219,11 +219,11 @@ type Daemon struct {
 	delegationRunning map[string]bool
 	// deterministic slow-preparation seam used by delegation idempotency tests.
 	delegationWorktreePrepareHook func(path string)
-	// deterministic failure seam for the LAST step of the delegation saga. Ticket
-	// creation is the only failure point past a live session, so it is the only way
-	// to exercise the deepest compensation set (session + pane + workspace +
-	// worktree) without corrupting the store. Tests only.
-	delegationTicketCreateHook func() error
+	// deterministic failure seam for the LAST step of the delegation saga. Since
+	// ticket creation retired there is no production failure point past a live
+	// session, and the deepest compensation set (session + pane + workspace +
+	// worktree) would otherwise have nothing that exercises it. Tests only.
+	delegationFinalizeHook func() error
 	// reloadingSessions marks sessions whose agent is being re-spawned in place
 	// (chief-of-staff assign/demote reload). handlePTYExit consumes the flag to
 	// suppress the killed worker's session_exited so the reload reads as a runtime
@@ -527,8 +527,11 @@ type Daemon struct {
 	// A daemon with no garden declared reads nothing and caches that: a session
 	// list is broadcast constantly, and probing an absent collection every time
 	// is work a quiet daemon must not do. Declaring the garden clears it.
+	// dispatchFromChief rides in the same cache: which of those sessions the
+	// chief of staff dispatched, the set the session broadcast badges from.
 	dispatchSeedsMu     sync.Mutex
 	dispatchSeeds       map[string]string
+	dispatchFromChief   map[string]bool
 	dispatchSeedsLoaded bool
 
 	// gardenNotePageSize sizes the whole-log read's pages; zero means the store's
@@ -1083,6 +1086,7 @@ func (d *Daemon) Start() error {
 		return fmt.Errorf("ensure enrollment record: %w", err)
 	}
 	d.ensureGardenCollections()
+	d.convertBacklogTicketsToSeeds()
 	d.ensureCrewCollections()
 	d.importCrewHomes()
 	if err := d.migrateCrewTicketIdentities(); err != nil {
@@ -3171,15 +3175,16 @@ func (d *Daemon) handleState(conn net.Conn, msg *protocol.StateMessage) {
 	d.sendOK(conn)
 }
 
-// persistResumeSessionID records the agent-native resume id on the session AND
-// mirrors it onto any ticket bound to that session (assignee == sessionID). The
-// session row is deleted on close, taking its resume_session_id with it, so the
-// durable copy on the ticket is what lets ticket Resume reattach the prior
-// conversation directly instead of dropping into the agent's resume picker.
+// persistResumeSessionID records the agent-native resume id on the session and
+// mirrors it where it survives the session row, which is deleted on close: onto
+// the session's dispatch record (what a seed's Resume reads) and onto any ticket
+// still bound to it. Without a durable copy, reopening the agent drops into its
+// resume picker instead of the prior conversation.
 func (d *Daemon) persistResumeSessionID(sessionID, resumeSessionID string) {
 	if _, err := d.store.TransitionSessionConversation(sessionID, resumeSessionID); err != nil {
 		d.logf("persistResumeSessionID: update failed for session %s: %v", sessionID, err)
 	}
+	d.rememberDispatchResume(sessionID, resumeSessionID)
 }
 
 func (d *Daemon) handleStop(conn net.Conn, msg *protocol.StopMessage) {

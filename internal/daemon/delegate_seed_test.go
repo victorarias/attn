@@ -97,10 +97,13 @@ func TestDelegationPlantsASeedTendedByItsDelegate(t *testing.T) {
 			t.Fatalf("the delegate's prompt never offers %q", verb)
 		}
 	}
-	// The ticket is untouched: both bind during the transition.
+	// Nothing else is bound: a dispatch is a seed and nothing more now.
 	ticket, err := d.store.ActiveTicketForSession(result.SessionID)
-	if err != nil || ticket == nil {
-		t.Fatalf("ActiveTicketForSession = %v, %v; the ticket must still bind", ticket, err)
+	if err != nil {
+		t.Fatalf("ActiveTicketForSession: %v", err)
+	}
+	if ticket != nil {
+		t.Fatalf("the delegation created a ticket: %+v", ticket)
 	}
 }
 
@@ -159,7 +162,7 @@ func TestDelegationRecoveryRebindsTheSameSeed(t *testing.T) {
 	}
 	first, _ := d.gardenDispatchCrown(result.SessionID)
 
-	again, err := d.bindDelegationSeed(result.SessionID, sourceSessionID, "Migrate the store to X", "Store migration", "", "", "")
+	again, err := d.bindDelegationSeed(result.SessionID, sourceSessionID, "Migrate the store to X", "Store migration", "", "", "", false)
 	if err != nil {
 		t.Fatalf("re-bind: %v", err)
 	}
@@ -175,8 +178,8 @@ func TestDelegationRecoveryRebindsTheSameSeed(t *testing.T) {
 	}
 }
 
-// An outpost holds no garden. The delegation still launches, on its ticket, and
-// the delegate is never pointed at a seed that does not exist.
+// An outpost holds no garden. The delegation still launches, and the delegate is
+// never pointed at a seed that does not exist.
 func TestDelegationOnAnOutpostBindsNoSeedAndStillLaunches(t *testing.T) {
 	d := newEnrolledDaemon(t, "d-"+strings.Repeat("a", 32))
 	t.Cleanup(d.stopEventBus)
@@ -201,8 +204,8 @@ func TestDelegationOnAnOutpostBindsNoSeedAndStillLaunches(t *testing.T) {
 	if strings.Contains(prompt, "attn seed note") {
 		t.Fatalf("the delegate was pointed at a garden that is not here:\n%s", prompt)
 	}
-	if ticket, err := d.store.ActiveTicketForSession(result.SessionID); err != nil || ticket == nil {
-		t.Fatalf("the ticket must still bind on an outpost: %v, %v", ticket, err)
+	if session := d.store.Get(result.SessionID); session == nil {
+		t.Fatalf("the delegation did not launch on an outpost")
 	}
 }
 
@@ -219,8 +222,9 @@ func plantForDelegation(t *testing.T, d *Daemon, sessionID, title string) protoc
 	return resp.SeedPlantResult.Seed
 }
 
-// Status reports become log notes: whatever the delegate reports onto its
-// ticket lands on its seed too, so the seed's log is the whole thread.
+// Status reports become log notes: whatever moves the ticket of work that was
+// already ticket-bound at the cutover lands on its seed too, so the seed's log
+// is the whole thread.
 func TestStatusReportsLandOnTheBoundSeedsLog(t *testing.T) {
 	d, backend, sourceSessionID := newGardenDelegationDaemon(t)
 	consumeDelegatedPrompt(t, backend)
@@ -234,6 +238,7 @@ func TestStatusReportsLandOnTheBoundSeedsLog(t *testing.T) {
 		t.Fatalf("delegate(): %v", err)
 	}
 	seedID, _ := d.gardenDispatchCrown(result.SessionID)
+	bindLegacyTicket(t, d, result.SessionID, sourceSessionID)
 
 	awaitSeedNotes(t, d, seedID, 2, func() {
 		for _, report := range []struct{ state, comment string }{
@@ -295,6 +300,7 @@ func TestCompletedReportDoesNotHarvestTheSeed(t *testing.T) {
 		t.Fatalf("delegate(): %v", err)
 	}
 	seedID, _ := d.gardenDispatchCrown(result.SessionID)
+	bindLegacyTicket(t, d, result.SessionID, sourceSessionID)
 
 	awaitSeedNotes(t, d, seedID, 1, func() {
 		callSetTicketStatus(t, d, result.SessionID, string(protocol.DispatchWorkStateCompleted), "merged")
@@ -334,17 +340,14 @@ func TestNudgingSomebodyElsesTicketMirrorsNothing(t *testing.T) {
 	}
 	workerSeed, _ := d.gardenDispatchCrown(worker.SessionID)
 	peerSeed, _ := d.gardenDispatchCrown(peer.SessionID)
-	workerTicket, err := d.store.ActiveTicketForSession(worker.SessionID)
-	if err != nil || workerTicket == nil {
-		t.Fatalf("ActiveTicketForSession: %v, %v", workerTicket, err)
-	}
+	workerTicketID := bindLegacyTicket(t, d, worker.SessionID, sourceSessionID)
 
 	awaitStatusHandled(t, d, &protocol.SetTicketStatusMessage{
 		Cmd:             protocol.CmdSetTicketStatus,
 		SourceSessionID: peer.SessionID,
 		WorkState:       protocol.DispatchWorkStateNeedsInput,
 		Comment:         protocol.Ptr("waiting on you"),
-		TicketID:        protocol.Ptr(workerTicket.ID),
+		TicketID:        protocol.Ptr(workerTicketID),
 	})
 
 	if total := show(t, d, workerSeed).NotesTotal; total != 0 {
