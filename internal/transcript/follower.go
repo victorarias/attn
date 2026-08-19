@@ -13,9 +13,10 @@ import (
 // decoded from it. Raw stays available because live state classification reads
 // provider-specific evidence that is intentionally not part of Event.
 type FollowRecord struct {
-	Raw    []byte
-	Events []Event
-	Usage  *TokenUsage
+	Raw     []byte
+	Events  []Event
+	Usage   *TokenUsage
+	Context *ContextObservation
 }
 
 // FollowBatch is the append-only delta since the follower's previous read.
@@ -23,6 +24,9 @@ type FollowBatch struct {
 	Records []FollowRecord
 	Events  []Event
 	Usage   []TokenUsage
+	// Context is the newest occupancy reading in this batch, or nil when no
+	// record carried one. Only the newest matters: every reading is absolute.
+	Context *ContextObservation
 }
 
 // Follower reads each complete transcript record once while preserving the
@@ -191,6 +195,10 @@ func (f *Follower) Read() (FollowBatch, error) {
 		if usage, ok := f.usage.Observe(raw, encodeEventCursor(f.fingerprint, lineOffset, 0)); ok {
 			followRecord.Usage = &usage
 			batch.Usage = append(batch.Usage, usage)
+		}
+		if occupancy, ok := ContextOccupancy(f.agent, raw); ok {
+			followRecord.Context = &occupancy
+			batch.Context = &occupancy
 		}
 		batch.Records = append(batch.Records, followRecord)
 		batch.Events = append(batch.Events, events...)

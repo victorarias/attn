@@ -17,6 +17,11 @@ import (
 // priming (~$0.30, and the day's live context). So: warm it while the user is
 // there, and end the day when they are not, because warmth bought through an
 // absence is warmth nobody uses.
+//
+// Context fill is the third thing it watches, and the only one that is not
+// about money: a member whose context fills up is compacted by its harness, and
+// a compact is not a nap. What the day was survives as the harness's summary of
+// itself rather than as the letter the member would have written.
 
 // CacheState is what attn believes about a session's prompt cache. It is an
 // ESTIMATE and says so in its name: no API reports a cache entry's remaining
@@ -36,6 +41,20 @@ type CacheState struct {
 // Remaining is how long the estimate says the cache has left. Negative once the
 // estimate says it has lapsed.
 func (c CacheState) Remaining() time.Duration { return c.TTL - c.Age }
+
+// ContextPressure is how full a member's context is against the budget its day
+// gets. Both in tokens; a zero Tokens means attn has no reading — a harness it
+// cannot parse, or a session that has not spoken yet — and a member attn cannot
+// measure is never asked to close on this ground.
+type ContextPressure struct {
+	Tokens int64
+	Budget int64
+}
+
+// Full reports that the day has spent its context budget.
+func (c ContextPressure) Full() bool {
+	return c.Tokens > 0 && c.Budget > 0 && c.Tokens >= c.Budget
+}
 
 // Signals is everything the decision reads. Assembled by the daemon once per
 // tick per awake member.
@@ -59,11 +78,18 @@ type Signals struct {
 	// member's own question with filler and buries it, while the handoff ask is
 	// precisely the answer an absence has for an open question.
 	Settled bool
+	// Context is how full the member's context is against its budget. Read
+	// independently of everything above: a full context is a full context whether
+	// the user is here, the cache is fresh, or the member is mid-thought.
+	Context ContextPressure
 	// HeartbeatEnabled and AutoSleepEnabled are the two halves' switches. Both
 	// on by default; either off means that half does nothing at all, never that
 	// the other half covers for it.
 	HeartbeatEnabled bool
 	AutoSleepEnabled bool
+	// ContextHandoffEnabled is the third half's switch, default on like the
+	// others.
+	ContextHandoffEnabled bool
 }
 
 // Action is what to do about one awake member this tick.
@@ -79,6 +105,10 @@ const (
 	ActionHeartbeat
 	// ActionSleep prompts the member's handoff so the day ends.
 	ActionSleep
+	// ActionContextHandoff prompts the member's handoff because its context is
+	// nearly full. The same turnover as ActionSleep and for the opposite reason:
+	// sleep ends a day nobody is watching, this ends a day that ran out of room.
+	ActionContextHandoff
 )
 
 func (a Action) String() string {
@@ -87,6 +117,8 @@ func (a Action) String() string {
 		return "heartbeat"
 	case ActionSleep:
 		return "sleep"
+	case ActionContextHandoff:
+		return "context_handoff"
 	default:
 		return "none"
 	}
@@ -99,14 +131,24 @@ func (a Action) String() string {
 // on holiday. Only once the cache is about to lapse is there a decision worth
 // spending anything on — and then who is here decides which way it goes.
 //
-// The two halves ask different things of the session they act on. Ending a day
-// is an answer to whatever the member was waiting for, so it only needs the
-// session to take input. Warming a cache is not an answer to anything, so it
-// waits for a session that owes nobody one — a heartbeat typed at a member
-// holding a question for the user answers that question with filler.
+// Context fill is not gated on cache pressure and sits above it: it is the one
+// condition that only gets worse, and waiting it out is how a day is lost.
+//
+// The three actions ask different things of the session they act on. Ending a
+// day — for context or for an absence — is an answer to whatever the member was
+// waiting for, so it only needs the session to take input. Warming a cache is
+// not an answer to anything, so it waits for a session that owes nobody one: a
+// heartbeat typed at a member holding a question for the user answers that
+// question with filler.
 func Decide(s Signals) Action {
 	if !s.Reachable {
 		return ActionNone
+	}
+	// A cache lapse costs a re-write; a full context costs the day — the harness
+	// compacts it, and what the member would have written a letter about survives
+	// only as the harness's summary of itself.
+	if s.ContextHandoffEnabled && s.Context.Full() {
+		return ActionContextHandoff
 	}
 	if s.Cache.Remaining() > s.Lead {
 		return ActionNone

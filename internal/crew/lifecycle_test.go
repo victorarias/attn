@@ -18,10 +18,15 @@ func TestDecide(t *testing.T) {
 	expiring := CacheState{Age: 58 * time.Minute, TTL: ttl}
 	lapsed := CacheState{Age: 90 * time.Minute, TTL: ttl}
 
+	// Every row runs with the context half ON and no reading taken, so each one
+	// also asserts that a member attn cannot measure is never asked to close on
+	// that ground.
 	base := Signals{
 		AwayLimit: limit, Lead: lead, Reachable: true, Settled: true,
-		HeartbeatEnabled: true, AutoSleepEnabled: true,
+		HeartbeatEnabled: true, AutoSleepEnabled: true, ContextHandoffEnabled: true,
 	}
+	full := ContextPressure{Tokens: 160000, Budget: 160000}
+	roomy := ContextPressure{Tokens: 40000, Budget: 160000}
 	with := func(mutate func(*Signals)) Signals {
 		s := base
 		mutate(&s)
@@ -112,6 +117,56 @@ func TestDecide(t *testing.T) {
 		{
 			name:    "auto-sleep off does not become a heartbeat while the user is gone",
 			signals: with(func(s *Signals) { s.Cache = expiring; s.AwayFor = 3 * time.Hour; s.AutoSleepEnabled = false }),
+			want:    ActionNone,
+		},
+		{
+			// The whole point of the third half: the user is right here and the cache
+			// is fresh, so neither cache-driven half has anything to say, and the day
+			// still has to end because the harness is about to compact it.
+			name:    "a full context ends the day with the user watching and the cache warm",
+			signals: with(func(s *Signals) { s.Cache = warm; s.Context = full }),
+			want:    ActionContextHandoff,
+		},
+		{
+			// Warming the cache of a day that is about to end is money spent on
+			// context nobody will use.
+			name:    "a full context outranks the heartbeat its cache would have earned",
+			signals: with(func(s *Signals) { s.Cache = expiring; s.Context = full }),
+			want:    ActionContextHandoff,
+		},
+		{
+			name:    "a context with room left decides nothing on its own",
+			signals: with(func(s *Signals) { s.Cache = warm; s.Context = roomy }),
+			want:    ActionNone,
+		},
+		{
+			// Closing IS an answer, so an unsettled member gets asked — the same rule
+			// auto-sleep follows, for the same reason.
+			name:    "an unsettled session with a full context is still asked to close",
+			signals: with(func(s *Signals) { s.Cache = warm; s.Context = full; s.Settled = false }),
+			want:    ActionContextHandoff,
+		},
+		{
+			// Mid-turn the ask would queue behind work nobody asked to interrupt, and
+			// the member is talking to the model right now anyway.
+			name:    "an unreachable session is not asked to close a full context",
+			signals: with(func(s *Signals) { s.Cache = warm; s.Context = full; s.Reachable = false }),
+			want:    ActionNone,
+		},
+		{
+			name:    "the context half off leaves a full context alone",
+			signals: with(func(s *Signals) { s.Cache = warm; s.Context = full; s.ContextHandoffEnabled = false }),
+			want:    ActionNone,
+		},
+		{
+			// Off means off, not "the other halves cover for it".
+			name:    "the context half off does not become a heartbeat",
+			signals: with(func(s *Signals) { s.Cache = expiring; s.Context = full; s.ContextHandoffEnabled = false }),
+			want:    ActionHeartbeat,
+		},
+		{
+			name:    "a budget attn could not resolve never reads as full",
+			signals: with(func(s *Signals) { s.Cache = warm; s.Context = ContextPressure{Tokens: 900000} }),
 			want:    ActionNone,
 		},
 	}

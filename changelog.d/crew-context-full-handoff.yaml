@@ -1,0 +1,12 @@
+kind: added
+area: crew
+change: >
+  A crew member whose context is nearly full is now asked to hand off — write
+  the letter, file it with `attn handoff` — instead of drifting into its
+  harness's auto-compact, which would leave the harness's summary of the day
+  where the member's own letter should be. attn reads how full a live session's
+  context is from its transcript (Claude Code and Codex; other harnesses report
+  nothing and are left alone), asks once per session, and re-asks only if a
+  compaction happened anyway and the context filled a second time. A member's
+  day gets 160,000 tokens by default — `crew.context_handoff_tokens` moves it,
+  `crew.context_handoff_enabled=false` turns the whole thing off.

@@ -139,6 +139,13 @@ const (
 	// SettingCrewAutoSleepEnabled gates auto-sleep — the prompted handoff that
 	// ends a member's day when the user is truly gone. Default ON.
 	SettingCrewAutoSleepEnabled = "crew.autosleep_enabled"
+	// SettingCrewContextHandoffEnabled gates the context-full handoff — the
+	// prompted turnover that ends a member's day before its harness compacts it.
+	// Default ON.
+	SettingCrewContextHandoffEnabled = "crew.context_handoff_enabled"
+	// SettingCrewContextHandoffTokens is how much context a member's day gets
+	// before that ask goes out. Receipt on crewContextBudgetDefault.
+	SettingCrewContextHandoffTokens = "crew.context_handoff_tokens"
 	// SettingCrewCacheTTLSeconds is the assumed prompt-cache lifetime for a
 	// harness this daemon has no shipped assumption for. Per-harness override:
 	// SettingCrewCacheTTLPrefix + agent.
@@ -409,6 +416,7 @@ func (d *Daemon) settingsWithAgentAvailability() map[string]interface{} {
 	// and listing every harness attn might ever launch would be noise.
 	settings[SettingCrewHeartbeatEnabled] = strconv.FormatBool(d.crewBoolSetting(SettingCrewHeartbeatEnabled))
 	settings[SettingCrewAutoSleepEnabled] = strconv.FormatBool(d.crewBoolSetting(SettingCrewAutoSleepEnabled))
+	settings[SettingCrewContextHandoffEnabled] = strconv.FormatBool(d.crewBoolSetting(SettingCrewContextHandoffEnabled))
 	settings[SettingCrewCacheTTLSeconds] = strconv.Itoa(int(d.crewCacheTTL("") / time.Second))
 	settings[SettingCrewHeartbeatLeadSeconds] = strconv.Itoa(int(d.crewHeartbeatLead() / time.Second))
 	settings[SettingCrewAwaySeconds] = strconv.Itoa(int(d.crewAwayLimit() / time.Second))
@@ -587,8 +595,10 @@ func (d *Daemon) validateSetting(key, value string) error {
 			activityPresenceIdleMinSeconds,
 			activityPresenceIdleMaxSeconds,
 		)
-	case SettingCrewHeartbeatEnabled, SettingCrewAutoSleepEnabled:
+	case SettingCrewHeartbeatEnabled, SettingCrewAutoSleepEnabled, SettingCrewContextHandoffEnabled:
 		return validateBooleanSetting(value)
+	case SettingCrewContextHandoffTokens:
+		return validateBoundedIntSetting("crew context handoff budget", value, crewContextBudgetMinTokens, crewContextBudgetMaxTokens)
 	case SettingCrewCacheTTLSeconds:
 		return validateBoundedIntSetting("crew cache TTL", value, crewCacheTTLMinSeconds, crewCacheTTLMaxSeconds)
 	case SettingCrewHeartbeatLeadSeconds:
