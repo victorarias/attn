@@ -27,12 +27,14 @@ and is the gate a bump has to clear.
 Verified against the pinned pi (0.83.0) by reading
 `node_modules/@earendil-works/`. Re-check an entry after a bump.
 
-- **A nisse host never gets a `session_shutdown`.** The emit lives on
+- **`session_shutdown` is the runtime's emit, not the session's.** It lives on
   `AgentSessionRuntime.dispose()`; `AgentSession.dispose()`, which
-  `host/index.ts` calls, does not emit it at all, and the host builds its
-  session with `createAgentSession` rather than the runtime. In the pi TUI it
-  fires on clean quit and SIGTERM/SIGHUP but not on an uncaught exception
-  (`uncaughtCrash` goes straight to `process.exit(1)`) or SIGKILL. Either way:
+  `host/index.ts` calls, emits nothing, and the host builds its session with
+  `createAgentSession` rather than the runtime — so nisse emits the event
+  itself on the way down, handlers first and dispose after, the order the
+  runtime uses. In the pi TUI it fires on clean quit and SIGTERM/SIGHUP but not
+  on an uncaught exception (`uncaughtCrash` goes straight to
+  `process.exit(1)`) or SIGKILL, and the same holds for nisse. Either way:
   **child exit is the liveness signal; a missing goodbye means nothing.**
 - **Module scope survives a session transition only while cwd does not
   change.** pi's extension module cache is keyed on cwd and a generation

@@ -1,0 +1,11 @@
+kind: fixed
+area: plugins
+change: >
+  Extensions running inside a nisse conversation now hear pi's
+  `session_shutdown` when the session stops cleanly. The host asked the agent
+  session to dispose, and pi emits that event from a different object, so
+  everything an extension does on shutdown — flushing a file, closing a
+  connection, saving state — was silently skipped.
+symptom: >
+  A pi extension's shutdown work never ran in an attn conversation session,
+  though it ran fine in pi's own terminal UI.
