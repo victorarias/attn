@@ -235,13 +235,17 @@ comments, status changes, and artifact attachments on its activity thread.
 
 Tickets are retired. A delegation binds a **seed** instead, reports are notes on
 its log, and every `attn ticket` write verb prints the garden command that
-replaced it and exits nonzero. Two things survive, on purpose:
+replaced it and exits nonzero. Three things survive, on purpose:
 
 - `attn ticket show` and `attn ticket list` keep reading the archived board
   forever — a done ticket has no garden equivalent to point at.
 - Work that was already ticket-bound at the cutover keeps moving on its ticket:
   the daemon mirrors its tender's garden moves and notes onto it, so an
   in-flight delegation still closes where it started.
+- An automation run still mints its own daemon-internal ticket, because
+  continuation, retention, and crash classification are keyed on it. It is not
+  an agent-facing card: no CLI verb creates or moves one, and the seed moves
+  mirror onto it like any other.
 
 Unbound backlog todos were converted to seeds at the cutover, each carrying its
 description as the seed's body and a log note naming the ticket it came from.
