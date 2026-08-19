@@ -3371,6 +3371,16 @@ export function useUiAutomationBridge({
             fromBottom: Math.round(list.scrollHeight - list.scrollTop - list.clientHeight),
           }
           : null;
+        // The reading column, measured rather than inferred: a max-width that
+        // silently fails to apply looks exactly like a pane too narrow to show
+        // it. `available` is what the column had to work with.
+        const firstMessage = root.querySelector('.conversation-message');
+        const column = list instanceof HTMLElement && firstMessage instanceof HTMLElement
+          ? {
+            available: Math.round(list.clientWidth),
+            message: Math.round(firstMessage.getBoundingClientRect().width),
+          }
+          : null;
         // What the agent has been sent and has not read yet, in the order the
         // pane shows it. A nudge scenario asserts the whole arc on this: the
         // entry appears here, then leaves as the message it delivered appears
@@ -3421,6 +3431,7 @@ export function useUiAutomationBridge({
           sessionId,
           messages,
           scroll,
+          column,
           tools,
           notices,
           queued,
