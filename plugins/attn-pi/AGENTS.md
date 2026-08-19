@@ -52,9 +52,15 @@ Verified against the pinned pi (0.83.0) by reading
   external-editor path spawns `$VISUAL`/`$EDITOR` (default `nano`) with
   `stdio: "inherit"`, so a vim or nvim user writes CPR and mode 1049 straight
   into attn's PTY.
-- **pi's light/dark probe reaches attn only through its fallback.** pi asks
-  DSR `CSI ?996n` first and falls back to OSC 11; attn answers OSC 11 from the
-  daemon-pushed theme and answers `?996n` nowhere. pi also toggles mode 2031.
+- **pi's light/dark probe is DSR `CSI ?996n`, with OSC 11 as its fallback.**
+  Both are answered from the daemon-pushed theme, by one rule: WCAG relative
+  luminance of the background, `>= 0.5` is light — pi's own cut, so the two
+  answers cannot disagree. The reply is `CSI ?997;1n` dark / `;2n` light.
+  pi asks only when its theme setting is the `light/dark` auto form, and
+  subscribes to unsolicited reports with mode 2031, which attn sends on a
+  runtime theme change and only when the light/dark answer actually moved.
+  ghostty-vt answers `?996n` with nothing, so there is no second responder to
+  strip.
 - **pi negotiates the Kitty keyboard protocol at start** with
   `ESC[>7u ESC[?u ESC[c` and pops it with `ESC[<u` on stop. attn's worker
   answers the trailing DA1, so pi falls back to modifyOtherKeys
