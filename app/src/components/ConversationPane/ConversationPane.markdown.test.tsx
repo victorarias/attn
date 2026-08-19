@@ -1,11 +1,11 @@
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, render, screen } from '@testing-library/react';
 import { ConversationPane } from './index';
 import { Markdown } from '../Markdown';
 import { DaemonApiProvider, type DaemonApi } from '../../contexts/DaemonApiContext';
 import { useConversationsStore } from '../../store/conversations';
+import mdTour from './__recordings__/md-tour.jsonl?raw';
+import mdLong from './__recordings__/md-long.jsonl?raw';
 
 /**
  * The pane, driven by envelope streams RECORDED FROM REAL nisse SESSIONS.
@@ -21,9 +21,10 @@ const SESSION = 'sess-md';
 
 interface Recorded { at: number; envelope: { seq: number; kind: string; body: Record<string, unknown> } }
 
+const RECORDINGS: Record<string, string> = { 'md-tour': mdTour, 'md-long': mdLong };
+
 function recording(name: string): Recorded[] {
-  const path = join(__dirname, '__recordings__', `${name}.jsonl`);
-  return readFileSync(path, 'utf8').trim().split('\n').map((line) => JSON.parse(line) as Recorded);
+  return RECORDINGS[name].trim().split('\n').map((line: string) => JSON.parse(line) as Recorded);
 }
 
 function renderPane() {
@@ -89,6 +90,9 @@ describe('ConversationPane markdown, replayed from real recordings', () => {
       });
       expect(markdownHtml(id)).toBe(streamed);
     },
+    // md-long is 1,364 deltas re-parsed against a happy-dom tree; the default
+    // 5 s is a limit on the fixture's size, not on anything under test.
+    60_000,
   );
 
   it('renders structure, not the markdown source', () => {

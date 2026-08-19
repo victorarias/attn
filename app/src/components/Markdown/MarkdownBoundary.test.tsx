@@ -1,8 +1,9 @@
+import type { ReactElement } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { MarkdownBoundary } from './MarkdownBoundary';
 
-function Explodes(): JSX.Element {
+function Explodes(): ReactElement {
   throw new Error('bad markdown');
 }
 

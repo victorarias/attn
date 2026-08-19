@@ -85,14 +85,20 @@ export function ConversationPane({ sessionId, paneActive, sessionState, resolved
 
   // Follow the stream. Only when the reader is already at the bottom: scrolling
   // back to re-read something must not be yanked away by the next delta.
+  //
+  // Whether they are at the bottom is decided by the reader's own scrolling, not
+  // by measuring after the delta landed. Markdown makes a delta grow the
+  // document by a whole block — an opening code fence measured 133px in one
+  // paint, against a tolerance of 80 — so a measurement taken afterwards reads
+  // that growth as the reader having scrolled back, and follow mode never
+  // returns. Appending content does not move scrollTop and fires no scroll
+  // event, so this ref only moves when the reader (or the line below) moves it.
+  const followingRef = useRef(true);
   const lastLength = items.reduce((total, item) => total + itemLength(item), 0);
-  useEffect(() => {
+  useLayoutEffect(() => {
     const list = listRef.current;
     if (!list) return;
-    const distanceFromBottom = list.scrollHeight - list.scrollTop - list.clientHeight;
-    if (distanceFromBottom < 80) {
-      list.scrollTop = list.scrollHeight;
-    }
+    if (followingRef.current) list.scrollTop = list.scrollHeight;
   }, [lastLength, items.length]);
 
   // Paging older history in puts content ABOVE what the reader is looking at,
@@ -127,6 +133,7 @@ export function ConversationPane({ sessionId, paneActive, sessionState, resolved
     const list = listRef.current;
     if (!list) return;
     anchorRef.current = { key: oldestKey, fromBottom: list.scrollHeight - list.scrollTop };
+    followingRef.current = list.scrollHeight - list.scrollTop - list.clientHeight < 80;
     // Fetch before the reader arrives at the top. The threshold is a screen of
     // reading, so on a fast host the page has landed by the time they get there
     // and the conversation just keeps going up.

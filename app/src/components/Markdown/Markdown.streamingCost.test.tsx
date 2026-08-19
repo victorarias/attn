@@ -1,8 +1,7 @@
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { act, cleanup, render } from '@testing-library/react';
 import { Markdown } from './index';
+import mdLong from '../ConversationPane/__recordings__/md-long.jsonl?raw';
 
 /**
  * What the settled/tail split buys, measured on the real recording.
@@ -14,10 +13,8 @@ import { Markdown } from './index';
  * the two runs is the same work in the same place, and that is the receipt.
  */
 
-const RECORDING = join(__dirname, '../ConversationPane/__recordings__/md-long.jsonl');
-
 function prefixes(): string[] {
-  const rows = readFileSync(RECORDING, 'utf8').trim().split('\n').map((line) => JSON.parse(line));
+  const rows = mdLong.trim().split('\n').map((line: string) => JSON.parse(line));
   const out: string[] = [];
   let text = '';
   for (const row of rows) {
