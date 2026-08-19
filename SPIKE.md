@@ -7,10 +7,14 @@ how to run what is here.
 
 ```bash
 make install PROFILE=mdspike        # or any throwaway profile name
+env -u ATTN_WS_PORT ATTN_PROFILE=mdspike attn plugin install-bundled attn-pi
 env -u ATTN_WS_PORT ATTN_PROFILE=mdspike ATTN_HARNESS_PROFILE=mdspike \
   ATTN_HARNESS_PARK_VISIBLE_PX=0 \
   node app/scripts/real-app-harness/nisse-markdown-demo.mjs
 ```
+
+A fresh profile ships attn-pi bundled but not installed, and without it
+`create_session` refuses with `agent "nisse" is not available`.
 
 It launches the profile's app, opens a nisse conversation, and replays a
 recorded reply — 7,845 chars over 317 coalesced deltas in 13.8 s — into the
@@ -18,7 +22,10 @@ pane at the pacing it was recorded at. No model is called. The app is left
 running: scroll back mid-replay and watch the view hold still, or stay at the
 bottom and watch it follow.
 
-- `--recording md-long` replays the 27,540-char reply instead.
+- `--recording md-long` replays the 27,540-char reply instead. Use this one to
+  watch a mermaid diagram draw: md-tour's only diagram is invalid mermaid as
+  the model wrote it (line 5, a bare `[` inside an edge label), so it settles
+  into mermaid's parse error. That is the recording, not the renderer.
 - `--theme light` relaunches in the light theme first.
 
 ## Check it
