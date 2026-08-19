@@ -37,11 +37,14 @@ Verified against the pinned pi (0.83.0) by reading
 - **Module scope survives a session transition only while cwd does not
   change.** pi's extension module cache is keyed on cwd and a generation
   counter: a resume/fork/new in the same directory keeps it, resuming a session
-  from another folder clears it, and `/reload` clears it outright. So the relay
-  client and `AutoMode` at module scope are rebuilt in both of those cases, and
-  a socket held there is orphaned rather than closed. pi's docs tell extension
-  authors the opposite contract — rebuild in `session_start` — so do not
-  lean on it harder than the relay already does.
+  from another folder clears it, and `/reload` clears it outright. A cleared
+  cache re-evaluates the entrypoint in the same process, so module scope is not
+  the process-wide slot it reads as, and anything rebuilt there that holds an
+  OS resource orphans the old one. The relay client and `AutoMode` therefore
+  live in a `globalThis` slot (`suite/singleton.ts`), which is how pi keeps its
+  own theme across module loaders. pi's docs tell extension authors the
+  opposite contract — rebuild in `session_start` — so keep per-session state
+  in the factory run and only process-lived resources in the slot.
 - **The worker must keep answering CPR even though pi never sends one.** pi's
   own renderer sends no CPR and never enters the alternate screen, but the
   external-editor path spawns `$VISUAL`/`$EDITOR` (default `nano`) with
@@ -111,9 +114,10 @@ Verified against the pinned pi (0.83.0) by reading
 - It must never crash or block pi: relay sends are fire-and-forget, failures
   are swallowed, and missing `ATTN_PI_SUITE_SOCKET`/`ATTN_PI_TOKEN` turns the
   whole suite into a no-op so a bare pi outside attn is unaffected.
-- The relay client lives at module scope (see the module-scope entry above);
-  every factory re-run re-binds the current pi/ctx rather than re-dialing, and
-  a stale one makes `driver.deliver_message` answer `delivered: false`.
+- The relay client lives in the process-wide slot (see the module-scope entry
+  above); every factory re-run re-binds the current pi/ctx rather than
+  re-dialing, and a stale one makes `driver.deliver_message` answer
+  `delivered: false`.
 - **Identity is re-announced on every `session_start`, never inferred from
   files** — a transition mints a new pi session id on a connection that is
   already open (`suite/core.ts` carries the same note at the handler). pi's
