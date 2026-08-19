@@ -1,0 +1,12 @@
+kind: fixed
+area: plugins
+change: >
+  Running `/reload` inside a pi session no longer leaves a dead relay
+  connection behind. pi clears its extension module cache on reload, which
+  re-evaluates attn's suite in the same process, and the suite rebuilt its
+  connection to attn there — a second socket, with the first one still open and
+  nobody reading it. The connection and auto mode's own state now live in a
+  process-wide slot, so a reload rebinds them instead of replacing them.
+symptom: >
+  After `/reload`, a pi session could stop reporting its state to attn, and
+  messages sent from attn were not delivered.

@@ -27,29 +27,40 @@ and is the gate a bump has to clear.
 Verified against the pinned pi (0.83.0) by reading
 `node_modules/@earendil-works/`. Re-check an entry after a bump.
 
-- **A nisse host never gets a `session_shutdown`.** The emit lives on
+- **`session_shutdown` is the runtime's emit, not the session's.** It lives on
   `AgentSessionRuntime.dispose()`; `AgentSession.dispose()`, which
-  `host/index.ts` calls, does not emit it at all, and the host builds its
-  session with `createAgentSession` rather than the runtime. In the pi TUI it
-  fires on clean quit and SIGTERM/SIGHUP but not on an uncaught exception
-  (`uncaughtCrash` goes straight to `process.exit(1)`) or SIGKILL. Either way:
+  `host/index.ts` calls, emits nothing, and the host builds its session with
+  `createAgentSession` rather than the runtime — so nisse emits the event
+  itself on the way down, handlers first and dispose after, the order the
+  runtime uses. In the pi TUI it fires on clean quit and SIGTERM/SIGHUP but not
+  on an uncaught exception (`uncaughtCrash` goes straight to
+  `process.exit(1)`) or SIGKILL, and the same holds for nisse. Either way:
   **child exit is the liveness signal; a missing goodbye means nothing.**
 - **Module scope survives a session transition only while cwd does not
   change.** pi's extension module cache is keyed on cwd and a generation
   counter: a resume/fork/new in the same directory keeps it, resuming a session
-  from another folder clears it, and `/reload` clears it outright. So the relay
-  client and `AutoMode` at module scope are rebuilt in both of those cases, and
-  a socket held there is orphaned rather than closed. pi's docs tell extension
-  authors the opposite contract — rebuild in `session_start` — so do not
-  lean on it harder than the relay already does.
+  from another folder clears it, and `/reload` clears it outright. A cleared
+  cache re-evaluates the entrypoint in the same process, so module scope is not
+  the process-wide slot it reads as, and anything rebuilt there that holds an
+  OS resource orphans the old one. The relay client and `AutoMode` therefore
+  live in a `globalThis` slot (`suite/singleton.ts`), which is how pi keeps its
+  own theme across module loaders. pi's docs tell extension authors the
+  opposite contract — rebuild in `session_start` — so keep per-session state
+  in the factory run and only process-lived resources in the slot.
 - **The worker must keep answering CPR even though pi never sends one.** pi's
   own renderer sends no CPR and never enters the alternate screen, but the
   external-editor path spawns `$VISUAL`/`$EDITOR` (default `nano`) with
   `stdio: "inherit"`, so a vim or nvim user writes CPR and mode 1049 straight
   into attn's PTY.
-- **pi's light/dark probe reaches attn only through its fallback.** pi asks
-  DSR `CSI ?996n` first and falls back to OSC 11; attn answers OSC 11 from the
-  daemon-pushed theme and answers `?996n` nowhere. pi also toggles mode 2031.
+- **pi's light/dark probe is DSR `CSI ?996n`, with OSC 11 as its fallback.**
+  Both are answered from the daemon-pushed theme, by one rule: WCAG relative
+  luminance of the background, `>= 0.5` is light — pi's own cut, so the two
+  answers cannot disagree. The reply is `CSI ?997;1n` dark / `;2n` light.
+  pi asks only when its theme setting is the `light/dark` auto form, and
+  subscribes to unsolicited reports with mode 2031, which attn sends on a
+  runtime theme change and only when the light/dark answer actually moved.
+  ghostty-vt answers `?996n` with nothing, so there is no second responder to
+  strip.
 - **pi negotiates the Kitty keyboard protocol at start** with
   `ESC[>7u ESC[?u ESC[c` and pops it with `ESC[<u` on stop. attn's worker
   answers the trailing DA1, so pi falls back to modifyOtherKeys
@@ -111,9 +122,10 @@ Verified against the pinned pi (0.83.0) by reading
 - It must never crash or block pi: relay sends are fire-and-forget, failures
   are swallowed, and missing `ATTN_PI_SUITE_SOCKET`/`ATTN_PI_TOKEN` turns the
   whole suite into a no-op so a bare pi outside attn is unaffected.
-- The relay client lives at module scope (see the module-scope entry above);
-  every factory re-run re-binds the current pi/ctx rather than re-dialing, and
-  a stale one makes `driver.deliver_message` answer `delivered: false`.
+- The relay client lives in the process-wide slot (see the module-scope entry
+  above); every factory re-run re-binds the current pi/ctx rather than
+  re-dialing, and a stale one makes `driver.deliver_message` answer
+  `delivered: false`.
 - **Identity is re-announced on every `session_start`, never inferred from
   files** — a transition mints a new pi session id on a connection that is
   already open (`suite/core.ts` carries the same note at the handler). pi's

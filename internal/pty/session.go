@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"os/exec"
 	"strconv"
@@ -63,6 +64,9 @@ type terminalQueries struct {
 	// oscQueryOrder lists the OSC color codes (10/11/12) queried, in ask order
 	// — clients that pair replies positionally depend on it.
 	oscQueryOrder []int
+	// colorScheme counts DSR `CSI ? 996 n` color-scheme queries, the same way
+	// the OSC counts do: one reply per ask.
+	colorScheme int
 	// da1BeforeCPR records that the chunk asked DA1 before CPR.
 	da1BeforeCPR bool
 }
@@ -113,9 +117,16 @@ type Session struct {
 	writeMu    sync.Mutex
 	ptmxClosed bool
 
-	// themeMu guards theme, which seeds OSC 10/11/12 replies.
-	themeMu sync.RWMutex
-	theme   TerminalTheme
+	// themeMu guards theme, which seeds OSC 10/11/12 and DSR 996 replies, and
+	// reportedScheme, the light/dark answer the child was last told — the
+	// gate that keeps SetTheme from re-announcing a scheme that did not move.
+	themeMu        sync.RWMutex
+	theme          TerminalTheme
+	reportedScheme colorScheme
+	// colorSchemeReports is set by the child's DECSET 2031 and cleared by its
+	// DECRST: unsolicited scheme reports are what that mode subscribes to, and
+	// a child that never asked for them must not receive any.
+	colorSchemeReports atomic.Bool
 
 	// harnessSignals and shellSignals read state signals off the RAW stream;
 	// neither alters the bytes. shellSignals is nil for non-shell agents.
@@ -335,6 +346,10 @@ func (s *Session) readLoop(onExit func(exitCode int, signal string), logf func(s
 				if len(queries.oscQueryOrder) > 0 {
 					s.writeOSCColorResponses(queries, logf)
 				}
+				if queries.colorScheme > 0 {
+					s.writeColorSchemeResponses(queries.colorScheme, logf)
+				}
+				s.trackColorSchemeReports(data)
 
 				seq := s.seqCounter.Add(1)
 				if readLoopSeqGapHook != nil {
@@ -924,6 +939,7 @@ func detectTerminalQueries(data []byte) terminalQueries {
 		}
 	}
 	return terminalQueries{
+		colorScheme:   countColorSchemeQueries(data),
 		da1:           da1Idx >= 0,
 		cpr:           cprIdx >= 0,
 		da1BeforeCPR:  da1Idx >= 0 && cprIdx >= 0 && da1Idx < cprIdx,
@@ -944,7 +960,17 @@ func (s *Session) SetTheme(theme TerminalTheme) error {
 	}
 	s.themeMu.Lock()
 	s.theme = theme
+	scheme := themeColorScheme(theme)
+	changed := scheme != s.reportedScheme
+	s.reportedScheme = scheme
 	s.themeMu.Unlock()
+	// A child subscribed to DECSET 2031 keeps its own theme in step from these
+	// reports; one that never subscribed is not written to, and neither is one
+	// whose scheme did not move — a repaint nobody asked for is what the mode
+	// exists to avoid.
+	if changed && s.colorSchemeReports.Load() {
+		s.writeColorSchemeReport(scheme)
+	}
 	return nil
 }
 
@@ -1019,6 +1045,93 @@ func (s *Session) writeOSCColorResponses(queries terminalQueries, logf func(stri
 			queries.osc12,
 		)
 	}
+}
+
+// colorScheme is the light/dark preference a `CSI ? 996 n` query asks for.
+// The zero value means the child has not been told anything yet.
+type colorScheme int
+
+const (
+	colorSchemeUnknown colorScheme = iota
+	colorSchemeDark
+	colorSchemeLight
+)
+
+// themeColorScheme derives the light/dark answer from the theme's background,
+// with the WCAG relative luminance and the >= 0.5 cut pi itself applies to the
+// OSC 11 color it falls back to (pi 0.83.0, theme.ts getThemeForRgbColor). The
+// two answers come from one background and one rule, so they cannot disagree.
+func themeColorScheme(theme TerminalTheme) colorScheme {
+	background := theme.Background
+	if !isValidHexColor(background) {
+		background = defaultThemeBackground
+	}
+	channel := func(hex string) float64 {
+		value, _ := strconv.ParseUint(hex, 16, 32)
+		linear := float64(value) / 255
+		if linear <= 0.03928 {
+			return linear / 12.92
+		}
+		return math.Pow((linear+0.055)/1.055, 2.4)
+	}
+	luminance := 0.2126*channel(background[1:3]) + 0.7152*channel(background[3:5]) + 0.0722*channel(background[5:7])
+	if luminance >= 0.5 {
+		return colorSchemeLight
+	}
+	return colorSchemeDark
+}
+
+// writeColorSchemeResponses answers every `CSI ? 996 n` query in the chunk.
+// pi asks this before it falls back to OSC 11, so an unanswered query leaves
+// it running on an environment guess for a terminal that knows the answer.
+func (s *Session) writeColorSchemeResponses(count int, logf func(string, ...interface{})) {
+	s.themeMu.Lock()
+	scheme := themeColorScheme(s.theme)
+	s.reportedScheme = scheme
+	s.themeMu.Unlock()
+
+	s.writeMu.Lock()
+	for i := 0; i < count; i++ {
+		_, _ = s.ptmx.Write(colorSchemeReport(scheme))
+	}
+	s.writeMu.Unlock()
+
+	if logf != nil {
+		logf("pty color-scheme reply: session=%s scheme=%d count=%d", s.id, scheme, count)
+	}
+}
+
+// writeColorSchemeReport sends an unsolicited scheme report, which is what a
+// child that enabled DECSET 2031 is listening for.
+func (s *Session) writeColorSchemeReport(scheme colorScheme) {
+	s.writeMu.Lock()
+	_, _ = s.ptmx.Write(colorSchemeReport(scheme))
+	s.writeMu.Unlock()
+}
+
+// colorSchemeReport is the DSR reply the color-palette-notification protocol
+// defines: `CSI ? 997 ; 1 n` for dark, `; 2 n` for light.
+func colorSchemeReport(scheme colorScheme) []byte {
+	if scheme == colorSchemeLight {
+		return []byte("\x1b[?997;2n")
+	}
+	return []byte("\x1b[?997;1n")
+}
+
+// trackColorSchemeReports follows the child's DECSET/DECRST 2031, the mode
+// that subscribes to unsolicited scheme reports. Last one in the chunk wins.
+func (s *Session) trackColorSchemeReports(data []byte) {
+	set := bytes.LastIndex(data, []byte("\x1b[?2031h"))
+	reset := bytes.LastIndex(data, []byte("\x1b[?2031l"))
+	if set < 0 && reset < 0 {
+		return
+	}
+	s.colorSchemeReports.Store(set > reset)
+}
+
+// countColorSchemeQueries counts DSR color-scheme queries (ESC [ ? 9 9 6 n).
+func countColorSchemeQueries(data []byte) int {
+	return bytes.Count(data, []byte("\x1b[?996n"))
 }
 
 // hexColorToOSCValue converts "#rrggbb" into the "rgb:RRRR/GGGG/BBBB" value

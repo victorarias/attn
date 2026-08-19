@@ -504,9 +504,20 @@ async function main(): Promise<void> {
     stream.emit("model_changed", body);
   };
 
-  const shutdown = () => {
+  const shutdown = async () => {
     if (shuttingDown) return;
     shuttingDown = true;
+    // The goodbye extensions listen for. pi emits it from
+    // AgentSessionRuntime, which the modes that own session replacement build;
+    // nisse never replaces a session, so it builds an AgentSession directly —
+    // and AgentSession.dispose() emits nothing (pi 0.83.0). Emitted here, in
+    // the same order the runtime uses: handlers first, dispose after, so an
+    // extension flushing or closing a resource still has a live session.
+    try {
+      await session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
+    } catch (error) {
+      console.error(`[nisse] session_shutdown failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
     // Cooperative teardown is the only kind that reaches pi's tool
     // subprocesses: a hard kill of this process orphans them (receipt: 3x
     // reproduced, 2026-08-04 spike). The daemon SIGTERMs first for exactly
@@ -520,8 +531,8 @@ async function main(): Promise<void> {
     process.exit(0);
   };
 
-  process.on("SIGTERM", shutdown);
-  process.on("SIGINT", shutdown);
+  process.on("SIGTERM", () => void shutdown());
+  process.on("SIGINT", () => void shutdown());
 
   const handleVerb = (verb: HostVerb) => {
     switch (verb.verb) {
@@ -567,7 +578,7 @@ async function main(): Promise<void> {
         return;
       }
       case "shutdown":
-        shutdown();
+        void shutdown();
         return;
     }
   };
@@ -608,7 +619,7 @@ async function main(): Promise<void> {
   }
 
   // stdin closed: the daemon is gone or has finished with us.
-  shutdown();
+  await shutdown();
 }
 
 main().catch((error) => {

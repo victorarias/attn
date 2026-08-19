@@ -1,0 +1,12 @@
+kind: fixed
+area: terminal
+change: >
+  Agents that ask the terminal whether it is light or dark now get an answer.
+  pi asks with a DSR query before falling back to the background color, and
+  attn answered nothing, so pi styled itself from a guess about the environment
+  instead of from the theme in front of it. The answer comes from the same
+  theme background the color replies use, and a theme switch while a session
+  runs is sent to the agents that subscribed to it.
+symptom: >
+  A pi session running in attn drew itself in light colors on a dark theme, or
+  the other way around.

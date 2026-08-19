@@ -310,3 +310,107 @@ func readAvailable(f *os.File, timeout time.Duration) (data []byte, ok bool) {
 		return nil, false
 	}
 }
+
+// TestColorSchemeQueryAnswersFromTheme covers pi's `CSI ? 996 n`: the query it
+// sends before falling back to OSC 11. Dark and light must come from the same
+// background the OSC 11 answer does.
+func TestColorSchemeQueryAnswersFromTheme(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		background string
+		want       string
+	}{
+		{name: "default dark theme", background: "", want: "\x1b[?997;1n"},
+		{name: "light background", background: "#ffffff", want: "\x1b[?997;2n"},
+		{name: "dark background", background: "#1e1e1e", want: "\x1b[?997;1n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, peer := newOSCTestSession(t)
+			if tc.background != "" {
+				if err := s.SetTheme(TerminalTheme{Background: tc.background}); err != nil {
+					t.Fatalf("SetTheme: %v", err)
+				}
+			}
+
+			if _, err := peer.Write([]byte("\x1b[?996n")); err != nil {
+				t.Fatalf("peer write: %v", err)
+			}
+
+			reply := readReplyUntil(t, peer, 2*time.Second, func(buf []byte) bool {
+				return len(buf) >= len(tc.want)
+			})
+			if reply != tc.want {
+				t.Fatalf("reply = %q, want %q", reply, tc.want)
+			}
+		})
+	}
+}
+
+// TestColorSchemeQueryCountsPerChunk: like the OSC counts, each ask needs its
+// own reply or the asking program waits out its timeout.
+func TestColorSchemeQueryCountsPerChunk(t *testing.T) {
+	_, peer := newOSCTestSession(t)
+
+	if _, err := peer.Write([]byte("\x1b[?996n\x1b[?996n")); err != nil {
+		t.Fatalf("peer write: %v", err)
+	}
+
+	want := "\x1b[?997;1n\x1b[?997;1n"
+	reply := readReplyUntil(t, peer, 2*time.Second, func(buf []byte) bool {
+		return len(buf) >= len(want)
+	})
+	if reply != want {
+		t.Fatalf("reply = %q, want %q", reply, want)
+	}
+}
+
+// TestColorSchemeReportFollowsMode2031: a child that subscribed with DECSET
+// 2031 is told when the theme changes under it, and one that did not is not
+// written to at all.
+func TestColorSchemeReportFollowsMode2031(t *testing.T) {
+	t.Run("unsubscribed child hears nothing", func(t *testing.T) {
+		s, peer := newOSCTestSession(t)
+		if err := s.SetTheme(TerminalTheme{Background: "#ffffff"}); err != nil {
+			t.Fatalf("SetTheme: %v", err)
+		}
+		if got, ok := readAvailable(peer, 150*time.Millisecond); ok {
+			t.Fatalf("theme change wrote %q to a child that never enabled mode 2031", got)
+		}
+	})
+
+	t.Run("subscribed child hears the change once", func(t *testing.T) {
+		s, peer := newOSCTestSession(t)
+		if _, err := peer.Write([]byte("\x1b[?2031h")); err != nil {
+			t.Fatalf("peer write: %v", err)
+		}
+		// The mode must be tracked before the theme moves; the read loop is
+		// what tracks it, so answer a query to know it consumed the chunk.
+		if _, err := peer.Write([]byte("\x1b[?996n")); err != nil {
+			t.Fatalf("peer write: %v", err)
+		}
+		if reply := readReplyUntil(t, peer, 2*time.Second, func(buf []byte) bool {
+			return len(buf) >= len("\x1b[?997;1n")
+		}); reply != "\x1b[?997;1n" {
+			t.Fatalf("query reply = %q", reply)
+		}
+
+		if err := s.SetTheme(TerminalTheme{Background: "#ffffff"}); err != nil {
+			t.Fatalf("SetTheme: %v", err)
+		}
+		want := "\x1b[?997;2n"
+		if reply := readReplyUntil(t, peer, 2*time.Second, func(buf []byte) bool {
+			return len(buf) >= len(want)
+		}); reply != want {
+			t.Fatalf("report after SetTheme = %q, want %q", reply, want)
+		}
+
+		// A theme change that does not move the scheme says nothing: the
+		// child repaints on what it is told.
+		if err := s.SetTheme(TerminalTheme{Background: "#fefefe"}); err != nil {
+			t.Fatalf("SetTheme: %v", err)
+		}
+		if got, ok := readAvailable(peer, 150*time.Millisecond); ok {
+			t.Fatalf("a scheme that did not change still reported %q", got)
+		}
+	})
+}
