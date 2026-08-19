@@ -156,6 +156,10 @@ export function GardenPanel({
   // The trail of crowns walked into, root last. Empty is the whole garden, which
   // is where the panel opens.
   const [trail, setTrail] = useState<string[]>([]);
+  // Closed seeds stay out of the listing until asked for: the garden grows
+  // without bound and most of what it holds is done. The toggle carries the
+  // count, so nothing is hidden silently.
+  const [showClosed, setShowClosed] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [seedDocument, setSeedDocument] = useState<SeedDocument | null>(null);
   const [documentLoading, setDocumentLoading] = useState(false);
@@ -177,10 +181,28 @@ export function GardenPanel({
   }, [trail, index]);
   const plotId = livingTrail.length > 0 ? livingTrail[livingTrail.length - 1] : null;
 
+  // A seed inside a crown lives in its plot, not at the root: listing it in
+  // both places reads as two seeds. A child whose crown missed the push (the
+  // cap dropped it) still shows at root — hiding it under an absent crown
+  // would hide it everywhere.
   const scoped = useMemo(() => {
-    if (!plotId) return seeds;
+    if (!plotId) {
+      return seeds.filter((seed) => {
+        const parent = crownOf(seed);
+        return !parent || !index.byID.has(parent);
+      });
+    }
     return seeds.filter((seed) => crownOf(seed) === plotId);
-  }, [seeds, plotId]);
+  }, [seeds, plotId, index]);
+
+  const closedCount = useMemo(
+    () => scoped.reduce((n, seed) => (closedStatus(seed.status) ? n + 1 : n), 0),
+    [scoped],
+  );
+  const visible = useMemo(
+    () => (showClosed ? scoped : scoped.filter((seed) => !closedStatus(seed.status))),
+    [scoped, showClosed],
+  );
 
   // Every garden push is relevant while a drill is open: notes and edge
   // changes re-push the snapshot without necessarily changing the seed's own
@@ -230,7 +252,17 @@ export function GardenPanel({
       <div className="garden-panel__header">
         <span className="garden-panel__kicker">The garden</span>
         <div className="garden-panel__header-actions">
-          <span className="garden-panel__count">{scoped.length}</span>
+          {closedCount > 0 && (
+            <button
+              type="button"
+              className="garden-panel__scope"
+              aria-pressed={showClosed}
+              onClick={() => setShowClosed((cur) => !cur)}
+            >
+              {showClosed ? `hide ${closedCount} closed` : `${closedCount} closed`}
+            </button>
+          )}
+          <span className="garden-panel__count">{visible.length}</span>
           <button type="button" className="garden-panel__close" onClick={onClose} aria-label="Close">
             ×
           </button>
@@ -238,30 +270,28 @@ export function GardenPanel({
       </div>
 
       {/* The way back out. Every level is its own target, so climbing two plots
-          is one click rather than two. */}
-      <nav className="garden-panel__trail" aria-label="Where you are">
-        <button
-          type="button"
-          className="garden-panel__trail-step"
-          onClick={() => climbTo(0)}
-          disabled={livingTrail.length === 0}
-        >
-          Whole garden
-        </button>
-        {livingTrail.map((id, depth) => (
-          <span key={id} className="garden-panel__trail-segment">
-            <span className="garden-panel__trail-sep" aria-hidden="true">›</span>
-            <button
-              type="button"
-              className="garden-panel__trail-step"
-              onClick={() => climbTo(depth + 1)}
-              disabled={depth === livingTrail.length - 1}
-            >
-              {index.byID.get(id)?.title ?? id}
-            </button>
-          </span>
-        ))}
-      </nav>
+          is one click rather than two. At root there is nowhere back to, so the
+          trail only appears once a plot is entered. */}
+      {livingTrail.length > 0 && (
+        <nav className="garden-panel__trail" aria-label="Where you are">
+          <button type="button" className="garden-panel__trail-step" onClick={() => climbTo(0)}>
+            Garden
+          </button>
+          {livingTrail.map((id, depth) => (
+            <span key={id} className="garden-panel__trail-segment">
+              <span className="garden-panel__trail-sep" aria-hidden="true">›</span>
+              <button
+                type="button"
+                className="garden-panel__trail-step"
+                onClick={() => climbTo(depth + 1)}
+                disabled={depth === livingTrail.length - 1}
+              >
+                {index.byID.get(id)?.title ?? id}
+              </button>
+            </span>
+          ))}
+        </nav>
+      )}
 
       {crown && (
         <div className="garden-panel__crown">
@@ -276,17 +306,26 @@ export function GardenPanel({
         </p>
       )}
 
-      {scoped.length === 0 ? (
-        <p className="garden-panel__empty">
-          {plotId ? 'Nothing planted in this plot yet.' : 'The garden is empty.'}{' '}
-          <code>
-            {plotId ? `attn seed plant "what this is" --part-of ${plotId}` : 'attn seed plant "what this is"'}
-          </code>{' '}
-          puts something in it.
-        </p>
+      {visible.length === 0 ? (
+        scoped.length > 0 ? (
+          // Everything here is closed and closed is hidden: say so, because a
+          // blank list over a non-empty plot reads as lost work.
+          <p className="garden-panel__empty">
+            Nothing open here. {closedCount} closed {closedCount === 1 ? 'seed is' : 'seeds are'}{' '}
+            behind the closed toggle above.
+          </p>
+        ) : (
+          <p className="garden-panel__empty">
+            {plotId ? 'Nothing planted in this plot yet.' : 'The garden is empty.'}{' '}
+            <code>
+              {plotId ? `attn seed plant "what this is" --part-of ${plotId}` : 'attn seed plant "what this is"'}
+            </code>{' '}
+            puts something in it.
+          </p>
+        )
       ) : (
         <ul className="garden-panel__list">
-          {scoped.map((seed) => {
+          {visible.map((seed) => {
             const expanded = expandedId === seed.id;
             const blockers = index.blockers.get(seed.id) ?? 0;
             const relations = expanded ? relationsOf(index, seed.id) : [];

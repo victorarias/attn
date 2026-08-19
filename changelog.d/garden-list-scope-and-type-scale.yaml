@@ -1,0 +1,10 @@
+kind: fixed
+area: garden
+change: >
+  The garden panel lists what you are actually looking at. A seed inside a
+  crown now shows only in its plot instead of appearing at the root as well,
+  harvested and withered seeds leave the default listing behind a counted
+  "N closed" toggle at every level, and the trail appears only once you have
+  walked into a plot. Garden text also moved up a tier — the 9px fine print is
+  gone, so rows and their meta lines read beside a seed's markdown body
+  instead of under it.

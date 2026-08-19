@@ -7,7 +7,10 @@
   overflow-y: auto;
   color: var(--color-text-primary);
   background: var(--color-bg-panel);
-  font-size: var(--font-size-sm);
+  /* Rows and titles read at the app's body tier; the small tier is for the
+     meta line. The 9px fine-print tier is deliberately unused here — beside a
+     14px markdown body it reads as broken, not as hierarchy. */
+  font-size: var(--font-size-md);
 }
 
 .garden-panel__header {
@@ -35,7 +38,7 @@
   border-radius: 6px;
   color: var(--color-text-secondary);
   cursor: pointer;
-  font-size: var(--font-size-xs);
+  font-size: var(--font-size-sm);
   padding: 4px 10px;
   white-space: nowrap;
 }
@@ -47,7 +50,7 @@
 
 .garden-panel__count {
   color: var(--color-text-tertiary);
-  font-size: var(--font-size-xs);
+  font-size: var(--font-size-sm);
   font-variant-numeric: tabular-nums;
 }
 
@@ -75,13 +78,13 @@
   background: var(--color-bg-elevated);
   border-radius: 4px;
   color: var(--color-text-secondary);
-  font-size: var(--font-size-xs);
+  font-size: var(--font-size-sm);
   padding: 2px 5px;
 }
 
 .garden-panel__capped {
   color: var(--color-text-tertiary);
-  font-size: var(--font-size-xs);
+  font-size: var(--font-size-sm);
   margin: 0 0 8px;
 }
 
@@ -184,7 +187,7 @@
 .garden-seed__state {
   color: var(--color-text-secondary);
   flex: none;
-  font-size: var(--font-size-xs);
+  font-size: var(--font-size-sm);
 }
 
 .garden-seed.is-growing .garden-seed__state {
@@ -193,7 +196,7 @@
 
 .garden-seed__tender {
   color: var(--color-text-tertiary);
-  font-size: var(--font-size-xs);
+  font-size: var(--font-size-sm);
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -208,13 +211,13 @@
   color: var(--color-text-muted);
   flex: none;
   font-family: var(--font-mono, ui-monospace, monospace);
-  font-size: var(--font-size-xs);
+  font-size: var(--font-size-sm);
 }
 
 .garden-seed__planted {
   color: var(--color-text-tertiary);
   flex: none;
-  font-size: var(--font-size-xs);
+  font-size: var(--font-size-sm);
   white-space: nowrap;
 }
 
@@ -239,7 +242,7 @@
   border-radius: 5px;
   color: var(--color-text-secondary);
   cursor: pointer;
-  font-size: var(--font-size-xs);
+  font-size: var(--font-size-sm);
   padding: 4px 8px;
 }
 
@@ -251,7 +254,7 @@
 
 .garden-seed__document-state {
   color: var(--color-text-muted);
-  font-size: var(--font-size-xs);
+  font-size: var(--font-size-sm);
   margin: 8px 0;
 }
 
@@ -263,20 +266,20 @@
   color: var(--color-text-tertiary);
   display: flex;
   flex-wrap: wrap;
-  font-size: var(--font-size-xs);
+  font-size: var(--font-size-sm);
   gap: 10px;
 }
 
 .garden-seed__ready {
   color: var(--accent);
   flex: none;
-  font-size: var(--font-size-xs);
+  font-size: var(--font-size-sm);
 }
 
 .garden-seed__blocked {
   color: var(--color-text-muted);
   flex: none;
-  font-size: var(--font-size-xs);
+  font-size: var(--font-size-sm);
   white-space: nowrap;
 }
 
@@ -299,12 +302,12 @@
 .garden-seed__relation-label {
   color: var(--color-text-muted);
   flex: none;
-  font-size: var(--font-size-xs);
+  font-size: var(--font-size-sm);
 }
 
 .garden-seed__relation-title {
   color: var(--color-text-secondary);
-  font-size: var(--font-size-xs);
+  font-size: var(--font-size-sm);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -313,7 +316,7 @@
 .garden-seed__relation-state {
   color: var(--color-text-tertiary);
   flex: none;
-  font-size: var(--font-size-xs);
+  font-size: var(--font-size-sm);
   margin-left: auto;
 }
 
@@ -336,7 +339,7 @@
 
 .garden-panel__trail-sep {
   color: var(--color-text-muted);
-  font-size: var(--font-size-xs);
+  font-size: var(--font-size-sm);
 }
 
 .garden-panel__trail-step {
@@ -344,7 +347,7 @@
   border: none;
   color: var(--color-text-secondary);
   cursor: pointer;
-  font-size: var(--font-size-xs);
+  font-size: var(--font-size-sm);
   max-width: 220px;
   overflow: hidden;
   padding: 0;
@@ -371,7 +374,7 @@
 
 .garden-panel__crown-progress {
   color: var(--color-text-secondary);
-  font-size: var(--font-size-xs);
+  font-size: var(--font-size-sm);
 }
 
 /* A crown's plot, on its row: the counts that say whether it is draining, and
@@ -383,7 +386,7 @@
   color: var(--color-text-muted);
   cursor: pointer;
   display: flex;
-  font-size: var(--font-size-xs);
+  font-size: var(--font-size-sm);
   gap: 6px;
   padding: 0 12px 6px 30px;
   text-align: left;

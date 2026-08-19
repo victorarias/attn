@@ -97,6 +97,10 @@ describe('GardenPanel lifecycle', () => {
         seeds={[{ ...planted, status: 'harvested', reason: 'shipped it', rev: 3 }]}
       />,
     );
+    // Harvest ends the seed's time in the default listing: closed seeds sit
+    // behind the counted toggle rather than in the list.
+    expect(screen.queryByText('harvested')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '1 closed' }));
     expect(screen.getByText('harvested')).toBeInTheDocument();
     expect(screen.queryByText(/tended by/)).not.toBeInTheDocument();
   });
@@ -110,8 +114,24 @@ describe('GardenPanel lifecycle', () => {
     });
     render(<GardenPanel isOpen onClose={vi.fn()} seedsTotal={1} seeds={[harvested]} />);
 
+    fireEvent.click(screen.getByRole('button', { name: '1 closed' }));
     expect(screen.queryByText('shipped it')).not.toBeInTheDocument();
     fireEvent.click(screen.getByText('finished'));
     expect(screen.getByText('shipped it')).toBeInTheDocument();
+  });
+
+  // Closed-by-default must never read as an empty garden: the state where
+  // everything is done says so, with the count and the way to see it.
+  it('says what is hidden when everything in view is closed', () => {
+    const done = seed({ id: 's-done22', title: 'all wrapped', status: 'harvested' });
+    const dead = seed({ id: 's-dead11', title: 'went nowhere', status: 'withered' });
+    render(<GardenPanel isOpen onClose={vi.fn()} seedsTotal={2} seeds={[done, dead]} />);
+
+    expect(screen.getByText(/Nothing open here\. 2 closed seeds are/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '2 closed' }));
+    expect(screen.getByText('all wrapped')).toBeInTheDocument();
+    expect(screen.getByText('went nowhere')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'hide 2 closed' })).toBeInTheDocument();
   });
 });

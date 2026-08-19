@@ -35,7 +35,14 @@ describe('GardenPanel edges', () => {
     title: 'the blocked one',
     edges: [{ kind: 'part-of', to: 's-ccc111' }],
   });
-  const crown = seed({ id: 's-ccc111', title: 'the crown' });
+  // The crown carries plot progress the way the daemon always pushes it for a
+  // seed with children — and the way the panel needs it, since children only
+  // render inside their plot now.
+  const crown = seed({
+    id: 's-ccc111',
+    title: 'the crown',
+    plot_progress: { total: 1, done: 0, withered: 0, growing: 0, dormant: 0, ready: 0, blocked: 1 },
+  });
 
   function chain(blockerStatus: string): Seed[] {
     return [
@@ -49,6 +56,7 @@ describe('GardenPanel edges', () => {
     render(<GardenPanel isOpen onClose={vi.fn()} seedsTotal={3} seeds={chain('planted')} />);
 
     expect(screen.getByText('ready')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Open the plot under the crown' }));
     expect(screen.getByText('blocked by 1')).toBeInTheDocument();
   });
 
@@ -58,6 +66,7 @@ describe('GardenPanel edges', () => {
     const { rerender } = render(
       <GardenPanel isOpen onClose={vi.fn()} seedsTotal={3} seeds={chain('planted')} />,
     );
+    fireEvent.click(screen.getByRole('button', { name: 'Open the plot under the crown' }));
     expect(screen.getByText('blocked by 1')).toBeInTheDocument();
 
     rerender(<GardenPanel isOpen onClose={vi.fn()} seedsTotal={3} seeds={chain('harvested')} />);
@@ -70,6 +79,7 @@ describe('GardenPanel edges', () => {
       <GardenPanel isOpen onClose={vi.fn()} seedsTotal={3} seeds={chain('planted')} />,
     );
 
+    fireEvent.click(screen.getByRole('button', { name: 'Open the plot under the crown' }));
     fireEvent.click(screen.getByText('the blocked one'));
 
     const relations = container.querySelector('.garden-seed__relations');

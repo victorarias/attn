@@ -15,7 +15,7 @@
 .seed-document__empty-ledger,
 .seed-document__withheld {
   color: var(--color-text-muted);
-  font-size: var(--font-size-xs);
+  font-size: var(--font-size-sm);
   margin: 0;
 }
 
@@ -28,7 +28,7 @@
 .seed-document__artifacts h3,
 .seed-document__ledger h3 {
   color: var(--color-text-secondary);
-  font-size: var(--font-size-xs);
+  font-size: var(--font-size-sm);
   font-weight: 600;
   letter-spacing: 0.04em;
   margin: 0 0 8px;
@@ -57,7 +57,7 @@
   color: var(--color-text-secondary);
   cursor: pointer;
   display: inline-block;
-  font-size: var(--font-size-xs);
+  font-size: var(--font-size-sm);
   padding: 4px 7px;
   text-decoration: none;
 }
@@ -119,7 +119,7 @@
 .seed-document__child-status {
   color: var(--color-text-muted);
   flex: none;
-  font-size: var(--font-size-xs);
+  font-size: var(--font-size-sm);
 }
 
 .seed-document__child-id {
@@ -142,7 +142,7 @@
   color: var(--color-text-muted);
   display: flex;
   flex-wrap: wrap;
-  font-size: var(--font-size-xs);
+  font-size: var(--font-size-sm);
   gap: 7px;
 }
 
@@ -152,7 +152,9 @@
 
 .seed-document__note-body {
   color: var(--color-text-secondary);
-  font-size: var(--font-size-xs);
+  /* A note is the seed's ledger, read like the body itself — one tier under
+     the markdown, not fine print. */
+  font-size: var(--font-size-md);
   margin-top: 3px;
 }
 
