@@ -27,7 +27,6 @@ export function AutoModeSettings({ policy }: AutoModeSettingsProps) {
   if (error && !state) {
     return (
       <section className="settings-block">
-        {renderIntro()}
         <div className="settings-block-body">
           <div className="automode-state">
             <span className="settings-warning">{error}</span>
@@ -43,7 +42,6 @@ export function AutoModeSettings({ policy }: AutoModeSettingsProps) {
   if (!state) {
     return (
       <section className="settings-block">
-        {renderIntro()}
         <div className="settings-block-body">
           <div className="automode-state" data-testid="automode-loading">
             Reading auto mode…
@@ -58,7 +56,6 @@ export function AutoModeSettings({ policy }: AutoModeSettingsProps) {
 
   return (
     <section className="settings-block" data-testid="settings-automode">
-      {renderIntro()}
       <div className="settings-block-body">
         {error && <span className="settings-warning">{error}</span>}
 
@@ -412,18 +409,4 @@ function formatStamp(value: string): string {
   const at = new Date(value);
   if (Number.isNaN(at.getTime())) return value;
   return at.toLocaleString();
-}
-
-function renderIntro() {
-  return (
-    <div className="settings-block-intro">
-      <span className="settings-kicker">Auto Mode</span>
-      <h3>pi's safety envelope</h3>
-      <p className="settings-description">
-        Work inside a session's own directory runs free; anything reaching
-        further is judged by a classifier against what the conversation asked
-        for. Edit the two pattern lists here, and promote what agents propose.
-      </p>
-    </div>
-  );
 }

@@ -1139,7 +1139,7 @@ export function SettingsModal({
           id: 'autoMode',
           label: 'Auto mode',
           title: 'Auto mode',
-          description: "pi's safety envelope: the policy sessions launch with, the lists you edit by hand, and the rule changes agents have proposed.",
+          description: "Work inside a session's own directory runs free; anything reaching further is judged by a classifier against what the conversation asked for. Edit the two pattern lists here, and promote what agents propose.",
           count: autoModePolicy.pendingCount,
           keywords: 'auto mode automode pi safety envelope classifier proposals promote discard allow deny hard deny patterns policy permissions denials',
         },
