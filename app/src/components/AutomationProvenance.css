@@ -1,0 +1,113 @@
+.automation-provenance {
+  min-width: 0;
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-xs);
+  line-height: 1.25;
+}
+
+.automation-provenance--line,
+.automation-provenance--detail {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+}
+
+.automation-provenance--compact {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 4px;
+}
+
+.automation-provenance--compact .automation-provenance__definition {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.automation-provenance--compact .automation-provenance__target::before {
+  content: '·';
+  margin-right: 4px;
+  color: var(--color-text-muted, var(--color-text-tertiary));
+}
+
+.automation-provenance--line > :not(:last-child)::after,
+.automation-provenance--detail > :not(:last-child)::after {
+  content: '·';
+  margin-left: 6px;
+  color: var(--color-text-muted, var(--color-text-tertiary));
+}
+
+.automation-provenance__kind,
+.automation-provenance__definition,
+.automation-provenance__target {
+  flex: none;
+  white-space: nowrap;
+}
+
+.automation-provenance__kind {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--accent);
+  font-weight: 650;
+}
+
+.automation-provenance--compact .automation-provenance__kind {
+  font-size: 9px;
+}
+
+.automation-provenance__definition {
+  color: var(--color-text-secondary);
+  font-weight: 550;
+}
+
+.automation-provenance__target {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font: inherit;
+  font-weight: 600;
+  cursor: default;
+}
+
+button.automation-provenance__target {
+  cursor: pointer;
+}
+
+button.automation-provenance__target:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.automation-provenance__title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.automation-provenance--badge {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  color: var(--accent);
+  font-size: 9px;
+}
+
+.automation-provenance--detail {
+  flex-wrap: wrap;
+  overflow: visible;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--color-border));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
+}

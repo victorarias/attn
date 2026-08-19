@@ -1,0 +1,7 @@
+kind: added
+area: automations
+change: >
+  Pull-request review automations now tell agents exactly which repository,
+  pull request, URL, and checked-out head they are reviewing. Their sessions,
+  tickets, and run history also show the automation name and pull-request
+  identity, so parallel model reviews are distinguishable at a glance.

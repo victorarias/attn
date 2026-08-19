@@ -3440,12 +3440,16 @@ func cloneSession(session *protocol.Session) *protocol.Session {
 }
 
 func (d *Daemon) sessionForBroadcast(session *protocol.Session) *protocol.Session {
-	return d.sessionForBroadcastWithChiefOfStaff(
+	decorated := d.sessionForBroadcastWithChiefOfStaff(
 		session,
 		d.chiefOfStaffSessionID(),
 		d.delegatedFromChiefSessionIDs(),
 		d.crewMembersBySession(),
 	)
+	if decorated != nil {
+		decorated.Automation = d.automationProvenanceForSession(decorated.ID)
+	}
+	return decorated
 }
 
 func (d *Daemon) sessionForBroadcastWithChiefOfStaff(
@@ -3481,9 +3485,11 @@ func (d *Daemon) sessionsForBroadcast(sessions []*protocol.Session) []protocol.S
 	chiefOfStaffSessionID := d.chiefOfStaffSessionID()
 	delegatedFromChief := d.delegatedFromChiefSessionIDs()
 	crewBySession := d.crewMembersBySession()
+	bySession, _ := d.latestAutomationProvenance()
 	out := make([]protocol.Session, 0, len(sessions))
 	for _, session := range sessions {
 		if decorated := d.sessionForBroadcastWithChiefOfStaff(session, chiefOfStaffSessionID, delegatedFromChief, crewBySession); decorated != nil {
+			decorated.Automation = bySession[decorated.ID]
 			out = append(out, *decorated)
 		}
 	}

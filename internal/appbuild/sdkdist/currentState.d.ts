@@ -1,3 +1,17 @@
+export interface PullRequestProvenance {
+    readonly repository: string;
+    readonly number: number;
+    readonly url: string;
+    readonly title?: string;
+    readonly head_sha: string;
+}
+export interface AutomationProvenance {
+    readonly run_id: string;
+    readonly definition_id: string;
+    readonly definition_name: string;
+    readonly trigger_type: string;
+    readonly pull_request?: PullRequestProvenance;
+}
 /** One agent session in attn's current state. */
 export interface Session {
     readonly activity?: string;
@@ -6,6 +20,7 @@ export interface Session {
     readonly auto_settle_dismiss_armed?: boolean;
     readonly auto_settle_fires_at?: string;
     readonly auto_settle_held?: boolean;
+    readonly automation?: AutomationProvenance;
     readonly branch?: string;
     readonly chief_of_staff?: boolean;
     readonly context_window_cap?: number;
@@ -126,6 +141,7 @@ export interface AuthorState {
 }
 export interface TicketRow {
     readonly assignee: string;
+    readonly automation?: AutomationProvenance;
     readonly closed_at?: string;
     readonly cwd: string;
     readonly id: string;

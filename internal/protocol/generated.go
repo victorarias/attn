@@ -1343,6 +1343,23 @@ type AutomationDeleteResultMessage struct {
 	Success bool `json:"success"`
 }
 
+type AutomationProvenance struct {
+	// DefinitionID corresponds to the JSON schema field "definition_id".
+	DefinitionID string `json:"definition_id"`
+
+	// DefinitionName corresponds to the JSON schema field "definition_name".
+	DefinitionName string `json:"definition_name"`
+
+	// PullRequest corresponds to the JSON schema field "pull_request".
+	PullRequest *PullRequestProvenance `json:"pull_request,omitempty,omitzero"`
+
+	// RunID corresponds to the JSON schema field "run_id".
+	RunID string `json:"run_id"`
+
+	// TriggerType corresponds to the JSON schema field "trigger_type".
+	TriggerType string `json:"trigger_type"`
+}
+
 type AutomationRunMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
@@ -1378,6 +1395,9 @@ type AutomationRunResultMessage struct {
 }
 
 type AutomationRunSummary struct {
+	// Automation corresponds to the JSON schema field "automation".
+	Automation *AutomationProvenance `json:"automation,omitempty,omitzero"`
+
 	// CancelReason corresponds to the JSON schema field "cancel_reason".
 	CancelReason *string `json:"cancel_reason,omitempty,omitzero"`
 
@@ -5557,6 +5577,23 @@ type PtyResizedMessage struct {
 	Ypixel *int `json:"ypixel,omitempty,omitzero"`
 }
 
+type PullRequestProvenance struct {
+	// HeadSHA corresponds to the JSON schema field "head_sha".
+	HeadSHA string `json:"head_sha"`
+
+	// Number corresponds to the JSON schema field "number".
+	Number int `json:"number"`
+
+	// Repository corresponds to the JSON schema field "repository".
+	Repository string `json:"repository"`
+
+	// Title corresponds to the JSON schema field "title".
+	Title *string `json:"title,omitempty,omitzero"`
+
+	// URL corresponds to the JSON schema field "url".
+	URL string `json:"url"`
+}
+
 type QueryAuthorsMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
@@ -6550,6 +6587,9 @@ type Session struct {
 	// AutoSettleHeld corresponds to the JSON schema field "auto_settle_held".
 	AutoSettleHeld *bool `json:"auto_settle_held,omitempty,omitzero"`
 
+	// Automation corresponds to the JSON schema field "automation".
+	Automation *AutomationProvenance `json:"automation,omitempty,omitzero"`
+
 	// Branch corresponds to the JSON schema field "branch".
 	Branch *string `json:"branch,omitempty,omitzero"`
 
@@ -7523,6 +7563,9 @@ type Ticket struct {
 	// Assignee corresponds to the JSON schema field "assignee".
 	Assignee string `json:"assignee"`
 
+	// Automation corresponds to the JSON schema field "automation".
+	Automation *AutomationProvenance `json:"automation,omitempty,omitzero"`
+
 	// ClosedAt corresponds to the JSON schema field "closed_at".
 	ClosedAt *string `json:"closed_at,omitempty,omitzero"`
 
@@ -7942,6 +7985,9 @@ type TicketResumeResultMessage struct {
 type TicketRow struct {
 	// Assignee corresponds to the JSON schema field "assignee".
 	Assignee string `json:"assignee"`
+
+	// Automation corresponds to the JSON schema field "automation".
+	Automation *AutomationProvenance `json:"automation,omitempty,omitzero"`
 
 	// ClosedAt corresponds to the JSON schema field "closed_at".
 	ClosedAt *string `json:"closed_at,omitempty,omitzero"`

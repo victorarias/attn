@@ -135,7 +135,7 @@ func (d *Daemon) actionAutomationRunsGet(msg *protocol.AutomationRunsGetMessage)
 	result.Success = true
 	result.Runs = make([]protocol.AutomationRunSummary, len(runs))
 	for i := range runs {
-		result.Runs[i] = automationRunSummary(runs[i])
+		result.Runs[i] = d.automationRunSummary(runs[i])
 	}
 	return result
 }
@@ -259,7 +259,7 @@ func (d *Daemon) actionAutomationRun(ctx context.Context, msg *protocol.Automati
 		return result
 	}
 	result.Success = true
-	summary := automationRunSummary(store.AutomationRunWithOccurrenceKey{AutomationRun: *run})
+	summary := d.automationRunSummary(store.AutomationRunWithOccurrenceKey{AutomationRun: *run})
 	result.Run = &summary
 	return result
 }
@@ -281,7 +281,7 @@ func (d *Daemon) buildAutomationDefinitionSummary(def store.AutomationDefinition
 		UpdatedAt: string(protocol.NewTimestamp(def.UpdatedAt)),
 	}
 	if lastRun != nil {
-		runSummary := automationRunSummary(*lastRun)
+		runSummary := d.automationRunSummary(*lastRun)
 		summary.LastRun = &runSummary
 	}
 	var spec automation.DefinitionSpec
@@ -297,7 +297,7 @@ func (d *Daemon) buildAutomationDefinitionSummary(def store.AutomationDefinition
 	return summary
 }
 
-func automationRunSummary(run store.AutomationRunWithOccurrenceKey) protocol.AutomationRunSummary {
+func (d *Daemon) automationRunSummary(run store.AutomationRunWithOccurrenceKey) protocol.AutomationRunSummary {
 	summary := protocol.AutomationRunSummary{
 		ID:            run.ID,
 		DefinitionID:  run.DefinitionID,
@@ -317,6 +317,22 @@ func automationRunSummary(run store.AutomationRunWithOccurrenceKey) protocol.Aut
 	}
 	if run.DeliveredAt != nil {
 		summary.DeliveredAt = protocol.Ptr(string(protocol.NewTimestamp(*run.DeliveredAt)))
+	}
+	record := run.Provenance
+	if record.RunID == "" {
+		loaded, err := d.store.GetAutomationProvenanceRecord(run.ID)
+		if err != nil {
+			d.logf("automation run %s provenance: %v", run.ID, err)
+		} else if loaded != nil {
+			record = *loaded
+		}
+	}
+	if record.RunID != "" {
+		provenance, err := automationProvenance(record)
+		if err != nil {
+			d.logf("automation run %s provenance: %v", run.ID, err)
+		}
+		summary.Automation = provenance
 	}
 	return summary
 }

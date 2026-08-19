@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import type { TicketRow } from '../hooks/useDaemonSocket';
 import { TicketStatus } from '../types/generated';
 import { isTicketOrphaned } from '../utils/ticketOrphan';
+import { AutomationProvenance } from './AutomationProvenance';
 import './TicketBoardPanel.css';
 
 export type BoardFilter = 'all' | 'blocked' | 'in_review' | 'closed_today';
@@ -289,6 +290,7 @@ function BoardCard({ ticket, index, onOpen, terminalBad }: BoardCardProps) {
         </span>
       )}
       <span className="tb-card-title">{ticket.title}</span>
+      <AutomationProvenance provenance={ticket.automation} density="compact" />
       <span className="tb-card-meta">
         <span className="tb-dot" aria-hidden="true" />
         <span className="tb-card-id">{ticket.id}</span>

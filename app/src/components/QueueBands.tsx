@@ -10,6 +10,8 @@ import { formatTurnAge, type QueueBands as QueueBandsModel, type QueueRow } from
 import { formatWakeTime } from '../utils/snoozeDurations';
 import { crewDisplayName } from '../utils/crewName';
 import { useNow, TURN_AGE_TICK_MS } from '../hooks/useNow';
+import type { AutomationProvenance as AutomationProvenanceValue } from '../types/generated';
+import { AutomationProvenance } from './AutomationProvenance';
 
 export interface QueueBandSessionView {
   id: string;
@@ -24,6 +26,7 @@ export interface QueueBandSessionView {
   autoSettleHeld?: boolean;
   /** The crew member whose day this session is, when it is one. */
   crewMember?: string;
+  automation?: AutomationProvenanceValue;
 }
 
 /** One registered crew member, as the sidebar draws it. */
@@ -143,7 +146,10 @@ function QueueRowView({
         controls) rather than reserving row width for buttons that are usually
         invisible.
       */}
-      <SessionLabel label={session.label} />
+      <span className="sidebar-session-identity">
+        <SessionLabel label={session.label} />
+        <AutomationProvenance provenance={session.automation} density="compact" />
+      </span>
       {session.chiefOfStaff && <ChiefOfStaffBadge />}
       {age && <span className="queue-row-age">{age}</span>}
       {wake && <span className="queue-row-wake-at">{wake}</span>}

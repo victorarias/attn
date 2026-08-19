@@ -47,6 +47,8 @@ import { startLeafDrag, type LeafDropSnapshot } from './leafDrag';
 import type { DockTarget } from './dockTarget';
 import type { WorkspaceSelectionStyle } from '../../utils/workspaceSelectionStyle';
 import { HeaderSessionCost } from './SessionCost';
+import type { AutomationProvenance as AutomationProvenanceValue } from '../../types/generated';
+import { AutomationProvenance } from '../AutomationProvenance';
 
 const ZOOM_PATH_RATIO = 0.76;
 const RESIZE_MOUSE_SUPPRESSION_MS = 1_500;
@@ -140,6 +142,7 @@ interface SessionTerminalWorkspaceProps {
     autoSettleDismissArmed?: boolean;
     isActive?: boolean;
     presentation?: Presentation;
+    automation?: AutomationProvenanceValue;
     // The board row for the ticket bound to this session (assignee == id), when
     // one exists. Drives the pane-header ticket chip + in-pane overlay.
     ticket?: TicketRow;
@@ -990,11 +993,14 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
                 />
               ) : null}
               <span className="workspace-pane-identity">
-                <span className="workspace-pane-title">{paneTitle}</span>
-                <HeaderSessionCost
-                  costUsd={paneSession?.costUsd}
-                  unknown={paneSession?.costUnknown}
-                />
+                <span className="workspace-pane-identity-main">
+                  <span className="workspace-pane-title">{paneTitle}</span>
+                  <HeaderSessionCost
+                    costUsd={paneSession?.costUsd}
+                    unknown={paneSession?.costUnknown}
+                  />
+                </span>
+                <AutomationProvenance provenance={paneSession?.automation} interactive />
               </span>
               {onRenameSession ? (
                 <button

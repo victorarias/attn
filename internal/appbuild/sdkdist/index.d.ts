@@ -121,7 +121,7 @@ export type Handler<Collections> = (event: AppEvent, ctx: AppContext<Collections
  * no derived state to rebuild.
  */
 export type ReconcileCause = "gap" | "version_changed";
-export type { AppRegistryEntry, AppViewInfo, AuthorState, CrewMember, CurrentStateSnapshot, EndpointCapabilities, EndpointInfo, PR, RepoState, Seed, SeedEdge, SeedPlotProgress, SeedVar, Session, TicketRow, Workspace, WorkspaceLayout, WorkspacePane, } from "./currentState";
+export type { AppRegistryEntry, AppViewInfo, AutomationProvenance, AuthorState, CrewMember, CurrentStateSnapshot, EndpointCapabilities, EndpointInfo, PR, PullRequestProvenance, RepoState, Seed, SeedEdge, SeedPlotProgress, SeedVar, Session, TicketRow, Workspace, WorkspaceLayout, WorkspacePane, } from "./currentState";
 /** The durable requests coalesced into one reconcile invocation. */
 export interface ReconcileReason {
     /** Sorted as gap, version_changed, independent of arrival order. */
