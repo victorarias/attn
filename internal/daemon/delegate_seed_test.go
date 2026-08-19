@@ -494,3 +494,63 @@ func TestSeedDecorationSeesADispatchRecordedAfterTheFirstBroadcast(t *testing.T)
 		t.Fatalf("seed_id = %v after dispatch, want %s", got.SeedID, seedID)
 	}
 }
+
+// Lineage by construction: a delegate that delegates onward leaves a plot, not
+// an orphan. The child seed is born part-of the caller's own seed; the first
+// hop — a caller with no seed of its own — nests under nothing.
+func TestDelegationFromADelegateNestsItsSeedUnderTheCallers(t *testing.T) {
+	d, backend, sourceSessionID := newGardenDelegationDaemon(t)
+	consumeDelegatedPrompt(t, backend)
+
+	first, err := d.delegate(&protocol.DelegateMessage{
+		Cmd:             protocol.CmdDelegate,
+		SourceSessionID: sourceSessionID,
+		Brief:           "scout the flaky test",
+		Label:           protocol.Ptr("the scout"),
+		Agent:           protocol.Ptr("codex"),
+	})
+	if err != nil {
+		t.Fatalf("first delegate(): %v", err)
+	}
+	firstSeedID, ok := d.gardenDispatchCrown(first.SessionID)
+	if !ok {
+		t.Fatal("the first delegation bound no seed")
+	}
+	firstSeed, _, err := d.readSeed(firstSeedID)
+	if err != nil {
+		t.Fatalf("read the first seed: %v", err)
+	}
+	for _, edge := range firstSeed.Edges {
+		if edge.Kind == garden.EdgePartOf {
+			t.Fatalf("the first hop nests under %q; a caller without a seed nests under nothing", edge.To)
+		}
+	}
+
+	second, err := d.delegate(&protocol.DelegateMessage{
+		Cmd:             protocol.CmdDelegate,
+		SourceSessionID: first.SessionID,
+		Brief:           "fix what the scout found",
+		Label:           protocol.Ptr("the fix"),
+		Agent:           protocol.Ptr("codex"),
+	})
+	if err != nil {
+		t.Fatalf("second delegate(): %v", err)
+	}
+	secondSeedID, ok := d.gardenDispatchCrown(second.SessionID)
+	if !ok {
+		t.Fatal("the second delegation bound no seed")
+	}
+	secondSeed, _, err := d.readSeed(secondSeedID)
+	if err != nil {
+		t.Fatalf("read the second seed: %v", err)
+	}
+	var nestedUnder string
+	for _, edge := range secondSeed.Edges {
+		if edge.Kind == garden.EdgePartOf {
+			nestedUnder = edge.To
+		}
+	}
+	if nestedUnder != firstSeedID {
+		t.Fatalf("the delegate's delegation nests under %q, want its caller's seed %q", nestedUnder, firstSeedID)
+	}
+}

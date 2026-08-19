@@ -827,10 +827,32 @@ func runSeedTransition(verb string, args []string) {
 // landed — and the note it primes with follows on the same screen.
 func fprintTransition(w io.Writer, result *protocol.SeedTransitionResult) {
 	fmt.Fprintln(w, transitionLine(result.Seed))
+	if open := openPlotSeeds(result.Seed); open > 0 && closedSeedStatus(string(result.Seed.Status)) {
+		fmt.Fprintf(w, "its plot still holds %d open seed(s) — a closed crown over open work reads as done; close them too, or replant this one\n", open)
+	}
 	if result.Handoff != nil {
 		fmt.Fprintln(w)
 		fprintHandoff(w, result.Handoff)
 	}
+}
+
+// closedSeedStatus is the two statuses that stop holding anything back.
+func closedSeedStatus(status string) bool {
+	return status == "harvested" || status == "withered"
+}
+
+// openPlotSeeds is how many of a crown's children are still open; zero for a
+// seed with no plot.
+func openPlotSeeds(seed protocol.Seed) int {
+	p := seed.PlotProgress
+	if p == nil {
+		return 0
+	}
+	open := p.Total - p.Done - p.Withered
+	if open < 0 {
+		return 0
+	}
+	return open
 }
 
 // transitionLine is the one line a move prints: what the seed is now, and who

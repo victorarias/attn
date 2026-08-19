@@ -1016,6 +1016,16 @@ Read it back with ` + "`" + `attn seed show ` + seedID + "`" + `, and leave whoe
 you a ` + "`" + `--handoff` + "`" + ` note. Continue the assigned work after reporting unless you
 are blocked or waiting on the user.
 
+Delegating a slice of this work onward? A delegation that plants a new seed is
+linked under ` + "`" + seedID + "`" + ` automatically. Dispatching at a seed that already
+exists (--plot) nests nothing — when your delegation owns that work, keep the
+lineage visible yourself:
+
+    attn seed link <that-seed-id> part-of ` + seedID + `
+
+Nest only seeds your delegations create or own; a seed you merely reviewed or
+touched is not yours to nest.
+
 ` + "`" + `attn ticket` + "`" + ` retired: every write verb now prints the garden command that
 replaced it. Only ` + "`" + `attn ticket show` + "`" + ` and ` + "`" + `attn ticket list` + "`" + ` still read.`
 }

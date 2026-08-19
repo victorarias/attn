@@ -101,6 +101,14 @@ func (d *Daemon) plantDelegatedSeed(sessionID, plannerSessionID, brief, name str
 		Edges:          []garden.Edge{},
 		Vars:           []garden.Var{},
 	}
+	// A delegation launched from a session that itself reports to a seed leaves
+	// lineage by construction: the new seed is born part-of the caller's seed,
+	// so a delegate's delegations read as its plot instead of as orphans. Only
+	// a seed the delegation creates nests this way — dispatching at an existing
+	// seed (--plot) leaves nesting to the caller, who knows whose work it is.
+	if parent, ok := d.gardenDispatchCrown(plannerSessionID); ok && parent != "" {
+		seed.Edges = append(seed.Edges, garden.Edge{Kind: garden.EdgePartOf, To: parent})
+	}
 	tender := garden.Tender{Session: sessionID}
 	// Nothing holds an unwritten seed, so the claim cannot be contested and the
 	// liveness predicate is never consulted.

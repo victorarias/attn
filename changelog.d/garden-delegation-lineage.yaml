@@ -1,0 +1,15 @@
+kind: changed
+area: garden
+change: >
+  Delegation lineage is visible by construction: a delegation launched from a
+  session that itself reports to a seed plants its new seed part-of the
+  caller's seed, so a delegate's delegations read as its plot instead of as
+  orphans. Dispatching at an existing seed (--plot) still nests nothing — the
+  injected seed guidance now tells the delegate when and how to link that case
+  itself. Closing a crown that still holds open children warns on the same
+  screen that confirms the move: `attn seed harvest`/`wither` name how many
+  open seeds the plot still holds.
+notes: >
+  Root cause was the seed-triage scout's report on 2026-08-19: it dispatched a
+  fix at an existing seed and nothing recorded the lineage until a human linked
+  it by hand, then harvesting its own seed silently stranded the growing child.
