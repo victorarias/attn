@@ -139,15 +139,15 @@ claim. Distinct heads accepted between those boundaries remain visible evidence.
 
 ## Implementation
 
-- [ ] Extend GitHub review observations/candidates with the refreshed head SHA.
-- [ ] Reconcile the active cycle against its latest occurrence payload, including
+- [x] Extend GitHub review observations/candidates with the refreshed head SHA.
+- [x] Reconcile the active cycle against its latest occurrence payload, including
       legacy cycle-only keys; make new occurrence keys SHA-specific.
-- [ ] Keep claim transactional and idempotent for `(definition, subject, cycle, SHA)`.
-- [ ] Permit changed-head continuity while retaining definition-contract, ticket,
+- [x] Keep claim transactional and idempotent for `(definition, subject, cycle, SHA)`.
+- [x] Permit changed-head continuity while retaining definition-contract, ticket,
       repository identity, transcript-resume, and unattended-launch checks.
-- [ ] Keep the existing fetch-exact-SHA / preserve-owned-checkout boundary.
-- [ ] Add a changelog fragment.
-- [ ] Run focused store, daemon, and git tests; then live-verify both configured
+- [x] Keep the existing fetch-exact-SHA / preserve-owned-checkout boundary.
+- [x] Add a changelog fragment.
+- [x] Run focused store, daemon, and git tests; then live-verify both configured
       reviewer shapes in one isolated profile against a mock PR head change,
       including a second head and dirty reviewer evidence. Do not mutate GitHub.
 
@@ -172,5 +172,25 @@ claim. Distinct heads accepted between those boundaries remain visible evidence.
 
 ## Approval checkpoint
 
-Awaiting Victor's approval of the recommendation, especially the worktree rule:
+Victor approved the recommendation on 2026-08-19, including the worktree rule:
 fetch the new commit but never move an agent-owned checkout automatically.
+
+## Verification receipts
+
+- Focused store, daemon, and git regression tests pass, including changed-head
+  idempotency, pending-run ordering, legacy occurrence compatibility, definition
+  independence, contract/identity safety, and dirty-worktree preservation.
+- `go test -race ./internal/store -run 'TestGitHubReview' -count=1` passes.
+- The changed daemon/store/git packages compile for Linux amd64 with CGO disabled.
+- Packaged scenario `AUTOMATION-PR-CONTINUITY` passes in isolated profile
+  `reviewpush` (run `automation-pr-continuity-2026-08-19T13-49-27-067Z`). It
+  exercised independent GPT Sol and solstice-alpha definitions, continued both
+  on the new head without replacement reviewers, preserved dirty evidence,
+  resumed after restart, and retained the missing-worktree refusal.
+- JavaScript syntax checks, changelog validation, and `git diff --check` pass.
+- The pre-commit suite passed every Go package and all 2,994 frontend tests. Its
+  E2E pass completed 195 tests before one unrelated terminal-layout test timed
+  out waiting for a repeatedly detached dashboard row; that exact test passed
+  alone immediately afterward. An earlier standalone daemon run also hit the
+  unrelated `TestDelegationOperationAcceptedBeforeSlowPreparation` timeout,
+  while the pre-commit daemon suites and complete affected automation group pass.

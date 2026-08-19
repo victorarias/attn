@@ -2,6 +2,7 @@ package store
 
 import (
 	"database/sql"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -754,8 +755,192 @@ func TestGitHubReviewEdgeRetriesThenReusesContinuityBinding(t *testing.T) {
 		t.Fatalf("continuation did not reuse binding: first=%#v second=%#v", first, second)
 	}
 	occurrence, err := s.GetAutomationOccurrence(second.OccurrenceID)
-	if err != nil || occurrence == nil || occurrence.OccurrenceKey != "review_requested:github.com/owner/repo#42:2" {
+	if err != nil || occurrence == nil || occurrence.OccurrenceKey != "review_requested:github.com/owner/repo#42:2:two" {
 		t.Fatalf("second occurrence = %#v err=%v", occurrence, err)
+	}
+}
+
+func TestGitHubReviewChangedHeadsAreDurableAndPendingRunCannotBeOvertaken(t *testing.T) {
+	s := New()
+	now := time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC)
+	def, err := s.UpsertAutomationDefinition("review", "Review", `{"id":"review"}`, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const (
+		subject   = "github.com/owner/repo#42"
+		headOne   = "0123456789abcdef0123456789abcdef01234567"
+		headTwo   = "89abcdef0123456789abcdef0123456789abcdef"
+		headThree = "fedcba9876543210fedcba9876543210fedcba98"
+	)
+	baselineGitHubReviewAutomation(t, s, def.ID, "github.com", now)
+	reconcile := func(at time.Time, head string) []AutomationReviewRequestCandidate {
+		t.Helper()
+		candidates, err := s.ReconcileAutomationReviewRequestHeads(def.ID, "github.com", []AutomationReviewRequestObservation{{SubjectKey: subject, HeadSHA: head}}, at)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return candidates
+	}
+	claim := func(at time.Time, head string, ids AutomationRunReservation) (*AutomationRun, bool) {
+		t.Helper()
+		run, created, err := s.ClaimGitHubReviewAutomationRun(def.ID, subject, 1, def.Revision, `{"head_sha":"`+head+`"}`, `{}`, at, ids)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return run, created
+	}
+
+	if candidates := reconcile(now, headOne); len(candidates) != 1 || candidates[0].Cycle != 1 || candidates[0].HeadSHA != headOne {
+		t.Fatalf("first-head candidates=%#v", candidates)
+	}
+	first, created := claim(now, headOne, AutomationRunReservation{RunID: "run-1", OccurrenceID: "occ-1", TicketID: "ticket-1", SessionID: "session-1", WorkspaceID: "workspace-1", PaneID: "pane-1"})
+	if !created {
+		t.Fatal("first head was not claimed")
+	}
+	if _, err := s.EnsureAutomationTicket(Ticket{ID: first.TicketID, Title: "Review", Status: TicketStatusWorking, Assignee: first.SessionID, AutomationRunID: first.ID}, "automation:review", TicketRoleChiefOfStaff, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.MarkAutomationRunDelivered(first.ID, `{}`, now); err != nil {
+		t.Fatal(err)
+	}
+	if candidates := reconcile(now.Add(time.Minute), headOne); len(candidates) != 0 {
+		t.Fatalf("same-head candidates=%#v", candidates)
+	}
+
+	if candidates := reconcile(now.Add(2*time.Minute), headTwo); len(candidates) != 1 || candidates[0].Cycle != 1 || candidates[0].HeadSHA != headTwo {
+		t.Fatalf("changed-head candidates=%#v", candidates)
+	}
+	second, created := claim(now.Add(2*time.Minute), headTwo, AutomationRunReservation{RunID: "run-2", OccurrenceID: "occ-2"})
+	if !created || second.TicketID != first.TicketID || second.SessionID != first.SessionID {
+		t.Fatalf("changed-head run=%#v created=%v first=%#v", second, created, first)
+	}
+	if err := s.EnsureAutomationContinuationTicket(second.TicketID, second.SessionID, second.ID, "/tmp/head-two.json", "automation:review", now.Add(2*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	occurrence, err := s.GetAutomationOccurrence(second.OccurrenceID)
+	if err != nil || occurrence == nil || occurrence.OccurrenceKey != "review_requested:"+subject+":1:"+headTwo {
+		t.Fatalf("changed-head occurrence=%#v err=%v", occurrence, err)
+	}
+
+	if candidates := reconcile(now.Add(3*time.Minute), headThree); len(candidates) != 1 || candidates[0].HeadSHA != headThree {
+		t.Fatalf("pending predecessor candidates=%#v", candidates)
+	}
+	retried, created := claim(now.Add(3*time.Minute), headThree, AutomationRunReservation{RunID: "run-3", OccurrenceID: "occ-3"})
+	if created || retried.ID != second.ID {
+		t.Fatalf("newer head overtook pending run: retried=%#v created=%v pending=%#v", retried, created, second)
+	}
+	if err := s.MarkAutomationRunDelivered(second.ID, `{}`, now.Add(3*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if candidates := reconcile(now.Add(4*time.Minute), headThree); len(candidates) != 1 || candidates[0].HeadSHA != headThree {
+		t.Fatalf("latest catch-up candidates=%#v", candidates)
+	}
+	third, created := claim(now.Add(4*time.Minute), headThree, AutomationRunReservation{RunID: "run-3", OccurrenceID: "occ-3"})
+	if !created || third.ID == second.ID || third.TicketID != first.TicketID || third.SessionID != first.SessionID {
+		t.Fatalf("latest catch-up run=%#v created=%v", third, created)
+	}
+	if err := s.EnsureAutomationContinuationTicket(third.TicketID, third.SessionID, third.ID, "/tmp/head-three.json", "automation:review", now.Add(4*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	ticket, err := s.GetTicket(first.TicketID)
+	if err != nil || ticket == nil || len(ticket.Activity) != 2 || !strings.Contains(ticket.Activity[0].Comment, second.ID) || !strings.Contains(ticket.Activity[1].Comment, third.ID) {
+		t.Fatalf("continuation inbox activity=%#v err=%v", ticket, err)
+	}
+}
+
+func TestGitHubReviewLegacyCycleOccurrenceUsesPayloadHeadWithoutReplay(t *testing.T) {
+	s := New()
+	now := time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC)
+	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const (
+		subject = "github.com/owner/repo#42"
+		headOne = "0123456789abcdef0123456789abcdef01234567"
+		headTwo = "89abcdef0123456789abcdef0123456789abcdef"
+	)
+	baselineGitHubReviewAutomation(t, s, def.ID, "github.com", now)
+	if _, err := s.ReconcileAutomationReviewRequests(def.ID, "github.com", []string{subject}, now); err != nil {
+		t.Fatal(err)
+	}
+	run, created, err := s.ClaimGitHubReviewAutomationRun(def.ID, subject, 1, def.Revision, `{}`, `{}`, now, AutomationRunReservation{RunID: "run-1", OccurrenceID: "occ-1", TicketID: "ticket-1", SessionID: "session-1", WorkspaceID: "workspace-1", PaneID: "pane-1"})
+	if err != nil || !created {
+		t.Fatalf("legacy claim created=%v err=%v", created, err)
+	}
+	if _, err := s.db.Exec(`UPDATE automation_occurrences SET payload_json=? WHERE id=?`, `{"head_sha":"`+headOne+`"}`, run.OccurrenceID); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.MarkAutomationRunDelivered(run.ID, `{}`, now); err != nil {
+		t.Fatal(err)
+	}
+	observed := func(head string, at time.Time) []AutomationReviewRequestCandidate {
+		t.Helper()
+		candidates, err := s.ReconcileAutomationReviewRequestHeads(def.ID, "github.com", []AutomationReviewRequestObservation{{SubjectKey: subject, HeadSHA: head}}, at)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return candidates
+	}
+	if candidates := observed(headOne, now.Add(time.Minute)); len(candidates) != 0 {
+		t.Fatalf("legacy same-head replayed: %#v", candidates)
+	}
+	if candidates := observed(headTwo, now.Add(2*time.Minute)); len(candidates) != 1 || candidates[0].Cycle != 1 {
+		t.Fatalf("legacy changed head candidates=%#v", candidates)
+	}
+}
+
+func TestGitHubReviewChangedHeadsKeepDefinitionsIndependent(t *testing.T) {
+	s := New()
+	now := time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC)
+	const (
+		subject = "github.com/owner/repo#42"
+		headOne = "0123456789abcdef0123456789abcdef01234567"
+		headTwo = "89abcdef0123456789abcdef0123456789abcdef"
+	)
+	var tickets, sessions []string
+	for index, definitionID := range []string{"review-sol", "review-solstice"} {
+		def, err := s.UpsertAutomationDefinition(definitionID, definitionID, `{}`, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		baselineGitHubReviewAutomation(t, s, def.ID, "github.com", now)
+		observe := func(head string, at time.Time) []AutomationReviewRequestCandidate {
+			t.Helper()
+			candidates, err := s.ReconcileAutomationReviewRequestHeads(def.ID, "github.com", []AutomationReviewRequestObservation{{SubjectKey: subject, HeadSHA: head}}, at)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return candidates
+		}
+		if candidates := observe(headOne, now); len(candidates) != 1 {
+			t.Fatalf("%s first candidates=%#v", definitionID, candidates)
+		}
+		first, created, err := s.ClaimGitHubReviewAutomationRun(def.ID, subject, 1, def.Revision, `{"head_sha":"`+headOne+`"}`, `{}`, now, AutomationRunReservation{
+			RunID: fmt.Sprintf("run-%d-1", index), OccurrenceID: fmt.Sprintf("occ-%d-1", index), TicketID: fmt.Sprintf("ticket-%d", index), SessionID: fmt.Sprintf("session-%d", index), WorkspaceID: fmt.Sprintf("workspace-%d", index), PaneID: fmt.Sprintf("pane-%d", index),
+		})
+		if err != nil || !created {
+			t.Fatalf("%s first claim created=%v err=%v", definitionID, created, err)
+		}
+		tickets = append(tickets, first.TicketID)
+		sessions = append(sessions, first.SessionID)
+		if _, err := s.EnsureAutomationTicket(Ticket{ID: first.TicketID, Title: definitionID, Status: TicketStatusWorking, Assignee: first.SessionID, AutomationRunID: first.ID}, "automation:"+definitionID, TicketRoleChiefOfStaff, now); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.MarkAutomationRunDelivered(first.ID, `{}`, now); err != nil {
+			t.Fatal(err)
+		}
+		if candidates := observe(headTwo, now.Add(time.Minute)); len(candidates) != 1 || candidates[0].Cycle != 1 {
+			t.Fatalf("%s changed-head candidates=%#v", definitionID, candidates)
+		}
+		second, created, err := s.ClaimGitHubReviewAutomationRun(def.ID, subject, 1, def.Revision, `{"head_sha":"`+headTwo+`"}`, `{}`, now.Add(time.Minute), AutomationRunReservation{RunID: fmt.Sprintf("run-%d-2", index), OccurrenceID: fmt.Sprintf("occ-%d-2", index)})
+		if err != nil || !created || second.TicketID != first.TicketID || second.SessionID != first.SessionID {
+			t.Fatalf("%s continuation=%#v created=%v err=%v", definitionID, second, created, err)
+		}
+	}
+	if len(tickets) != 2 || tickets[0] == tickets[1] || sessions[0] == sessions[1] {
+		t.Fatalf("definitions shared continuity: tickets=%#v sessions=%#v", tickets, sessions)
 	}
 }
 
@@ -847,10 +1032,11 @@ func TestGitHubReviewWithdrawalExposesPendingRunAndReleasesEmptyBinding(t *testi
 	}
 	const subject = "github.com/owner/repo#42"
 	baselineGitHubReviewAutomation(t, s, def.ID, "github.com", now)
+	const payload = `{"head_sha":"0123456789abcdef0123456789abcdef01234567"}`
 	if _, err := s.ReconcileAutomationReviewRequests(def.ID, "github.com", []string{subject}, now); err != nil {
 		t.Fatal(err)
 	}
-	first, _, err := s.ClaimGitHubReviewAutomationRun(def.ID, subject, 1, def.Revision, `{}`, `{}`, now, AutomationRunReservation{
+	first, _, err := s.ClaimGitHubReviewAutomationRun(def.ID, subject, 1, def.Revision, payload, `{}`, now, AutomationRunReservation{
 		RunID: "run-1", OccurrenceID: "occ-1", TicketID: "ticket-1", SessionID: "session-1", WorkspaceID: "workspace-1", PaneID: "pane-1",
 	})
 	if err != nil {

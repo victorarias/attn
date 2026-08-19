@@ -45,6 +45,16 @@ function runJSON(binary, args, env) {
   return JSON.parse(run(binary, args, env));
 }
 
+function setTicketStatus(binary, args, env) {
+  try {
+    return run(binary, args, env);
+  } catch (error) {
+    const stderr = String(error?.stderr || '');
+    if (!stderr.includes('unread ticket activity')) throw error;
+    return run(binary, args, env);
+  }
+}
+
 function createFixture(root) {
   const repo = path.join(root, 'fixture-repo');
   fs.mkdirSync(repo, { recursive: true });
@@ -63,6 +73,22 @@ function createFixture(root) {
     },
   });
   return { repo, sha: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo, encoding: 'utf8' }).trim() };
+}
+
+function advanceFixture(repo) {
+  fs.writeFileSync(path.join(repo, 'NEW_HEAD.md'), 'Second immutable review input.\n');
+  execFileSync('git', ['add', 'NEW_HEAD.md'], { cwd: repo });
+  execFileSync('git', ['commit', '-q', '-m', 'second fixture head'], {
+    cwd: repo,
+    env: {
+      ...process.env,
+      GIT_AUTHOR_NAME: 'attn',
+      GIT_AUTHOR_EMAIL: 'attn@local',
+      GIT_COMMITTER_NAME: 'attn',
+      GIT_COMMITTER_EMAIL: 'attn@local',
+    },
+  });
+  return execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo, encoding: 'utf8' }).trim();
 }
 
 function recentCodexTranscripts() {
@@ -135,6 +161,15 @@ async function setRequested(mockURL, active) {
     body: JSON.stringify({ active }),
   });
   if (!response.ok) throw new Error(`mock control returned ${response.status}`);
+}
+
+async function setHead(mockURL, sha) {
+  const response = await fetch(`${mockURL}/__control/head`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ sha }),
+  });
+  if (!response.ok) throw new Error(`mock head control returned ${response.status}`);
 }
 
 async function wsRequest(wsURL, message, event, timeoutMs = 30_000) {
@@ -227,13 +262,18 @@ async function main() {
   const seedHome = path.join(runner.sessionDir, 'codex-home');
   const seed = seedCodexRollout(seedHome);
   const probe = createCodexProbe(runner.sessionDir);
-  const definitionID = `slice4-${Date.now().toString(36)}`;
+  const definitionID = `slice4-sol-${Date.now().toString(36)}`;
+  const secondaryDefinitionID = `slice4-solstice-${Date.now().toString(36)}`;
   const definitionFile = path.join(runner.sessionDir, 'definition.yml');
+  const secondaryDefinitionFile = path.join(runner.sessionDir, 'definition-solstice.yml');
   let mock = null;
   let daemonEnv = null;
   let sessionID = '';
   let ticketID = '';
   let worktree = '';
+  let secondarySessionID = '';
+  let secondaryTicketID = '';
+  let secondaryWorktree = '';
   try {
     mock = await runner.step('start_local_mock_github', () => startMock(fixture.sha));
     daemonEnv = profileEnv(profile, {
@@ -255,8 +295,13 @@ async function main() {
     // internal/automation/automation.go), so this literal no longer emits it.
     // A brand-new id is inserted enabled regardless
     // (store.UpsertAutomationDefinition).
-    fs.writeFileSync(definitionFile, `api_version: attn.dev/automations/v1alpha1\nid: ${definitionID}\nname: Slice 4 packaged continuity proof\ntrigger:\n  type: github_review_requested\n  repositories:\n    mode: all_accessible\n    include: [mock.github.local/owner/repo]\nprompt: |\n  Review only the local fixture and report in this ticket. Never write to GitHub.\nlaunch:\n  driver: codex\n  executable: ${JSON.stringify(probe.executable)}\n  model: gpt-5.6-terra\n  effort: high\nlocation:\n  type: repository_worktree\n  repository_sources:\n    default: {type: managed_cache}\n    overrides:\n      mock.github.local/owner/repo:\n        type: local_clone\n        path: ${JSON.stringify(fixture.repo)}\n`);
-    await runner.step('apply_definition', async () => runJSON(binary, ['automation', 'apply', '--file', definitionFile], daemonEnv));
+    const definition = (id, name, model) => `api_version: attn.dev/automations/v1alpha1\nid: ${id}\nname: ${name}\ntrigger:\n  type: github_review_requested\n  repositories:\n    mode: all_accessible\n    include: [mock.github.local/owner/repo]\nprompt: |\n  Review only the local fixture and report in this ticket. Never write to GitHub.\nlaunch:\n  driver: codex\n  executable: ${JSON.stringify(probe.executable)}\n  model: ${model}\n  effort: high\nlocation:\n  type: repository_worktree\n  repository_sources:\n    default: {type: managed_cache}\n    overrides:\n      mock.github.local/owner/repo:\n        type: local_clone\n        path: ${JSON.stringify(fixture.repo)}\n`;
+    fs.writeFileSync(definitionFile, definition(definitionID, 'Slice 4 packaged continuity proof', 'gpt-5.6-sol'));
+    fs.writeFileSync(secondaryDefinitionFile, definition(secondaryDefinitionID, 'Slice 4 Solstice continuity proof', 'solstice-alpha'));
+    await runner.step('apply_definitions', async () => {
+      runJSON(binary, ['automation', 'apply', '--file', definitionFile], daemonEnv);
+      runJSON(binary, ['automation', 'apply', '--file', secondaryDefinitionFile], daemonEnv);
+    });
     await runner.step('deliver_initial_review', async () => {
       await wsRequest(options.wsUrl, { cmd: 'refresh_prs' }, 'refresh_prs_result');
       const runRow = await poll(() => {
@@ -280,8 +325,47 @@ async function main() {
           && !prompt.includes('Untrusted provider payload'),
         'provider-authored title and body stay out of the instruction block',
       );
+      const secondaryRun = await poll(() => {
+        const rows = runJSON(binary, ['automation', 'runs', secondaryDefinitionID], daemonEnv) || [];
+        return rows.find((row) => row.state === 'delivered') || null;
+      }, 'secondary delivered automation run', 45_000);
+      secondarySessionID = secondaryRun.session_id;
+      secondaryTicketID = secondaryRun.ticket_id;
+      secondaryWorktree = observer.getSession(secondarySessionID)?.directory || path.join(dataDirForProfile(profile), 'automation', 'worktrees', secondarySessionID, 'repo');
+      await poll(() => invocations(probe.log).length >= 2 ? invocations(probe.log) : null, 'two independent Codex launches');
       runner.assert(fs.existsSync(worktree), 'initial exact-SHA worktree exists', { worktree });
       runner.assert(execFileSync('git', ['rev-parse', 'HEAD'], { cwd: worktree, encoding: 'utf8' }).trim() === fixture.sha, 'initial worktree is pinned to provider SHA');
+      runner.assert(secondarySessionID !== sessionID && secondaryTicketID !== ticketID, 'the Sol and Solstice definitions own independent reviewer bindings');
+    });
+    await runner.step('continue_live_reviewer_on_new_head', async () => {
+      fs.writeFileSync(path.join(worktree, 'review-notes.txt'), 'preserve me across review cycles\n');
+      fs.writeFileSync(path.join(secondaryWorktree, 'review-notes.txt'), 'preserve the second reviewer too\n');
+      const nextSHA = advanceFixture(fixture.repo);
+      await setHead(mock.url, nextSHA);
+      // Observation runs before detail refresh. The first refresh learns the new
+      // head; the second feeds that stored head through normal automation
+      // observation, which performs the authoritative focused GET.
+      await wsRequest(options.wsUrl, { cmd: 'refresh_prs' }, 'refresh_prs_result');
+      await wsRequest(options.wsUrl, { cmd: 'refresh_prs' }, 'refresh_prs_result');
+      const row = await poll(() => {
+        const rows = runJSON(binary, ['automation', 'runs', definitionID], daemonEnv) || [];
+        return rows.length >= 2 && rows[0].state === 'delivered' ? rows[0] : null;
+      }, 'changed-head continuation', 45_000);
+      const secondaryRow = await poll(() => {
+        const rows = runJSON(binary, ['automation', 'runs', secondaryDefinitionID], daemonEnv) || [];
+        return rows.length >= 2 && rows[0].state === 'delivered' ? rows[0] : null;
+      }, 'secondary changed-head continuation', 45_000);
+      runner.assert(row.session_id === sessionID && row.ticket_id === ticketID, 'changed head reuses the live reviewer session and ticket', row);
+      runner.assert(secondaryRow.session_id === secondarySessionID && secondaryRow.ticket_id === secondaryTicketID, 'changed head independently reuses the second reviewer binding', secondaryRow);
+      runner.assert(invocations(probe.log).length === 2, 'changed head does not spawn another live reviewer for either definition', invocations(probe.log));
+      runner.assert(execFileSync('git', ['rev-parse', 'HEAD'], { cwd: worktree, encoding: 'utf8' }).trim() === fixture.sha, 'changed head does not move the reviewer-owned checkout');
+      runner.assert(fs.readFileSync(path.join(worktree, 'review-notes.txt'), 'utf8').includes('preserve me'), 'dirty reviewer evidence survives changed-head delivery');
+      runner.assert(fs.readFileSync(path.join(secondaryWorktree, 'review-notes.txt'), 'utf8').includes('second reviewer'), 'dirty evidence survives for the second reviewer');
+    });
+    await runner.step('retire_secondary_reviewer', async () => {
+      run(binary, ['automation', 'disable', secondaryDefinitionID], daemonEnv);
+      await client.request('close_session', { sessionId: secondarySessionID });
+      await observer.waitFor(() => !observer.getSession(secondarySessionID) ? true : null, 'secondary reviewer to unregister');
     });
     await runner.step('assert_visible_provenance', async () => {
       await client.request('select_session', { sessionId: sessionID });
@@ -330,8 +414,7 @@ async function main() {
     });
     await runner.step('seed_resume_and_stop_origin', async () => {
       await socketRequest(resources.socket, { cmd: 'set_session_resume_id', id: sessionID, resume_session_id: seed.id });
-      fs.writeFileSync(path.join(worktree, 'review-notes.txt'), 'preserve me across review cycles\n');
-      run(binary, ['ticket', 'status', 'completed', '--ticket', ticketID, '--session', sessionID, '--comment', 'first review complete'], daemonEnv);
+      setTicketStatus(binary, ['ticket', 'status', 'completed', '--ticket', ticketID, '--session', sessionID, '--comment', 'first review complete'], daemonEnv);
       const db = path.join(dataDirForProfile(profile), 'attn.db');
       execFileSync('sqlite3', ['-cmd', '.timeout 5000', db, `UPDATE tickets SET archived_at=datetime('now') WHERE id='${ticketID.replaceAll("'", "''")}';`]);
       await client.request('close_session', { sessionId: sessionID });
@@ -346,13 +429,13 @@ async function main() {
     const continuation = await runner.step('assert_same_reviewer_resumed', async () => {
       const row = await poll(() => {
         const rows = runJSON(binary, ['automation', 'runs', definitionID], daemonEnv) || [];
-        return rows.length >= 2 && rows[0].state === 'delivered' ? rows[0] : null;
+        return rows.length >= 3 && rows[0].state === 'delivered' ? rows[0] : null;
       }, 'delivered continuation', 45_000);
-      const calls = await poll(() => invocations(probe.log).length >= 2 ? invocations(probe.log) : null, 'Codex resume launch');
-      const resumed = calls[1].argv;
+      const calls = await poll(() => invocations(probe.log).length >= 3 ? invocations(probe.log) : null, 'Codex resume launch');
+      const resumed = calls[2].argv;
       runner.assert(row.session_id === sessionID && row.ticket_id === ticketID, 'continuation reuses the same session and ticket', row);
       runner.assert(resumed.includes('resume') && resumed.includes(seed.id), 'Codex receives the copied rollout id', { argv: resumed, rollout: seed.id });
-      runner.assert(resumed.some((arg) => arg.includes('gpt-5.6-terra')) && resumed.some((arg) => arg.includes('high')), 'resume keeps pinned model and effort', { argv: resumed });
+      runner.assert(resumed.some((arg) => arg.includes('gpt-5.6-sol')) && resumed.some((arg) => arg.includes('high')), 'resume keeps pinned model and effort', { argv: resumed });
       runner.assert(fs.readFileSync(path.join(worktree, 'review-notes.txt'), 'utf8').includes('preserve me'), 'dirty reviewer work survives continuation');
       const tickets = runJSON(binary, ['ticket', 'list', '--all', '--json'], daemonEnv);
       const ticket = tickets.find((item) => item.id === ticketID);
@@ -378,11 +461,11 @@ async function main() {
       await wsRequest(options.wsUrl, { cmd: 'refresh_prs' }, 'refresh_prs_result');
       const row = await poll(() => {
         const rows = runJSON(binary, ['automation', 'runs', definitionID], daemonEnv) || [];
-        return rows.length >= 3 && rows[0].state === 'delivered' ? rows[0] : null;
+        return rows.length >= 4 && rows[0].state === 'delivered' ? rows[0] : null;
       }, 'post-restart delivered continuation', 45_000);
       runner.assert(row.session_id === sessionID && row.ticket_id === ticketID, 'post-restart continuation reuses the same session and ticket', row);
-      const calls = await poll(() => invocations(probe.log).length >= 3 ? invocations(probe.log) : null, 'post-restart Codex resume launch');
-      runner.assert(calls[2].argv.includes('resume'), 'post-restart launch resumes rather than starting fresh', { argv: calls[2].argv });
+      const calls = await poll(() => invocations(probe.log).length >= 4 ? invocations(probe.log) : null, 'post-restart Codex resume launch');
+      runner.assert(calls[3].argv.includes('resume'), 'post-restart launch resumes rather than starting fresh', { argv: calls[3].argv });
       runner.assert(fs.readFileSync(path.join(worktree, 'review-notes.txt'), 'utf8').includes('preserve me'), 'reviewer work survives the daemon restart');
     });
     await runner.step('assert_missing_worktree_fails_visibly', async () => {
@@ -395,7 +478,7 @@ async function main() {
       await wsRequest(options.wsUrl, { cmd: 'refresh_prs' }, 'refresh_prs_result');
       const failed = await poll(() => {
         const rows = runJSON(binary, ['automation', 'runs', definitionID], daemonEnv) || [];
-        return rows.length >= 4 && rows[0].state === 'failed' ? rows[0] : null;
+        return rows.length >= 5 && rows[0].state === 'failed' ? rows[0] : null;
       }, 'visible missing-worktree failure', 30_000);
       runner.assert(String(failed.last_error).includes('worktree') && String(failed.last_error).includes('missing'), 'missing delivered worktree fails without recreation', failed);
     });

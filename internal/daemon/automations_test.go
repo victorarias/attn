@@ -518,9 +518,15 @@ func TestAutomationRecoveryLeavesGitHubRunsForFreshProviderObservation(t *testin
 }
 
 func TestGitHubReviewObservationDedupesPollsAndReusesReviewer(t *testing.T) {
+	const (
+		headOne = "0123456789abcdef0123456789abcdef01234567"
+		headTwo = "89abcdef0123456789abcdef0123456789abcdef"
+	)
 	var snapshotGETs atomic.Int32
 	var snapshotDraft atomic.Bool
+	var snapshotHead atomic.Value
 	snapshotDraft.Store(true)
+	snapshotHead.Store(headOne)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/repos/owner/repo/pulls/42" {
 			http.NotFound(w, r)
@@ -532,7 +538,7 @@ func TestGitHubReviewObservationDedupesPollsAndReusesReviewer(t *testing.T) {
 		if snapshotDraft.Load() {
 			draft = "true"
 		}
-		_, _ = w.Write([]byte(`{"number":42,"html_url":"https://github.com/owner/repo/pull/42","title":"Change","body":"untrusted","state":"open","draft":` + draft + `,"user":{"login":"author"},"head":{"sha":"0123456789abcdef0123456789abcdef01234567","ref":"feature","repo":{"full_name":"owner/repo"}},"base":{"sha":"89abcdef0123456789abcdef0123456789abcdef","ref":"main","repo":{"full_name":"owner/repo"}}}`))
+		_, _ = w.Write([]byte(`{"number":42,"html_url":"https://github.com/owner/repo/pull/42","title":"Change","body":"untrusted","state":"open","draft":` + draft + `,"user":{"login":"author"},"head":{"sha":"` + snapshotHead.Load().(string) + `","ref":"feature","repo":{"full_name":"owner/repo"}},"base":{"sha":"fedcba9876543210fedcba9876543210fedcba98","ref":"main","repo":{"full_name":"owner/repo"}}}`))
 	}))
 	defer server.Close()
 	client, err := github.NewClientForHost("github.com", server.URL, "token")
@@ -570,9 +576,9 @@ location:
 		}
 		return s.MarkAutomationRunDelivered(run.ID, `{"type":"test"}`, time.Now())
 	}
-	demand := []*protocol.PR{{Host: "github.com", Repo: "owner/repo", Number: 42, Role: protocol.PRRoleReviewer, State: protocol.PRStateWaiting, Reason: protocol.PRReasonReviewNeeded}}
+	demand := []*protocol.PR{{Host: "github.com", Repo: "owner/repo", Number: 42, HeadSHA: protocol.Ptr(headOne), Role: protocol.PRRoleReviewer, State: protocol.PRStateWaiting, Reason: protocol.PRReasonReviewNeeded}}
 	observedAt := time.Now()
-	approvedDemand := []*protocol.PR{{Host: "github.com", Repo: "owner/repo", Number: 42, ApprovedByMe: true, Role: protocol.PRRoleReviewer, State: protocol.PRStateWaiting, Reason: protocol.PRReasonReviewNeeded}}
+	approvedDemand := []*protocol.PR{{Host: "github.com", Repo: "owner/repo", Number: 42, HeadSHA: protocol.Ptr(headOne), ApprovedByMe: true, Role: protocol.PRRoleReviewer, State: protocol.PRStateWaiting, Reason: protocol.PRReasonReviewNeeded}}
 	d.observeGitHubReviewRequests("github.com", approvedDemand, observedAt)
 	if snapshotGETs.Load() != 0 || delivered.Load() != 0 {
 		t.Fatalf("completed review snapshot GETs=%d deliveries=%d", snapshotGETs.Load(), delivered.Load())
@@ -591,19 +597,31 @@ location:
 	if err != nil || len(firstRuns) != 1 {
 		t.Fatalf("first runs=%#v err=%v", firstRuns, err)
 	}
+	// A later detail-refreshed head in the same still-active request cycle gets
+	// one new occurrence on the existing reviewer binding. Repeating that head
+	// does not fetch or deliver again.
+	snapshotHead.Store(headTwo)
+	demand[0].HeadSHA = protocol.Ptr(headTwo)
+	d.observeGitHubReviewRequests("github.com", demand, observedAt.Add(2*time.Second))
+	d.observeGitHubReviewRequests("github.com", demand, observedAt.Add(3*time.Second))
+	if snapshotGETs.Load() != 3 || delivered.Load() != 2 {
+		t.Fatalf("changed-head snapshot GETs=%d deliveries=%d", snapshotGETs.Load(), delivered.Load())
+	}
 	// Removal closes the durable edge; a later request is a new occurrence but
 	// adopts the original per-subject ticket/session/workspace/pane binding.
 	d.observeGitHubReviewRequests("github.com", nil, observedAt.Add(time.Minute))
 	d.observeGitHubReviewRequests("github.com", demand, observedAt.Add(2*time.Minute))
-	if snapshotGETs.Load() != 3 || delivered.Load() != 2 {
+	if snapshotGETs.Load() != 4 || delivered.Load() != 3 {
 		t.Fatalf("re-request snapshot GETs=%d deliveries=%d", snapshotGETs.Load(), delivered.Load())
 	}
 	runs, err := s.ListAutomationRuns("requested-review")
-	if err != nil || len(runs) != 2 {
+	if err != nil || len(runs) != 3 {
 		t.Fatalf("runs=%#v err=%v", runs, err)
 	}
-	if runs[0].ID == runs[1].ID || runs[0].TicketID != runs[1].TicketID || runs[0].SessionID != runs[1].SessionID || runs[0].WorkspaceID != runs[1].WorkspaceID || runs[0].PaneID != runs[1].PaneID {
-		t.Fatalf("re-request did not preserve reviewer binding: %#v", runs)
+	for i := 1; i < len(runs); i++ {
+		if runs[i-1].ID == runs[i].ID || runs[i-1].TicketID != runs[i].TicketID || runs[i-1].SessionID != runs[i].SessionID || runs[i-1].WorkspaceID != runs[i].WorkspaceID || runs[i-1].PaneID != runs[i].PaneID {
+			t.Fatalf("continuation did not preserve reviewer binding: %#v", runs)
+		}
 	}
 }
 
@@ -929,7 +947,7 @@ func TestFreshThreadAfterTicketSweepGetsItsOwnTicketNotTheOldOne(t *testing.T) {
 	}
 }
 
-func TestChangedHeadContinuationFailsBeforePublishingTicketActivity(t *testing.T) {
+func TestChangedHeadContinuationKeepsContractAndIdentityChecks(t *testing.T) {
 	s := store.New()
 	now := time.Date(2026, 7, 19, 18, 0, 0, 0, time.UTC)
 	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, now)
@@ -971,15 +989,15 @@ func TestChangedHeadContinuationFailsBeforePublishingTicketActivity(t *testing.T
 		t.Fatalf("changed-contract preflight err=%v", err)
 	}
 	err = d.validateAutomationContinuation(req)
-	if err == nil || !strings.Contains(err.Error(), "changed pull-request revision") {
-		t.Fatalf("changed-head preflight err=%v", err)
+	if err != nil {
+		t.Fatalf("changed-head preflight rejected safe continuation: %v", err)
 	}
 	ticket, err := s.GetTicket(first.TicketID)
 	if err != nil || ticket == nil {
 		t.Fatalf("ticket=%#v err=%v", ticket, err)
 	}
 	if len(ticket.Activity) != 0 {
-		t.Fatalf("unsafe continuation published ticket activity before validation: %#v", ticket.Activity)
+		t.Fatalf("continuation validation published ticket activity: %#v", ticket.Activity)
 	}
 }
 
@@ -1068,7 +1086,7 @@ func TestSuccessfulContinuationReopensArchivedTicket(t *testing.T) {
 	}
 }
 
-func setupContinuationWorktree(t *testing.T) (*Daemon, automation.WorkRequest, string) {
+func setupContinuationWorktree(t *testing.T) (*Daemon, automation.WorkRequest, string, string) {
 	t.Helper()
 	root := t.TempDir()
 	repo := filepath.Join(root, "repo")
@@ -1124,28 +1142,53 @@ func setupContinuationWorktree(t *testing.T) (*Daemon, automation.WorkRequest, s
 	}
 	continuation := firstReq
 	continuation.RunID = "run-2"
-	return d, continuation, prepared.Directory
+	return d, continuation, prepared.Directory, repo
 }
 
 func TestContinuationPreservesOwnedDirtyWorktree(t *testing.T) {
-	d, req, worktree := setupContinuationWorktree(t)
+	d, req, worktree, repo := setupContinuationWorktree(t)
+	originalHead, err := attngit.GetHeadCommit(worktree)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(filepath.Join(worktree, "review-notes.txt"), []byte("keep me"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "new-head.txt"), []byte("new review input"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGitDaemon(t, repo, "add", "new-head.txt")
+	runGitDaemon(t, repo, "commit", "-m", "new head")
+	newHead, err := attngit.GetHeadCommit(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var input automation.PullRequestInput
+	if err := json.Unmarshal(req.Context, &input); err != nil {
+		t.Fatal(err)
+	}
+	input.HeadSHA = newHead
+	req.Context, err = json.Marshal(input)
+	if err != nil {
 		t.Fatal(err)
 	}
 	prepared, err := d.prepareAutomationLocation(context.Background(), req)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if prepared.Directory != worktree {
-		t.Fatalf("continuation worktree=%q want=%q", prepared.Directory, worktree)
+	if prepared.Directory != worktree || prepared.Revision != newHead {
+		t.Fatalf("continuation location=%#v want worktree=%q revision=%q", prepared, worktree, newHead)
 	}
 	if data, err := os.ReadFile(filepath.Join(worktree, "review-notes.txt")); err != nil || string(data) != "keep me" {
 		t.Fatalf("dirty evidence changed: data=%q err=%v", data, err)
 	}
+	if head, err := attngit.GetHeadCommit(worktree); err != nil || head != originalHead {
+		t.Fatalf("owned checkout moved: head=%q want=%q err=%v", head, originalHead, err)
+	}
 }
 
 func TestContinuationFailsWhenOwnedWorktreeIsMissing(t *testing.T) {
-	d, req, worktree := setupContinuationWorktree(t)
+	d, req, worktree, _ := setupContinuationWorktree(t)
 	if err := os.RemoveAll(worktree); err != nil {
 		t.Fatal(err)
 	}
@@ -1155,7 +1198,7 @@ func TestContinuationFailsWhenOwnedWorktreeIsMissing(t *testing.T) {
 }
 
 func TestWithdrawnBeforeLaunchReRequestCreatesFirstWorktree(t *testing.T) {
-	d, req, worktree := setupContinuationWorktree(t)
+	d, req, worktree, _ := setupContinuationWorktree(t)
 	ticket, err := d.store.GetTicket(req.IDs.TicketID)
 	if err != nil || ticket == nil {
 		t.Fatalf("ticket=%#v err=%v", ticket, err)

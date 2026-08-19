@@ -535,10 +535,9 @@ func Effective(spec DefinitionSpec, revision int) (Snapshot, error) {
 // continuity binding (ticket/session/worktree) is safe to reuse across
 // occurrences: the reviewer-facing prompt, launch configuration, and
 // location. It deliberately excludes Continuity/CatchUp (a policy change
-// doesn't invalidate an in-flight thread) and any per-occurrence
-// freshness signal (e.g. GitHub HeadSHA, checked separately by
-// validateAutomationContinuation as per-PR freshness, not contract
-// identity).
+// doesn't invalidate an in-flight thread) and any per-occurrence input such as
+// GitHub HeadSHA. Delivery validates the PR identity separately, while a new
+// head is exactly what the per-subject thread is allowed to continue onto.
 type ContinuationContract struct {
 	Prompt   string
 	Launch   EffectiveLaunch

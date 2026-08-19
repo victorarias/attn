@@ -291,9 +291,8 @@ func (d *Daemon) validateAutomationContinuation(req automation.WorkRequest) erro
 	if !originSnapshot.ContinuationContract().Equal(reqContract) {
 		return errors.New("automation reviewer contract changed; refusing to reuse a session with stale instructions")
 	}
-	// The origin/current pull-request revision comparison only applies to
-	// GitHub-provider occurrences. A scheduled occurrence's payload is
-	// ScheduledInput, not a pull request; parsing it here would always fail.
+	// GitHub continuity stays bound to one PR subject while its immutable head
+	// input advances. Scheduled occurrences carry a different payload shape.
 	if req.Provider == "github" {
 		originOccurrence, err := d.store.GetAutomationOccurrence(origin.OccurrenceID)
 		if err != nil || originOccurrence == nil {
@@ -307,8 +306,8 @@ func (d *Daemon) validateAutomationContinuation(req automation.WorkRequest) erro
 		if err != nil {
 			return err
 		}
-		if originPR.HeadSHA != currentPR.HeadSHA {
-			return errors.New("reviewer continuity across a changed pull-request revision is not enabled yet")
+		if originPR.SubjectKey() != currentPR.SubjectKey() || currentPR.SubjectKey() != req.ContinuityKey {
+			return errors.New("automation reviewer pull-request identity changed; refusing to reuse its session")
 		}
 	}
 	if d.canStartWithdrawnUndeliveredReviewer(origin, req.IDs.SessionID) {
@@ -450,8 +449,8 @@ func (d *Daemon) prepareAutomationLocation(_ context.Context, req automation.Wor
 		if err != nil {
 			return automation.PreparedLocation{}, fmt.Errorf("continuity origin payload: %w", err)
 		}
-		if originPR.HeadSHA != pr.HeadSHA {
-			return automation.PreparedLocation{}, errors.New("reviewer continuity across a changed pull-request revision is not enabled yet")
+		if originPR.SubjectKey() != pr.SubjectKey() || (req.ContinuityKey != "" && pr.SubjectKey() != req.ContinuityKey) {
+			return automation.PreparedLocation{}, errors.New("automation reviewer pull-request identity changed; refusing to reuse its worktree")
 		}
 	}
 	identity := pr.RepositoryIdentity()
