@@ -3,6 +3,7 @@ package hub
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -888,5 +889,204 @@ func TestManagerBrowserControlResponseMustComeFromOwningEndpoint(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for owning endpoint result")
+	}
+}
+
+// forwardTestServer accepts one hub connection and pushes every frame it reads
+// onto frames, so a test can assert both that a command arrived and that a
+// refused one never did.
+func forwardTestServer(t *testing.T) (*httptest.Server, chan []byte) {
+	t.Helper()
+	frames := make(chan []byte, 16)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			t.Errorf("Accept() error = %v", err)
+			return
+		}
+		defer conn.Close(websocket.StatusNormalClosure, "")
+		for {
+			_, payload, err := conn.Read(r.Context())
+			if err != nil {
+				return
+			}
+			frames <- payload
+		}
+	}))
+	t.Cleanup(server.Close)
+	return server, frames
+}
+
+func dialForwardTestServer(t *testing.T, ctx context.Context, server *httptest.Server) *websocket.Conn {
+	t.Helper()
+	conn, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http"), nil)
+	if err != nil {
+		t.Fatalf("Dial() error = %v", err)
+	}
+	t.Cleanup(func() { conn.Close(websocket.StatusNormalClosure, "") })
+	return conn
+}
+
+// A binary_mismatch endpoint keeps its WebSocket alive, so the connection being
+// up is exactly the case where a naive forward runs the command on the wrong
+// build. The refusal has to beat the live connection.
+func TestForwardRefusesAParkedEndpointWhileItsConnectionIsAlive(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	server, frames := forwardTestServer(t)
+	conn := dialForwardTestServer(t, ctx, server)
+
+	manager := NewManager(store.New(), nil, nil, nil, nil, nil)
+	manager.runtimes["endpoint-1"] = &endpointRuntime{
+		record: store.EndpointRecord{ID: "endpoint-1", Name: "gpu-box"},
+		conn:   conn,
+		info: protocol.EndpointInfo{
+			Status:        "binary_mismatch",
+			StatusMessage: protocol.Ptr("remote binary (abc1234) differs from this client (def5678) — click Sync to update"),
+		},
+	}
+
+	err := manager.ForwardEndpointCommand(ctx, "endpoint-1", []byte(`{"cmd":"spawn_session"}`))
+	if err == nil {
+		t.Fatal("ForwardEndpointCommand() error = nil, want a parked refusal")
+	}
+	var parked *ParkedEndpointError
+	if !errors.As(err, &parked) {
+		t.Fatalf("ForwardEndpointCommand() error = %T (%v), want *ParkedEndpointError", err, err)
+	}
+	for _, want := range []string{"gpu-box", "parked", "differs from this client", "click Sync to update"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not name %q", err.Error(), want)
+		}
+	}
+
+	select {
+	case frame := <-frames:
+		t.Fatalf("refused command still reached the mismatched remote: %s", frame)
+	case <-time.After(200 * time.Millisecond):
+	}
+}
+
+// Once the mismatched connection drops the manager keeps the parked status and
+// slow-retries, so the refusal must still name the reason instead of falling
+// through to the mute "endpoint not connected".
+func TestForwardRefusesAParkedEndpointWhoseConnectionDropped(t *testing.T) {
+	manager := NewManager(store.New(), nil, nil, nil, nil, nil)
+	manager.runtimes["endpoint-1"] = &endpointRuntime{
+		record: store.EndpointRecord{ID: "endpoint-1", Name: "gpu-box"},
+		info: protocol.EndpointInfo{
+			Status:        "binary_mismatch",
+			StatusMessage: protocol.Ptr("remote binary (abc1234) differs from this client (def5678) — click Sync to update"),
+		},
+	}
+
+	err := manager.ForwardEndpointCommand(context.Background(), "endpoint-1", []byte(`{"cmd":"spawn_session"}`))
+	var parked *ParkedEndpointError
+	if !errors.As(err, &parked) {
+		t.Fatalf("ForwardEndpointCommand() error = %v, want *ParkedEndpointError", err)
+	}
+	if strings.Contains(err.Error(), "not connected") {
+		t.Errorf("error %q still reads as a bare connection failure", err.Error())
+	}
+	if !strings.Contains(err.Error(), "click Sync to update") {
+		t.Errorf("error %q does not name the way out", err.Error())
+	}
+}
+
+// The PTY entry point resolves a target to an endpoint and must land on the
+// same refusal; it is the path every keystroke and attach takes.
+func TestForwardPTYCommandRefusesAParkedEndpoint(t *testing.T) {
+	manager := NewManager(store.New(), nil, nil, nil, nil, nil)
+	manager.runtimes["endpoint-1"] = &endpointRuntime{
+		record:   store.EndpointRecord{ID: "endpoint-1", Name: "gpu-box"},
+		sessions: map[string]protocol.Session{"session-1": {ID: "session-1"}},
+		info: protocol.EndpointInfo{
+			Status:        "binary_mismatch",
+			StatusMessage: protocol.Ptr("remote binary (abc1234) differs from this client (def5678) — click Sync to update"),
+		},
+	}
+
+	err := manager.ForwardPTYCommand(context.Background(), "session-1", []byte(`{"cmd":"pty_input"}`))
+	var parked *ParkedEndpointError
+	if !errors.As(err, &parked) {
+		t.Fatalf("ForwardPTYCommand() error = %v, want *ParkedEndpointError", err)
+	}
+}
+
+// "endpoint not found" keeps meaning what it always meant: no runtime under
+// that id. Widening it to cover parked endpoints is the defect being fixed.
+func TestForwardStillReportsNotFoundForAnUnknownEndpoint(t *testing.T) {
+	manager := NewManager(store.New(), nil, nil, nil, nil, nil)
+
+	err := manager.ForwardEndpointCommand(context.Background(), "endpoint-ghost", []byte(`{"cmd":"spawn_session"}`))
+	if err == nil || err.Error() != "endpoint not found: endpoint-ghost" {
+		t.Fatalf("ForwardEndpointCommand() error = %v, want \"endpoint not found: endpoint-ghost\"", err)
+	}
+	var parked *ParkedEndpointError
+	if errors.As(err, &parked) {
+		t.Fatal("an unknown endpoint must not be reported as parked")
+	}
+}
+
+func TestForwardStillDeliversToAHealthyEndpoint(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	server, frames := forwardTestServer(t)
+	conn := dialForwardTestServer(t, ctx, server)
+
+	manager := NewManager(store.New(), nil, nil, nil, nil, nil)
+	manager.runtimes["endpoint-1"] = &endpointRuntime{
+		record: store.EndpointRecord{ID: "endpoint-1", Name: "gpu-box"},
+		conn:   conn,
+		info:   protocol.EndpointInfo{Status: "connected", StatusMessage: protocol.Ptr("Connected")},
+	}
+
+	if err := manager.ForwardEndpointCommand(ctx, "endpoint-1", []byte(`{"cmd":"spawn_session"}`)); err != nil {
+		t.Fatalf("ForwardEndpointCommand() error = %v", err)
+	}
+	select {
+	case frame := <-frames:
+		if string(frame) != `{"cmd":"spawn_session"}` {
+			t.Fatalf("remote received %s", frame)
+		}
+	case <-ctx.Done():
+		t.Fatal("timed out waiting for the forwarded command")
+	}
+}
+
+// A protocol mismatch parks the endpoint the same way and for the same reason,
+// so it answers with the same refusal rather than "not connected".
+func TestForwardRefusesAVersionMismatchedEndpoint(t *testing.T) {
+	manager := NewManager(store.New(), nil, nil, nil, nil, nil)
+	manager.runtimes["endpoint-1"] = &endpointRuntime{
+		record: store.EndpointRecord{ID: "endpoint-1", Name: "gpu-box"},
+		info: protocol.EndpointInfo{
+			Status:        "version_mismatch",
+			StatusMessage: protocol.Ptr("remote v41, this client v42 — remote needs update"),
+		},
+	}
+
+	err := manager.ForwardEndpointCommand(context.Background(), "endpoint-1", []byte(`{"cmd":"spawn_session"}`))
+	var parked *ParkedEndpointError
+	if !errors.As(err, &parked) {
+		t.Fatalf("ForwardEndpointCommand() error = %v, want *ParkedEndpointError", err)
+	}
+	if !strings.Contains(err.Error(), "remote needs update") {
+		t.Errorf("error %q does not carry the endpoint's own status message", err.Error())
+	}
+}
+
+// The endpoint list has one wording for the mismatch; the command error must
+// reuse it rather than grow a second one that can drift.
+func TestParkedRefusalFallsBackToTheStatusWhenThereIsNoMessage(t *testing.T) {
+	manager := NewManager(store.New(), nil, nil, nil, nil, nil)
+	manager.runtimes["endpoint-1"] = &endpointRuntime{
+		record: store.EndpointRecord{ID: "endpoint-1"},
+		info:   protocol.EndpointInfo{Status: "binary_mismatch"},
+	}
+
+	err := manager.ForwardEndpointCommand(context.Background(), "endpoint-1", []byte(`{"cmd":"spawn_session"}`))
+	if err == nil || err.Error() != "endpoint endpoint-1 is parked: binary_mismatch" {
+		t.Fatalf("ForwardEndpointCommand() error = %v, want the id and the status", err)
 	}
 }

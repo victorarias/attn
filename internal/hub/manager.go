@@ -1058,6 +1058,57 @@ func (m *Manager) HasConfiguredEndpoints() bool {
 	return len(m.runtimes) > 0
 }
 
+// parkedStatuses are the endpoint statuses that mean the hub is deliberately
+// holding this endpoint back until the user clicks Sync. Every one of them is
+// set with a message naming what differs and how to fix it, and every one of
+// them makes the remote unsafe to command: its binary or its protocol is not
+// the one this client speaks.
+var parkedStatuses = map[string]bool{
+	"binary_mismatch":  true,
+	"version_mismatch": true,
+	"version_ahead":    true,
+}
+
+// ParkedEndpointError refuses a command aimed at an endpoint the hub is
+// holding back. It carries the status message the endpoint list already shows,
+// so the command error and the banner cannot drift apart.
+type ParkedEndpointError struct {
+	EndpointID string
+	Name       string
+	Status     string
+	Message    string
+}
+
+func (e *ParkedEndpointError) Error() string {
+	who := strings.TrimSpace(e.Name)
+	if who == "" {
+		who = e.EndpointID
+	}
+	detail := strings.TrimSpace(e.Message)
+	if detail == "" {
+		detail = e.Status
+	}
+	return fmt.Sprintf("endpoint %s is parked: %s", who, detail)
+}
+
+// parkedErrorLocked returns the refusal for a held-back endpoint, or nil when
+// commands may be forwarded to it. Callers hold m.mu.
+//
+// The check is on status, not on the connection: a binary_mismatch endpoint
+// keeps a live WebSocket, so without this the command runs on a remote attn
+// already knows is the wrong build.
+func parkedErrorLocked(endpointID string, runtime *endpointRuntime) error {
+	if !parkedStatuses[runtime.info.Status] {
+		return nil
+	}
+	return &ParkedEndpointError{
+		EndpointID: endpointID,
+		Name:       runtime.record.Name,
+		Status:     runtime.info.Status,
+		Message:    protocol.Deref(runtime.info.StatusMessage),
+	}
+}
+
 func (m *Manager) ForwardPTYCommand(ctx context.Context, targetID string, payload []byte) error {
 	endpointID, ok := m.EndpointIDForPTYTarget(targetID)
 	if !ok {
@@ -1072,6 +1123,10 @@ func (m *Manager) ForwardEndpointCommand(ctx context.Context, endpointID string,
 	if !ok {
 		m.mu.RUnlock()
 		return fmt.Errorf("endpoint not found: %s", endpointID)
+	}
+	if parked := parkedErrorLocked(endpointID, runtime); parked != nil {
+		m.mu.RUnlock()
+		return parked
 	}
 	conn := runtime.conn
 	m.mu.RUnlock()
@@ -1683,6 +1738,10 @@ func (m *Manager) SetEndpointRemoteWeb(ctx context.Context, endpointID string, e
 	if !ok {
 		m.mu.Unlock()
 		return fmt.Errorf("endpoint not found: %s", endpointID)
+	}
+	if parked := parkedErrorLocked(endpointID, runtime); parked != nil {
+		m.mu.Unlock()
+		return parked
 	}
 	if runtime.conn == nil {
 		m.mu.Unlock()

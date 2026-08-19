@@ -1,0 +1,9 @@
+kind: fixed
+area: hub
+change: >
+  A command sent to a remote endpoint that attn is holding back now fails
+  with the reason and the way out — "endpoint gpu-box is parked: remote
+  binary (abc1234) differs from this client (def5678) — click Sync to
+  update" — instead of a bare "endpoint not connected". A mismatched
+  endpoint whose connection is still alive is refused too, rather than
+  running the command on a remote build attn already knows is wrong.

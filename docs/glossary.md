@@ -742,6 +742,15 @@ code's name for the dialing side), **endpoint** (a stored SSH target), and
 **remote** (the dialed machine) describe the plumbing; home and outpost
 describe the ownership relationship carried over it.
 
+A **parked endpoint** is one the hub is deliberately holding back until the
+user clicks Sync: its binary or its protocol version is not the one this
+client speaks (`binary_mismatch`, `version_mismatch`, `version_ahead`). Parked
+is about the remote build, not about a seed being put down. The hub refuses to
+forward commands to a parked endpoint — a binary mismatch keeps its WebSocket
+alive, so refusing on status is what stops a command running on a build attn
+already knows is wrong — and the refusal carries the endpoint's own status
+message, so the command error and the banner cannot drift apart.
+
 ## Conversation session
 
 A **conversation session** is an attn session whose agent runs headless in a
