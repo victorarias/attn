@@ -1,0 +1,14 @@
+kind: internal
+area: docs
+change: >
+  plugins/attn-pi/AGENTS.md is instructions again: what pi's docs answer is a
+  pointer into the installed doc set, and what pi leaves undocumented was
+  re-verified against the pinned 0.83.0 before being kept.
+notes: >
+  A multi-agent verify-then-refute pass over the file's pi claims killed most
+  of them. The corrections that matter: a nisse host never receives a
+  session_shutdown at all (the emit is on AgentSessionRuntime.dispose, which
+  the host does not use); module scope survives a session transition only
+  while cwd is unchanged; pi probes CSI ?996n before OSC 11 and attn answers
+  ?996n nowhere; pi's external-editor path spawns $EDITOR with stdio inherit,
+  so CPR and the alternate screen do reach attn's PTY.

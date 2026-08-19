@@ -507,6 +507,10 @@
   min-width: 0;
 }
 
+.session-row-main > .automation-provenance {
+  max-width: 100%;
+}
+
 .session-row-main .session-name {
   flex: initial;
 }

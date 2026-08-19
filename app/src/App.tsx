@@ -1273,6 +1273,7 @@ function AppContent({
       autoSettleDismissArmed: daemonSession?.auto_settle_dismiss_armed ?? false,
       costUsd: daemonSession?.cost_usd,
       costUnknown: daemonSession?.cost_unknown ?? false,
+      automation: daemonSession?.automation ?? s.automation,
       // Dropped when a pane status overrides the state: the reason describes the
       // resolver's answer, and a pane-derived state was not the resolver's.
       state_reason: paneState ? undefined : daemonSession?.state_reason,
@@ -4030,6 +4031,7 @@ function AppContent({
                       isActive: entry.id === activeSessionId,
                       presentation: presentationBySessionId.get(entry.id),
                       seedId: entry.seedId,
+                      automation: entry.automation,
                     }))}
                     seedTargetSessions={daemonSessions.map((session) => ({
                       sessionId: session.id,

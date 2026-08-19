@@ -76,6 +76,20 @@ describe('adoptSnapshot', () => {
     terminal.free();
   });
 
+  it('preserves extended indexed colors when restoring a themed terminal', () => {
+    const palette = Array.from({ length: 16 }, (_, index) => index === 3 ? 0x123456 : 0);
+    const terminal = ghostty.createTerminal(80, 24, { palette });
+    const history = terminal.adoptSnapshot(snapshot);
+    while (history.next() !== null) { /* drain */ }
+
+    terminal.write('m\x1b[38;5;196mR\x1b[48;5;46mG\x1b[33mY');
+    const cells = terminal.getLine(5)!;
+    expect(cells[8]).toMatchObject({ codepoint: 'R'.codePointAt(0), fg_r: 0xff, fg_g: 0x00, fg_b: 0x00 });
+    expect(cells[9]).toMatchObject({ codepoint: 'G'.codePointAt(0), bg_r: 0x00, bg_g: 0xff, bg_b: 0x00 });
+    expect(cells[10]).toMatchObject({ codepoint: 'Y'.codePointAt(0), fg_r: 0x12, fg_g: 0x34, fg_b: 0x56 });
+    terminal.free();
+  });
+
   it('puts nothing on the pty', () => {
     // The fixture's parser sits mid-CSI, which is the case a replay-based
     // restore would answer queries from.

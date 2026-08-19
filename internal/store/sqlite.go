@@ -1210,6 +1210,12 @@ CREATE TABLE IF NOT EXISTS app_reconcile_progress (
 	// tolerating a schema-version rewind in recovery tests, the guard prevents a
 	// rerun from reclassifying reconcile rows as subscriptions.
 	{116, "record app reconcile invocation lifecycles", ``},
+	{117, "index automation provenance lookups", `
+		CREATE INDEX IF NOT EXISTS idx_automation_runs_session_created
+			ON automation_runs(session_id, created_at DESC, id DESC);
+		CREATE INDEX IF NOT EXISTS idx_automation_runs_ticket_created
+			ON automation_runs(ticket_id, created_at DESC, id DESC);
+	`},
 }
 
 // migration99SQL is everything migration 99 does after its guarded ALTER.

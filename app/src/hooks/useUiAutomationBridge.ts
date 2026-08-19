@@ -612,6 +612,7 @@ function collectSessionUiState(
       ? {
           text: sidebarItem.textContent || '',
           bounds: rectSnapshot(sidebarItem),
+          automation: sidebarItem.querySelector('.automation-provenance')?.textContent?.trim() || '',
         }
       : null,
     workspaceBounds: workspaceDom.workspaceRoot?.bounds ?? null,
@@ -622,6 +623,7 @@ function collectSessionUiState(
       splits: collectSplitDomMetrics(workspaceId),
     },
     agentPaneBounds: rectSnapshot(firstAgentPane),
+    paneAutomation: firstAgentPane?.querySelector('.automation-provenance')?.textContent?.trim() || '',
     settling: settlingChip instanceof HTMLElement
       ? {
           text: settlingChip.textContent?.trim() || '',
@@ -1447,6 +1449,7 @@ function collectAutomationsUiState() {
         id: row.getAttribute('data-run-id') ?? '',
         state: row.getAttribute('data-state') ?? '',
         navigable: Boolean(row.querySelector('button.automations-panel__run-row-main')),
+        automation: row.querySelector('.automation-provenance')?.textContent?.trim() ?? '',
         lastError: row.querySelector('.automations-panel__run-error')?.textContent?.trim() ?? '',
       }))
     : [];

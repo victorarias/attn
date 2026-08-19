@@ -212,3 +212,48 @@ func TestCrewDirList_RepeatsAndClears(t *testing.T) {
 		t.Fatalf("an empty value = %+v, want the flag seen with no dirs", cleared)
 	}
 }
+
+// `crew set --agent` is how a member moves harness, and passing it empty is the
+// way back to the default — a distinction a plain string cannot carry, so the
+// parse hands the daemon a pointer.
+func TestParseCrewSetArgs_CarriesTheHarnessAndTheWayBack(t *testing.T) {
+	parsed, err := parseCrewSetArgs([]string{"trellis", "--agent", "codex"})
+	if err != nil {
+		t.Fatalf("parseCrewSetArgs: %v", err)
+	}
+	if parsed.member != "trellis" || parsed.agent == nil || *parsed.agent != "codex" {
+		t.Fatalf("parsed = %+v, want trellis on codex", parsed)
+	}
+	if parsed.cwd != nil || parsed.awareness != nil {
+		t.Errorf("naming only --agent touched another field: %+v", parsed)
+	}
+
+	cleared, err := parseCrewSetArgs([]string{"trellis", "--agent", ""})
+	if err != nil {
+		t.Fatalf("parseCrewSetArgs --agent '': %v", err)
+	}
+	if cleared.agent == nil || *cleared.agent != "" {
+		t.Fatalf("an empty --agent did not reach the daemon as a clear: %+v", cleared.agent)
+	}
+
+	// Naming nothing is refused rather than sent as a write that changes nothing.
+	if _, err := parseCrewSetArgs([]string{"trellis"}); err == nil {
+		t.Error("crew set with no field was accepted")
+	}
+}
+
+// The AGENT column says what a member lives on without anyone having to wake it
+// to find out.
+func TestPrintCrewList_NamesTheHarnessEachMemberRunsOn(t *testing.T) {
+	var out bytes.Buffer
+	printCrewList(&out, []protocol.CrewMember{
+		{ID: "keel", HomeDir: "/home/.attn/crew/keel", Agent: protocol.Ptr("codex")},
+		{ID: "trellis", HomeDir: "/home/.attn/crew/trellis", Agent: protocol.Ptr("claude")},
+	})
+	text := out.String()
+	for _, want := range []string{"AGENT", "codex", "claude"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("crew list output is missing %q:\n%s", want, text)
+		}
+	}
+}

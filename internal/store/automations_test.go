@@ -34,6 +34,43 @@ func TestAutomationClaimIsIdempotentAndSnapshotsRevision(t *testing.T) {
 	}
 }
 
+func TestAutomationProvenanceRecordsAreNewestFirstAndJoined(t *testing.T) {
+	s := New()
+	now := time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC)
+	def, err := s.UpsertAutomationDefinition("review", "Requested PR review - GPT Sol medium", `{"trigger":{"type":"github_review_requested"}}`, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstIDs := AutomationRunReservation{RunID: "run-1", OccurrenceID: "occ-1", TicketID: "ticket-1", SessionID: "session-1", WorkspaceID: "workspace-1", PaneID: "pane-1"}
+	if _, created, err := s.ClaimManualAutomationRun(def.ID, "request-1", "ghe.spotify.net/owner/repo#1", `{"cycle":1}`, def.Revision, `{}`, now, firstIDs); err != nil || !created {
+		t.Fatalf("first claim created=%v err=%v", created, err)
+	}
+	secondIDs := AutomationRunReservation{RunID: "run-2", OccurrenceID: "occ-2", TicketID: "ticket-1", SessionID: "session-1", WorkspaceID: "workspace-1", PaneID: "pane-1"}
+	if _, created, err := s.ClaimManualAutomationRun(def.ID, "request-2", "ghe.spotify.net/owner/repo#1", `{"cycle":2}`, def.Revision, `{}`, now.Add(time.Minute), secondIDs); err != nil || !created {
+		t.Fatalf("second claim created=%v err=%v", created, err)
+	}
+
+	records, err := s.ListLatestAutomationProvenanceRecords()
+	if err != nil || len(records) != 1 {
+		t.Fatalf("records = %#v err=%v", records, err)
+	}
+	if records[0].RunID != "run-2" || records[0].DefinitionName != def.Name || records[0].SessionID != "session-1" || records[0].PayloadJSON != `{"cycle":2}` {
+		t.Fatalf("latest record = %#v", records[0])
+	}
+	loaded, err := s.GetAutomationProvenanceRecord("run-1")
+	if err != nil || loaded == nil || loaded.RunID != "run-1" || loaded.DefinitionSpecJSON != def.SpecJSON {
+		t.Fatalf("loaded record = %#v err=%v", loaded, err)
+	}
+	latestForSession, err := s.GetLatestAutomationProvenanceRecordForSession("session-1")
+	if err != nil || latestForSession == nil || latestForSession.RunID != "run-2" {
+		t.Fatalf("latest session record = %#v err=%v", latestForSession, err)
+	}
+	latestForTicket, err := s.GetLatestAutomationProvenanceRecordForTicket("ticket-1")
+	if err != nil || latestForTicket == nil || latestForTicket.RunID != "run-2" {
+		t.Fatalf("latest ticket record = %#v err=%v", latestForTicket, err)
+	}
+}
+
 func TestScheduledAutomationClaimIsIdempotent(t *testing.T) {
 	s := New()
 	now := time.Date(2026, 7, 20, 3, 0, 0, 0, time.UTC)

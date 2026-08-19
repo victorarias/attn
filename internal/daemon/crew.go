@@ -534,6 +534,9 @@ func (d *Daemon) crewMemberWire(member crew.Member) protocol.CrewMember {
 	if member.CWD != "" {
 		wire.Cwd = protocol.Ptr(member.CWD)
 	}
+	// Always the resolved answer, never the stored blank: a reader asking what a
+	// member runs on must not have to know the default.
+	wire.Agent = protocol.Ptr(member.LaunchAgent())
 	wire.AwarenessDirs = append([]string{}, member.AwarenessDirs...)
 	// The wire carries only a binding that still binds: whether a session is
 	// live is judged here, at read, so a caller never has to.

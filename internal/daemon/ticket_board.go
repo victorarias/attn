@@ -27,9 +27,12 @@ func (d *Daemon) ticketRows(filter store.TicketListFilter) []protocol.Ticket {
 		return nil
 	}
 	out := make([]protocol.Ticket, 0, len(rows))
+	_, byTicket := d.latestAutomationProvenance()
 	for _, t := range rows {
 		if t != nil {
-			out = append(out, ticketToProtocol(t))
+			row := ticketToProtocol(t)
+			row.Automation = byTicket[t.ID]
+			out = append(out, row)
 		}
 	}
 	return out
@@ -136,6 +139,7 @@ func ticketToProtocol(t *store.Ticket) protocol.Ticket {
 
 func (d *Daemon) ticketToProtocolFull(t *store.Ticket) (protocol.Ticket, error) {
 	pt := ticketToProtocol(t)
+	pt.Automation = d.automationProvenanceForTicket(t.ID)
 	artifacts, err := d.ticketArtifacts(t.ID)
 	if err != nil {
 		return protocol.Ticket{}, err

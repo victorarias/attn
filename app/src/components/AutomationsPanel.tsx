@@ -3,6 +3,7 @@ import { AutomationDefinitionSummary, AutomationRunSummary } from '../types/gene
 import { useAutomationsStore, selectDefinitionById } from '../store/automations';
 import { AutomationActionTimeoutError } from '../hooks/useDaemonSocket';
 import { AutomationForm, automationFormKey } from './automations/AutomationForm';
+import { AutomationProvenance } from './AutomationProvenance';
 import './AutomationsPanel.css';
 
 export interface AutomationsPanelProps {
@@ -438,7 +439,9 @@ export function AutomationsPanel({
                         delivered {new Date(run.delivered_at).toLocaleString()}
                       </span>
                     )}
-                    {run.occurrence_key && (
+                    {run.automation ? (
+                      <AutomationProvenance provenance={run.automation} />
+                    ) : run.occurrence_key && (
                       <span className="automations-panel__run-occurrence">{run.occurrence_key}</span>
                     )}
                   </>

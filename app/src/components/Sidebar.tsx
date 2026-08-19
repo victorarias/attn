@@ -22,6 +22,8 @@ import { useAppViewTitleResolver } from '../hooks/useAppViewTitle';
 import type { WorkspaceWithSessions } from '../utils/workspaceViewModels';
 import type { QueueBands as QueueBandsModel } from '../utils/queueBands';
 import type { WorkspaceSelectionStyle } from '../utils/workspaceSelectionStyle';
+import type { AutomationProvenance as AutomationProvenanceValue } from '../types/generated';
+import { AutomationProvenance } from './AutomationProvenance';
 
 interface LocalSession {
   id: string;
@@ -44,6 +46,7 @@ interface LocalSession {
   turnOwed?: boolean;
   turnOpenedAt?: string;
   crewMember?: string;
+  automation?: AutomationProvenanceValue;
 }
 
 type SidebarWorkspace = WorkspaceWithSessions<LocalSession>;
@@ -1202,7 +1205,10 @@ export function Sidebar({
                     title={session.state === 'recoverable' ? 'Session will be recovered when opened' : undefined}
                   >
                     <StateIndicator state={session.state} size="md" seed={session.id} reason={session.state_reason} />
-                    <SessionLabel label={session.label} />
+                    <span className="sidebar-session-identity">
+                      <SessionLabel label={session.label} />
+                      <AutomationProvenance provenance={session.automation} density="compact" />
+                    </span>
                     {session.endpointName && (
                       <span className={`session-endpoint-badge status-${session.endpointStatus || 'connected'}`}>
                         {session.endpointName}
@@ -1383,7 +1389,10 @@ export function Sidebar({
                           onClick={() => onSelectSession(session.id)}
                         >
                           <StateIndicator state={session.state} size="md" seed={session.id} reason={session.state_reason} />
-                          <SessionLabel label={session.label} />
+                          <span className="sidebar-session-identity">
+                            <SessionLabel label={session.label} />
+                            <AutomationProvenance provenance={session.automation} density="compact" />
+                          </span>
                           {session.chiefOfStaff && <ChiefOfStaffBadge />}
                           {session.delegatedFromChief && <DelegatedFromChiefBadge />}
                           {session.endpointName && (

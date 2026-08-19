@@ -45,6 +45,8 @@ import { startLeafDrag, type LeafDropSnapshot } from './leafDrag';
 import type { DockTarget } from './dockTarget';
 import type { WorkspaceSelectionStyle } from '../../utils/workspaceSelectionStyle';
 import { HeaderSessionCost } from './SessionCost';
+import type { AutomationProvenance as AutomationProvenanceValue } from '../../types/generated';
+import { AutomationProvenance } from '../AutomationProvenance';
 
 const ZOOM_PATH_RATIO = 0.76;
 const RESIZE_MOUSE_SUPPRESSION_MS = 1_500;
@@ -141,6 +143,7 @@ interface SessionTerminalWorkspaceProps {
     // The seed this session reports to, when a delegation bound one. Drives the
     // pane-header seed chip.
     seedId?: string;
+    automation?: AutomationProvenanceValue;
   }>;
   // A seed may be tended outside the workspace where its reading tile sits.
   seedTargetSessions?: WorkspaceTileSessionOption[];
@@ -959,11 +962,14 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
                 />
               ) : null}
               <span className="workspace-pane-identity">
-                <span className="workspace-pane-title">{paneTitle}</span>
-                <HeaderSessionCost
-                  costUsd={paneSession?.costUsd}
-                  unknown={paneSession?.costUnknown}
-                />
+                <span className="workspace-pane-identity-main">
+                  <span className="workspace-pane-title">{paneTitle}</span>
+                  <HeaderSessionCost
+                    costUsd={paneSession?.costUsd}
+                    unknown={paneSession?.costUnknown}
+                  />
+                </span>
+                <AutomationProvenance provenance={paneSession?.automation} interactive />
               </span>
               {onRenameSession ? (
                 <button

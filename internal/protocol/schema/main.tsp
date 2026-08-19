@@ -117,6 +117,28 @@ enum WorkflowAgentCallStatus {
 // Core Entities
 // ============================================================================
 
+// PullRequestProvenance is the validated identity of a GitHub pull request
+// that caused an automation run. Title is provider-authored display data; the
+// other fields have passed PullRequestInput's identity checks.
+model PullRequestProvenance {
+  repository: string;           // host/owner/repository
+  number: int32;
+  url: string;
+  title?: string;
+  head_sha: string;
+}
+
+// AutomationProvenance is a derived read model. The daemon joins existing
+// definition/run/occurrence rows when it builds wire snapshots; sessions and
+// tickets do not persist a second copy.
+model AutomationProvenance {
+  run_id: string;
+  definition_id: string;
+  definition_name: string;
+  trigger_type: string;
+  pull_request?: PullRequestProvenance;
+}
+
 model Session {
   id: string;
   label: string;
@@ -151,6 +173,7 @@ model Session {
   activity_at?: string;         // ISO timestamp the activity line was generated. Present whenever activity is, so a client can age out a line the generator has stopped refreshing rather than showing it as current.
   cost_usd?: float64;           // Accrued token cost in USD. Present only after usage exists and every observed model has a price.
   cost_unknown?: boolean;       // True after usage exists when any observed model has no price. Mutually exclusive with cost_usd; both absent means no usage yet.
+  automation?: AutomationProvenance; // Present when this session was launched by an automation; latest run wins for a continuity thread.
   todos?: string[];             // Optional: can be empty/absent
   last_seen: string;            // ISO timestamp, always set
 }
@@ -398,10 +421,10 @@ model Ticket {
   // Highest event sequence for this ticket at detail-read time. App mutations
   // echo it as expected_event_seq and must refresh when it is stale.
   latest_event_seq?: int32;
+  automation?: AutomationProvenance;
   activity: TicketActivity[];
   artifacts: TicketArtifact[];
 }
-
 
 model PR {
   // Core identity - always present
@@ -3514,6 +3537,7 @@ model AutomationRunSummary {
   updated_at: string;
   delivered_at?: string;
   occurrence_key?: string;
+  automation?: AutomationProvenance;
 }
 
 // Per-action result messages for the automations surface (socket + WS share
@@ -5526,6 +5550,9 @@ model CrewMember {
   home_dir: string;
   // Where the member's sessions launch; absent until the wake slice records one.
   cwd?: string;
+  // The harness this member's days run on. Absent means the crew default
+  // (claude); a wake's own `agent` still wins for that one day.
+  agent?: string;
   // The places the member's charter is about.
   awareness_dirs: string[];
   // The session living this member's current day. Present only while that
@@ -5623,6 +5650,9 @@ model CrewSetMessage {
   cmd: "crew_set";
   member: string;
   cwd?: string;
+  // The harness the member's days run on. An empty string clears it back to
+  // the crew default — the way out, said the way `cwd` says it.
+  agent?: string;
   awareness_dirs?: string[];
 
   // The way out. An empty awareness_dirs cannot say "clear it": the field is

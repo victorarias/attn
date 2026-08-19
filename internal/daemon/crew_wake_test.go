@@ -706,3 +706,105 @@ func TestCrewWake_AnOutpostHoldsNoneOfIt(t *testing.T) {
 		t.Fatal("an outpost primed a session as a crew member")
 	}
 }
+
+// A member lives on the harness its record names: the registry decides, not the
+// caller, so a member registered on codex wakes on codex every morning with
+// nobody typing a flag.
+func TestCrewWake_LaunchesTheHarnessTheMemberIsRegisteredOn(t *testing.T) {
+	d, backend, _ := newWakeableDaemon(t)
+	if resp := crewSet(t, d, protocol.CrewSetMessage{Member: "trellis", Agent: protocol.Ptr("codex")}); !resp.Ok {
+		t.Fatalf("crew set: %v", protocol.Deref(resp.Error))
+	}
+	if got := protocol.Deref(memberByID(t, crewList(t, d), "trellis").Agent); got != "codex" {
+		t.Fatalf("roster agent = %q, want codex", got)
+	}
+
+	woken, err := d.crewWake("trellis", "")
+	if err != nil {
+		t.Fatalf("wake: %v", err)
+	}
+	backend.mu.Lock()
+	agent, model := backend.spawnOpts[0].Agent, backend.spawnOpts[0].Model
+	backend.mu.Unlock()
+	if agent != "codex" {
+		t.Errorf("member woke on %q, want codex", agent)
+	}
+	// The pin names a Claude model; a codex member takes codex's own default.
+	if model != "" {
+		t.Errorf("codex member was pinned to model %q, want the harness default", model)
+	}
+	// The stored session is what the lifecycle tick reads its harness off, so a
+	// codex day must be assumed against codex's prompt-cache lifetime.
+	session := d.store.Get(woken.SessionID)
+	if session == nil {
+		t.Fatalf("no session %q was stored", woken.SessionID)
+	}
+	if string(session.Agent) != "codex" {
+		t.Errorf("stored session agent = %q, want codex", session.Agent)
+	}
+	if got := d.crewCacheTTL(string(session.Agent)); got != crewCacheTTLCodex*time.Second {
+		t.Errorf("the codex day is warmed against %s, want %ds", got, crewCacheTTLCodex)
+	}
+}
+
+// A member with no recorded harness keeps waking where it always has, so the
+// field arriving changes nothing for the members that predate it.
+func TestCrewWake_AnUnsetAgentIsStillTheDefaultHarness(t *testing.T) {
+	d, backend, _ := newWakeableDaemon(t)
+	if got := protocol.Deref(memberByID(t, crewList(t, d), "trellis").Agent); got != crew.DefaultAgent {
+		t.Fatalf("roster agent = %q, want the default %q", got, crew.DefaultAgent)
+	}
+	if _, err := d.crewWake("trellis", ""); err != nil {
+		t.Fatalf("wake: %v", err)
+	}
+	backend.mu.Lock()
+	agent := backend.spawnOpts[0].Agent
+	backend.mu.Unlock()
+	if agent != crew.DefaultAgent {
+		t.Errorf("member woke on %q, want %q", agent, crew.DefaultAgent)
+	}
+}
+
+// `--agent` is one day, not a move: it wins over the record for the wake it is
+// typed on, and the record is untouched.
+func TestCrewWake_TheFlagWinsForOneDayWithoutMovingTheMember(t *testing.T) {
+	d, backend, _ := newWakeableDaemon(t)
+	if resp := crewSet(t, d, protocol.CrewSetMessage{Member: "trellis", Agent: protocol.Ptr("codex")}); !resp.Ok {
+		t.Fatalf("crew set: %v", protocol.Deref(resp.Error))
+	}
+	if _, err := d.crewWake("trellis", "claude"); err != nil {
+		t.Fatalf("wake: %v", err)
+	}
+	backend.mu.Lock()
+	agent := backend.spawnOpts[0].Agent
+	backend.mu.Unlock()
+	if agent != "claude" {
+		t.Errorf("wake --agent claude launched %q", agent)
+	}
+	if got := protocol.Deref(memberByID(t, crewList(t, d), "trellis").Agent); got != "codex" {
+		t.Errorf("the flag moved the member to %q; it should still be codex", got)
+	}
+}
+
+// A harness this daemon cannot launch is refused when it is typed, not at the
+// next morning — and the way out is the same flag, empty.
+func TestCrewSet_RefusesAnUnknownHarnessAndClearsBackToTheDefault(t *testing.T) {
+	d, _, _ := newWakeableDaemon(t)
+	resp := crewSet(t, d, protocol.CrewSetMessage{Member: "trellis", Agent: protocol.Ptr("nosuchharness")})
+	if resp.Ok {
+		t.Fatal("an unknown harness was accepted")
+	}
+	if msg := protocol.Deref(resp.Error); !strings.Contains(msg, "nosuchharness") {
+		t.Errorf("refusal %q does not name the harness it refused", msg)
+	}
+
+	if resp := crewSet(t, d, protocol.CrewSetMessage{Member: "trellis", Agent: protocol.Ptr("codex")}); !resp.Ok {
+		t.Fatalf("crew set codex: %v", protocol.Deref(resp.Error))
+	}
+	if resp := crewSet(t, d, protocol.CrewSetMessage{Member: "trellis", Agent: protocol.Ptr("")}); !resp.Ok {
+		t.Fatalf("crew set --agent '': %v", protocol.Deref(resp.Error))
+	}
+	if got := protocol.Deref(memberByID(t, crewList(t, d), "trellis").Agent); got != crew.DefaultAgent {
+		t.Errorf("clearing the agent left %q, want %q", got, crew.DefaultAgent)
+	}
+}
