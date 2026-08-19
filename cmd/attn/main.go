@@ -802,7 +802,9 @@ task source:
 
 placement:
   (no flags)                 add a pane to the source workspace; Git repositories
-                             get a new worktree automatically
+                             get a new worktree automatically, and a
+                             non-repository source is refused — place it with a
+                             flag below or pass --no-worktree
   --new-workspace            create a workspace using the source directory
   --workspace <id>           add a pane to an existing workspace
   --cwd <path>               create a workspace at an existing directory
