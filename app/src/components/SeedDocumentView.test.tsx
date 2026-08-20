@@ -97,8 +97,13 @@ describe('SeedDocumentView', () => {
       />,
     );
 
-    expect(screen.queryByRole('button', { name: '/repo/old.md' })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '/repo/current.md' }));
+    expect(screen.queryByRole('button', { name: /old\.md/ })).not.toBeInTheDocument();
+    // The row is the object: its kind in words, the file by name, the directory
+    // beside it — the whole path is the title, not the label.
+    const artifact = screen.getByRole('button', { name: /current\.md/ });
+    expect(artifact).toHaveTextContent('markdown');
+    expect(artifact).toHaveAttribute('title', '/repo/current.md');
+    fireEvent.click(artifact);
     expect(onOpenMarkdownArtifact).toHaveBeenCalledWith('/repo/current.md');
   });
 
@@ -115,8 +120,11 @@ describe('SeedDocumentView', () => {
     );
 
     expect(screen.getByText('nb-plan-7')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'https://example.test/pr/1' }))
-      .toHaveAttribute('href', 'https://example.test/pr/1');
+    // A plain URL reads as its host and path; only the kind gutter says what
+    // sort of thing it is, so there is no icon vocabulary to learn.
+    const link = screen.getByRole('link', { name: /example\.test/ });
+    expect(link).toHaveAttribute('href', 'https://example.test/pr/1');
+    expect(link).toHaveTextContent('link');
   });
 
   it('renders no artifact section for an empty set', () => {

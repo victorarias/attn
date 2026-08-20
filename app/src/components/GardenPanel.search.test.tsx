@@ -44,17 +44,20 @@ function type(text: string) {
   fireEvent.change(field(), { target: { value: text } });
 }
 
+// Rows are read off the list itself: an answer is an option of the search
+// field's listbox, a level of the walk is a list of buttons, and this asks the
+// same question of both.
 function rows(): string[] {
-  return screen.queryAllByRole('option').map((row) => row.textContent ?? '');
+  return Array.from(document.querySelectorAll('.garden-row')).map((row) => row.textContent ?? '');
 }
 
 /** The snippet is split into highlighted runs, so read it off its own element. */
 function snippet(): string {
-  return document.querySelector('.garden-seed__snippet')?.textContent ?? '';
+  return document.querySelector('.garden-row__snippet')?.textContent ?? '';
 }
 
 function drillIntoTheCrown() {
-  fireEvent.click(screen.getByRole('button', { name: 'Open the plot under ship the search' }));
+  fireEvent.click(screen.getByRole('button', { name: /ship the search/ }));
 }
 
 // Search and filters are one mechanism: the query line is the only filter state

@@ -3492,6 +3492,17 @@ function AppContent({
     });
   }, [sendOpenSeed, activeSessionId, showError]);
 
+  // whether a seed's artifact is still on disk, so the row can say
+  // so instead of offering to open nothing. fs_exists resolves under a root, so
+  // an absolute artifact path is asked as (its directory, its name); a root that
+  // does not resolve rejects, and the row stays unflagged rather than claiming a
+  // file is gone on the strength of a path it could not ask about.
+  const checkArtifactPath = useCallback((path: string) => {
+    const slash = path.lastIndexOf('/');
+    if (slash <= 0) return Promise.resolve(true);
+    return sendFsExists(path.slice(slash + 1), path.slice(0, slash)).then((result) => result.exists);
+  }, [sendFsExists]);
+
   const handleOpenMarkdownArtifact = useCallback((path: string) => {
     void sendOpenMarkdown(path, '').catch((error) => {
       showError(error instanceof Error ? error.message : 'Could not open the document');
@@ -4202,6 +4213,7 @@ function AppContent({
                   fetchSeedDocument={sendSeedDocumentGet}
                   onOpenAsTile={handleOpenSeedTile}
                   onOpenMarkdownArtifact={handleOpenMarkdownArtifact}
+                  checkArtifactPath={checkArtifactPath}
                   onResumeSeed={handleResumeSeed}
                 />
               ),
@@ -4343,6 +4355,7 @@ function AppContent({
           handleOpenSeedTile(seedId);
         }}
         onOpenMarkdownArtifact={handleOpenMarkdownArtifact}
+        checkArtifactPath={checkArtifactPath}
         onResumeSeed={handleResumeSeed}
         onClose={closeGardenSurface}
       />

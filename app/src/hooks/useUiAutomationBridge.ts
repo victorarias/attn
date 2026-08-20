@@ -1366,36 +1366,82 @@ function clickTestId(testid: string) {
 // The garden panel, as a scenario reads it: where you are in the garden, and
 // what is in front of you. The trail and the rows are the two things a
 // navigation scenario asserts on, so both come back whole.
+// the garden panel is a stack of places now — one list of rows per
+// place, and a seed's own page instead of an expanded row. The state this
+// reports is what a scenario needs to say where the reader is standing and
+// whether climbing put them back: the trail, the rows, and the scroll offset.
+// The panel the reader is looking at. With the fullscreen surface up, the dock's
+// panel is still mounted behind it and inert, so the first match in the document
+// is the wrong one to drive.
+function frontGardenPanel(): HTMLElement | null {
+  const panels = Array.from(document.querySelectorAll('.garden-panel'));
+  const front = panels.find((p) => p.classList.contains('is-columns')) ?? panels[0];
+  return front instanceof HTMLElement ? front : null;
+}
+
 function collectGardenUiState() {
-  const panel = document.querySelector('.garden-panel');
+  // Two panels can be mounted at once — the dock behind the fullscreen surface —
+  // and they draw one shared walk. Report the one in front, and summarise both,
+  // so a scenario can tell a handoff from a coincidence.
+  const panels = Array.from(document.querySelectorAll('.garden-panel'));
+  const panel = panels.find((p) => p.classList.contains('is-columns')) ?? panels[0];
   if (!(panel instanceof HTMLElement)) {
     return { present: false };
   }
-  const trail = Array.from(panel.querySelectorAll('.garden-panel__trail-step')).map((step) => ({
-    label: step.textContent?.trim() ?? '',
-    here: step instanceof HTMLButtonElement ? step.disabled : false,
+  const surfaces = panels.map((p) => ({
+    layout: p.classList.contains('is-columns') ? 'columns' : 'stack',
+    here: p.querySelector('.garden-head__title')?.textContent?.trim() ?? '',
+    steps: Array.from(p.querySelectorAll('.garden-trail__step')).map((s) => s.textContent?.trim() ?? ''),
   }));
-  const seeds = Array.from(panel.querySelectorAll('.garden-seed')).map((row) => ({
-    id: row.querySelector('.garden-seed__id')?.textContent?.trim() ?? '',
-    title: row.querySelector('.garden-seed__title')?.textContent?.trim() ?? '',
-    status: row.querySelector('.garden-seed__state')?.textContent?.trim() ?? '',
-    ready: Boolean(row.querySelector('.garden-seed__ready')),
-    blocked: row.querySelector('.garden-seed__blocked')?.textContent?.trim() ?? '',
-    tender: row.querySelector('.garden-seed__tender')?.textContent?.trim() ?? '',
-    plot: row.querySelector('.garden-seed__plot-counts')?.textContent?.trim() ?? '',
+  const trail = Array.from(panel.querySelectorAll('.garden-trail__step')).map((step) => ({
+    label: step.textContent?.trim() ?? '',
+    depth: Number.parseInt(step.getAttribute('data-trail-depth') ?? '-1', 10),
+    here: false,
+  }));
+  const here = panel.querySelector('.garden-head__title')?.textContent?.trim() ?? '';
+  if (here) trail.push({ label: here, depth: trail.length, here: true });
+  const seeds = Array.from(panel.querySelectorAll('.garden-row')).map((row) => ({
+    id: row.querySelector('[data-seed-row]')?.getAttribute('data-seed-row') ?? '',
+    title: row.querySelector('.garden-row__title')?.textContent?.trim() ?? '',
+    status: (row.className.match(/is-(planted|growing|harvested|withered|dormant|unknown)/) ?? [])[1] ?? '',
+    signal: row.querySelector('.garden-row__signal')?.textContent?.trim() ?? '',
+    tender: row.querySelector('.garden-row__tender')?.textContent?.trim() ?? '',
+    plot: row.querySelector('.garden-row__plot')?.textContent?.trim() ?? '',
     // Why this row is in a result list: the plot it came from, and the line of
     // body that matched when the title did not explain itself.
-    home: row.querySelector('.garden-seed__home')?.textContent?.trim() ?? '',
-    snippet: row.querySelector('.garden-seed__snippet')?.textContent?.trim() ?? '',
+    home: row.querySelector('.garden-row__home')?.textContent?.trim() ?? '',
+    snippet: row.querySelector('.garden-row__snippet')?.textContent?.trim() ?? '',
+  }));
+  const viewport = panel.querySelector('.garden-viewport');
+  const focused = document.activeElement;
+  // The columns renderer puts several lists on screen at once, so a flat row
+  // list cannot say which level a row belongs to.
+  const columnsBox = panel.querySelector('.garden-columns');
+  const columns = Array.from(
+    panel.querySelectorAll('.garden-column:not(.garden-column--reader):not(.garden-column--results)'),
+  ).map((col) => ({
+    key: col.getAttribute('data-column') ?? '',
+    rows: col.querySelectorAll('[data-seed-row]').length,
+    selected: col.querySelector('.garden-row.is-selected [data-seed-row]')?.getAttribute('data-seed-row') ?? '',
+    scrollTop: col instanceof HTMLElement ? Math.round(col.scrollTop) : -1,
   }));
   const field = panel.querySelector('.garden-search__input');
-  const closed = panel.querySelector('.garden-panel__scope');
-  const active = field instanceof HTMLInputElement ? field.getAttribute('aria-activedescendant') : null;
+  const closed = panel.querySelector('.garden-chrome__scope');
+  const activeDescendant = field instanceof HTMLInputElement ? field.getAttribute('aria-activedescendant') : null;
   return {
     present: true,
+    surfaces,
+    layout: columnsBox ? 'columns' : 'stack',
+    panes: columnsBox instanceof HTMLElement ? Number(columnsBox.dataset.panes ?? 0) : 0,
+    boxWidth: columnsBox instanceof HTMLElement ? Math.round(columnsBox.clientWidth) : -1,
+    columns,
     trail,
-    crown: panel.querySelector('.garden-panel__crown-progress')?.textContent?.trim() ?? '',
-    empty: panel.querySelector('.garden-panel__empty')?.textContent?.trim() ?? '',
+    here,
+    crown: panel.querySelector('.garden-head__progress')?.textContent?.trim() ?? '',
+    empty: panel.querySelector('.garden-empty')?.textContent?.trim() ?? '',
+    scrollTop: viewport instanceof HTMLElement ? Math.round(viewport.scrollTop) : -1,
+    scrollHeight: viewport instanceof HTMLElement ? viewport.scrollHeight : -1,
+    focusedRow: focused instanceof HTMLElement ? focused.getAttribute('data-seed-row') ?? '' : '',
     seeds,
     // Search and filters are one line and one state, so one reader answers for
     // both: what the query says, where it is looking, what it found, and every
@@ -1405,16 +1451,39 @@ function collectGardenUiState() {
       focused: document.activeElement === field,
       scope: field?.getAttribute('aria-label') ?? '',
       hint: panel.querySelector('.garden-search__meta')?.textContent?.trim() ?? '',
-      count: panel.querySelector('.garden-panel__count')?.textContent?.trim() ?? '',
-      activeSeed: active?.replace('garden-row-', '') ?? '',
+      results: panel.querySelectorAll('#garden-results [data-seed-row]').length,
+      activeSeed: activeDescendant?.replace('garden-row-', '') ?? '',
       closedToggle: closed
         ? { label: closed.textContent?.trim() ?? '', on: closed.getAttribute('aria-pressed') === 'true' }
         : null,
-      nothing: panel.querySelector('.garden-panel__nothing-line')?.textContent?.trim() ?? '',
-      moves: Array.from(panel.querySelectorAll('.garden-panel__moves button')).map(
+      nothing: panel.querySelector('.garden-nothing__line')?.textContent?.trim() ?? '',
+      moves: Array.from(panel.querySelectorAll('.garden-nothing__moves button')).map(
         (move) => move.textContent?.trim() ?? '',
       ),
     },
+  };
+}
+
+// A seed's own page — its document, its artifact rows, its log.
+function collectGardenSeedPage() {
+  const page = document.querySelector('.garden-page');
+  if (!(page instanceof HTMLElement)) return { present: false };
+  return {
+    present: true,
+    title: page.querySelector('.garden-head__title')?.textContent?.trim() ?? '',
+    meta: page.querySelector('.garden-head__meta')?.textContent?.trim() ?? '',
+    body: page.querySelector('.garden-body')?.textContent?.trim() ?? '',
+    artifacts: Array.from(page.querySelectorAll('.seed-artifact')).map((item) => ({
+      kind: item.querySelector('.seed-artifact__kind')?.textContent?.trim() ?? '',
+      primary: item.querySelector('.seed-artifact__primary')?.textContent?.trim() ?? '',
+      secondary: item.querySelector('.seed-artifact__secondary')?.textContent?.trim() ?? '',
+      gone: Boolean(item.querySelector('.seed-artifact__gone')),
+      external: Boolean(item.querySelector('.seed-artifact__leaves')),
+    })),
+    notes: Array.from(page.querySelectorAll('.garden-log > li')).map((note) => ({
+      kind: note.getAttribute('data-kind') ?? '',
+      body: note.querySelector('.garden-log__body')?.textContent?.trim() ?? '',
+    })),
   };
 }
 
@@ -3238,19 +3307,18 @@ export function useUiAutomationBridge({
       }
       case 'garden_get_state':
         return collectGardenUiState();
-      // Walking the garden is a click on a crown's plot; the trail climbs back.
-      case 'garden_open_plot': {
+      // Opening a seed IS the drill — one target per row, whether the seed has
+      // a plot under it or not.
+      case 'garden_open_plot':
+      case 'garden_open_seed': {
         const seedId = typeof payload.seedId === 'string' ? payload.seedId : '';
         if (!seedId) throw new Error('garden_open_plot requires seedId');
-        const row = Array.from(document.querySelectorAll('.garden-seed')).find(
-          (candidate) => candidate.querySelector('.garden-seed__id')?.textContent?.trim() === seedId,
-        );
-        const open = row?.querySelector('.garden-seed__plot');
-        if (!(open instanceof HTMLElement)) {
-          throw new Error(`no plot to open on ${seedId} (it is not a crown, or the panel is not showing it)`);
+        const row = frontGardenPanel()?.querySelector(`[data-seed-row="${seedId}"]`);
+        if (!(row instanceof HTMLElement)) {
+          throw new Error(`no row for ${seedId} (the panel is not showing it)`);
         }
-        open.click();
-        await settleUi(2);
+        row.click();
+        await settleUi(3);
         return collectGardenUiState();
       }
       // Typing into the search line, through the field the reader types into:
@@ -3259,7 +3327,7 @@ export function useUiAutomationBridge({
       case 'garden_search': {
         const query = typeof payload.query === 'string' ? payload.query : null;
         if (query === null) throw new Error('garden_search requires query');
-        const field = document.querySelector('.garden-search__input');
+        const field = frontGardenPanel()?.querySelector('.garden-search__input');
         if (!(field instanceof HTMLInputElement)) {
           throw new Error('the garden panel is not open, so there is nothing to search');
         }
@@ -3273,7 +3341,7 @@ export function useUiAutomationBridge({
       case 'garden_search_key': {
         const key = typeof payload.key === 'string' ? payload.key : null;
         if (!key) throw new Error('garden_search_key requires key');
-        const field = document.querySelector('.garden-search__input');
+        const field = frontGardenPanel()?.querySelector('.garden-search__input');
         if (!(field instanceof HTMLInputElement)) {
           throw new Error('the garden panel is not open, so there is nothing to walk');
         }
@@ -3292,41 +3360,64 @@ export function useUiAutomationBridge({
       }
       case 'garden_climb_to': {
         const depth = typeof payload.depth === 'number' ? payload.depth : 0;
-        const steps = Array.from(document.querySelectorAll('.garden-panel__trail-step'));
-        const step = steps[depth];
+        const step = frontGardenPanel()?.querySelector(`[data-trail-depth="${depth}"]`);
         if (!(step instanceof HTMLElement)) {
-          throw new Error(`no trail step at depth ${depth} (the trail is ${steps.length} deep)`);
+          throw new Error(`no trail step at depth ${depth}`);
         }
         step.click();
-        await settleUi(2);
+        await settleUi(3);
         return collectGardenUiState();
       }
-      // Expanding a seed row is the panel's drill-down: the row opens into the
-      // seed document, artifacts and all.
       case 'garden_expand_seed': {
         const seedId = typeof payload.seedId === 'string' ? payload.seedId : '';
         if (!seedId) throw new Error('garden_expand_seed requires seedId');
-        const row = Array.from(document.querySelectorAll('.garden-seed')).find(
-          (candidate) => candidate.querySelector('.garden-seed__id')?.textContent?.trim() === seedId,
-        );
-        const head = row?.querySelector('.garden-seed__head');
-        if (!(head instanceof HTMLElement)) {
-          throw new Error(`no row for ${seedId} (the panel is not showing it)`);
-        }
-        // The document is fetched on the way in, so a caller re-reading a row it
-        // already opened asks for the round trip with reopen.
-        if (payload.reopen === true && row?.classList.contains('is-expanded')) {
-          head.click();
-          await settleUi(2);
-        }
-        if (!row?.classList.contains('is-expanded')) {
-          head.click();
+        const row = frontGardenPanel()?.querySelector(`[data-seed-row="${seedId}"]`);
+        if (row instanceof HTMLElement) {
+          row.click();
           await settleUi(3);
         }
-        return collectSeedDocumentState('.garden-seed__detail', seedId);
+        return collectGardenSeedPage();
       }
-      // The way back to a delegate whose session is gone: the drill's reopen
-      // button. The daemon owns the whole composite, so the verb only clicks.
+      case 'garden_seed_page':
+        return collectGardenSeedPage();
+      // A real key at whatever holds focus, so the keyboard design is driven the
+      // way a reader drives it (no HID takeover).
+      case 'garden_press': {
+        const key = typeof payload.key === 'string' ? payload.key : '';
+        if (!key) throw new Error('garden_press requires key');
+        const times = typeof payload.times === 'number' ? Math.max(1, Math.floor(payload.times)) : 1;
+        const target = document.activeElement instanceof HTMLElement
+          ? document.activeElement
+          : frontGardenPanel()?.querySelector('.garden-viewport, .garden-columns');
+        if (!(target instanceof HTMLElement)) throw new Error('the garden is not on screen');
+        for (let press = 0; press < times; press += 1) {
+          target.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
+          await settleUi(1);
+        }
+        await settleUi(2);
+        return collectGardenUiState();
+      }
+      // scroll the place the reader is standing in.
+      case 'garden_scroll': {
+        // `column` names a list level by its data-column key; without it the
+        // reader's own viewport is the target, in either renderer.
+        const column = typeof payload.column === 'string' ? payload.column : '';
+        const panel = frontGardenPanel();
+        const viewport = column
+          ? panel?.querySelector(`.garden-column[data-column="${column}"]`)
+          : panel?.querySelector('.garden-viewport, .garden-column--reader');
+        if (!(viewport instanceof HTMLElement)) {
+          throw new Error(column ? `no column ${column} on screen` : 'the garden is not on screen');
+        }
+        const top = typeof payload.top === 'number' ? payload.top : null;
+        const by = typeof payload.by === 'number' ? payload.by : 0;
+        viewport.scrollTo({
+          top: top === null ? viewport.scrollTop + by : top,
+          behavior: payload.smooth === true ? 'smooth' : 'auto',
+        });
+        await settleUi(payload.smooth === true ? 40 : 3);
+        return collectGardenUiState();
+      }
       case 'garden_resume_seed': {
         const seedId = typeof payload.seedId === 'string' ? payload.seedId : '';
         if (!seedId) throw new Error('garden_resume_seed requires seedId');

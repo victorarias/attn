@@ -1,80 +1,176 @@
+/* Type is tiered twice and only twice: 13px is what you read, 11px is what the
+   surface says about itself. Nothing in the garden is 9px any more. */
+
 .garden-panel {
   display: flex;
   flex-direction: column;
-  gap: 10px;
   height: 100%;
-  padding: 16px;
-  overflow-y: auto;
+  min-height: 0;
   color: var(--color-text-primary);
   background: var(--color-bg-panel);
-  /* Rows and titles read at the app's body tier; the small tier is for the
-     meta line. The 9px fine-print tier is deliberately unused here — beside a
-     14px markdown body it reads as broken, not as hierarchy. */
   font-size: var(--font-size-md);
 }
 
-.garden-panel__header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  border-bottom: 1px solid var(--color-border);
-  padding-bottom: 8px;
-}
+/* ---- chrome: the way back, pinned ------------------------------------- */
 
-.garden-panel__kicker {
-  font-size: var(--font-size-xl);
-  font-weight: 600;
-}
-
-.garden-panel__header-actions {
+.garden-chrome {
+  align-items: baseline;
+  border-bottom: 1px solid var(--color-border-subtle);
   display: flex;
-  align-items: center;
+  flex: none;
   gap: 8px;
+  padding: 10px 16px 9px;
 }
 
-.garden-panel__scope {
-  background: var(--color-bg-button);
-  border: 1px solid var(--color-border);
-  border-radius: 6px;
-  color: var(--color-text-secondary);
-  cursor: pointer;
+.garden-trail {
+  align-items: baseline;
+  display: flex;
+  flex: 1;
+  gap: 5px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.garden-trail__seg {
+  align-items: baseline;
+  display: flex;
+  gap: 5px;
+  min-width: 0;
+}
+
+.garden-trail__sep {
+  color: var(--color-text-dimmed);
+  flex: none;
   font-size: var(--font-size-sm);
-  padding: 4px 10px;
+}
+
+.garden-trail__step {
+  background: none;
+  border: none;
+  border-radius: 3px;
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+  flex: none;
+  font-family: inherit;
+  font-size: var(--font-size-sm);
+  max-width: 200px;
+  overflow: hidden;
+  padding: 0;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.garden-panel__scope:hover {
-  border-color: var(--accent);
+.garden-trail__step:hover {
   color: var(--color-text-primary);
 }
 
-.garden-panel__count {
-  color: var(--color-text-tertiary);
+.garden-trail__step:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* The place you are in, once its own title has scrolled away. */
+.garden-trail__here {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The closed lens, as one control that is both the way in and the way out. It
+   sits in the chrome rather than over the list because it is a statement about
+   the whole place, not about one of its rows. */
+.garden-chrome__scope {
+  background: none;
+  border: none;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  flex: none;
   font-size: var(--font-size-sm);
   font-variant-numeric: tabular-nums;
+  padding: 0;
+  white-space: nowrap;
 }
 
-.garden-panel__close {
-  background: transparent;
-  border: none;
-  color: var(--color-text-secondary);
-  cursor: pointer;
-  font-size: var(--font-size-md);
-  line-height: 1;
-  padding: 4px;
-}
-
-.garden-panel__close:hover {
+.garden-chrome__scope:hover {
   color: var(--color-text-primary);
 }
 
-.garden-panel__empty {
+.garden-chrome__scope[aria-pressed='true'] {
+  color: var(--color-text-secondary);
+}
+
+.garden-chrome__scope:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.garden-chrome__close {
+  background: transparent;
+  border: none;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  flex: none;
+  font-size: var(--font-size);
+  line-height: 1;
+  padding: 0 2px;
+}
+
+.garden-chrome__close:hover {
+  color: var(--color-text-primary);
+}
+
+/* ---- the place ---------------------------------------------------------- */
+
+.garden-viewport {
+  flex: 1 1 auto;
+  min-height: 0;
+  outline: none;
+  overflow-y: auto;
+}
+
+.garden-page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin: 0 auto;
+  max-width: 880px;
+  padding: 14px 16px 40px;
+}
+
+/* Drilling in and climbing out are movements. Ten pixels and 160ms is enough to
+   say which direction — anything more is a slide show. */
+@media (prefers-reduced-motion: no-preference) {
+  .garden-page[data-arrival='in'] {
+    animation: garden-page-in 160ms cubic-bezier(0.2, 0, 0, 1);
+  }
+
+  .garden-page[data-arrival='out'] {
+    animation: garden-page-out 160ms cubic-bezier(0.2, 0, 0, 1);
+  }
+
+  @keyframes garden-page-in {
+    from { opacity: 0; transform: translateX(10px); }
+    to { opacity: 1; transform: none; }
+  }
+
+  @keyframes garden-page-out {
+    from { opacity: 0; transform: translateX(-10px); }
+    to { opacity: 1; transform: none; }
+  }
+}
+
+.garden-capped,
+.garden-empty {
   color: var(--color-text-tertiary);
   line-height: 1.6;
   margin: 0;
 }
 
-.garden-panel__empty code {
+.garden-empty code,
+.garden-capped code {
   background: var(--color-bg-elevated);
   border-radius: 4px;
   color: var(--color-text-secondary);
@@ -82,208 +178,363 @@
   padding: 2px 5px;
 }
 
-.garden-panel__capped {
-  color: var(--color-text-tertiary);
-  font-size: var(--font-size-sm);
-  margin: 0 0 8px;
-}
+/* ---- rows --------------------------------------------------------------- */
 
-.garden-panel__list {
+.garden-list {
   display: flex;
   flex-direction: column;
-  gap: 4px;
   list-style: none;
   margin: 0;
   padding: 0;
 }
 
-.garden-seed {
-  border: 1px solid var(--color-border-subtle);
-  border-radius: 6px;
-  overflow: hidden;
-}
-
-.garden-seed:hover {
-  border-color: var(--color-border);
-}
-
-.garden-seed.is-expanded {
-  border-color: var(--accent);
-}
-
-.garden-seed__head {
+.garden-row > button {
   align-items: baseline;
-  background: transparent;
+  background: none;
   border: none;
+  border-radius: 4px;
   color: inherit;
   cursor: pointer;
   display: flex;
-  gap: 8px;
-  padding: 8px 10px;
+  font: inherit;
+  gap: 10px;
+  padding: 5px 8px;
   text-align: left;
   width: 100%;
 }
 
-.garden-seed__head:hover {
+.garden-row > button:hover {
   background: var(--color-bg-elevated);
 }
 
-/* The status pip. Colors are the shared functional tokens, so a seed's state
-   reads the same as every other state surface in the app. */
-.garden-seed__status {
+.garden-row > button:focus-visible {
+  background: var(--color-bg-elevated);
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
+/* The status pip carries the resting state, so most rows need no words. */
+.garden-row__pip {
+  align-self: center;
+  background: var(--color-text-muted);
   border-radius: 50%;
   flex: none;
   height: 6px;
   width: 6px;
-  align-self: center;
-  background: var(--color-text-muted);
 }
 
-.garden-seed.is-planted .garden-seed__status {
-  background: var(--color-accent);
-}
+.is-planted .garden-row__pip { background: var(--color-accent); }
+.is-growing .garden-row__pip { background: var(--accent); }
+.is-harvested .garden-row__pip { background: var(--color-text-tertiary); }
+.is-withered .garden-row__pip { background: var(--color-error); }
+.is-dormant .garden-row__pip { background: var(--color-warning); }
 
-.garden-seed.is-growing .garden-seed__status {
-  background: var(--accent);
-}
-
-.garden-seed.is-harvested .garden-seed__status {
-  background: var(--color-text-tertiary);
-}
-
-.garden-seed.is-withered .garden-seed__status {
-  background: var(--color-error);
-}
-
-.garden-seed.is-dormant .garden-seed__status {
-  background: var(--color-warning);
-}
-
-/* Title on top, then the line that says what is happening to it. Two lines
-   rather than one crowded row: state and tender are what the panel is for in
-   slice 2, and they must be readable without expanding a seed. */
-.garden-seed__main {
-  display: flex;
+.garden-row__title {
   flex: 1;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
-.garden-seed__title {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.garden-seed__line {
-  align-items: baseline;
-  display: flex;
-  gap: 8px;
-  min-width: 0;
-}
-
-.garden-seed__state {
-  color: var(--color-text-secondary);
+.garden-row__signal {
+  color: var(--color-text-tertiary);
   flex: none;
   font-size: var(--font-size-sm);
 }
 
-.garden-seed.is-growing .garden-seed__state {
-  color: var(--accent);
-}
+.garden-row__signal.is-active { color: var(--accent); }
+.garden-row__signal.is-blocked { color: var(--color-text-muted); }
+.garden-row__signal.is-parked { color: var(--color-warning); }
+.garden-row__signal.is-closed { color: var(--color-text-muted); }
 
-.garden-seed__tender {
+.garden-row__tender {
   color: var(--color-text-tertiary);
+  flex: none;
   font-size: var(--font-size-sm);
-  min-width: 0;
+  max-width: 140px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.garden-seed__line .garden-seed__id {
-  margin-left: auto;
-}
-
-.garden-seed__id {
+/* The id is how you talk to the CLI about a seed, and it is noise forty-five
+   times down a list. It lives in a slot that is always reserved and only fills
+   under the pointer or focus, so showing it never moves a row. */
+.garden-row__id {
   color: var(--color-text-muted);
   flex: none;
   font-family: var(--font-mono, ui-monospace, monospace);
   font-size: var(--font-size-sm);
+  opacity: 0;
+  text-align: right;
+  width: 64px;
 }
 
-.garden-seed__planted {
+.garden-row > button:hover .garden-row__id,
+.garden-row > button:focus-visible .garden-row__id {
+  opacity: 1;
+}
+
+.garden-row__plot {
+  align-items: baseline;
   color: var(--color-text-tertiary);
+  display: flex;
   flex: none;
   font-size: var(--font-size-sm);
-  white-space: nowrap;
-}
-
-.garden-seed__detail {
-  border-top: 1px solid var(--color-border-subtle);
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 10px;
-}
-
-.garden-seed__actions {
-  display: flex;
-  justify-content: flex-end;
+  font-variant-numeric: tabular-nums;
   gap: 6px;
 }
 
-.garden-seed__open-tile,
-.garden-seed__reopen {
+.garden-row__chevron {
+  color: var(--color-text-muted);
+}
+
+.garden-row > button:hover .garden-row__chevron {
+  color: var(--color-text-primary);
+}
+
+.garden-closed-toggle {
+  align-items: baseline;
+  align-self: flex-start;
+  background: none;
+  border: none;
+  border-radius: 4px;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  display: flex;
+  font-family: inherit;
+  font-size: var(--font-size-sm);
+  gap: 6px;
+  margin-top: 4px;
+  padding: 4px 8px;
+}
+
+.garden-closed-toggle:hover {
+  color: var(--color-text-secondary);
+}
+
+.garden-closed-toggle:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.garden-closed-toggle__caret {
+  display: inline-block;
+  width: 8px;
+}
+
+/* ---- a seed's own page --------------------------------------------------- */
+
+.garden-head {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.garden-head__row {
+  align-items: baseline;
+  display: flex;
+  gap: 16px;
+}
+
+.garden-head__title {
+  flex: 1;
+  font-size: var(--font-size-lg);
+  font-weight: 600;
+  line-height: 1.25;
+  margin: 0;
+  min-width: 0;
+}
+
+.garden-head__actions {
+  display: flex;
+  flex: none;
+  gap: 6px;
+}
+
+.garden-head__actions button {
   background: var(--color-bg-button);
   border: 1px solid var(--color-border);
   border-radius: 5px;
   color: var(--color-text-secondary);
   cursor: pointer;
+  font-family: inherit;
   font-size: var(--font-size-sm);
-  padding: 4px 8px;
+  padding: 3px 8px;
 }
 
-.garden-seed__open-tile:hover,
-.garden-seed__reopen:hover {
+.garden-head__actions button:hover {
   border-color: var(--accent);
   color: var(--color-text-primary);
 }
 
-.garden-seed__document-state {
-  color: var(--color-text-muted);
-  font-size: var(--font-size-sm);
-  margin: 8px 0;
-}
-
-.garden-seed__document-state--error {
-  color: var(--color-error);
-}
-
-.garden-seed__meta {
+.garden-head__meta {
+  align-items: baseline;
   color: var(--color-text-tertiary);
   display: flex;
   flex-wrap: wrap;
   font-size: var(--font-size-sm);
+  gap: 12px;
+}
+
+.garden-head__state {
+  align-items: baseline;
+  display: flex;
+  gap: 6px;
+}
+
+.garden-head__id {
+  color: var(--color-text-muted);
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+
+.garden-head__progress {
+  align-items: center;
+  color: var(--color-text-tertiary);
+  display: flex;
+  font-size: var(--font-size-sm);
   gap: 10px;
 }
 
-.garden-seed__ready {
-  color: var(--accent);
+/* How far a plot has drained, as proportion. Three pixels of it. */
+.garden-progress {
+  border-radius: 2px;
+  display: flex;
   flex: none;
-  font-size: var(--font-size-sm);
+  gap: 1px;
+  height: 3px;
+  overflow: hidden;
+  width: 160px;
 }
 
-.garden-seed__blocked {
-  color: var(--color-text-muted);
-  flex: none;
-  font-size: var(--font-size-sm);
+/* Done is the quiet segment in both themes. The muted grey is the one text
+   token that stays mid-weight on either ground; tertiary goes near-black on
+   light, which would make the finished work the loudest thing on the page. */
+.garden-progress__seg.is-done { background: var(--color-text-muted); }
+.garden-progress__seg.is-growing { background: var(--accent); }
+.garden-progress__seg.is-parked { background: var(--color-warning); }
+.garden-progress__seg.is-withered { background: var(--color-error); }
+.garden-progress__seg.is-rest { background: var(--color-accent); opacity: 0.5; }
+
+/* ── Columns ─────────────────────────────────────────────────────
+   Fullscreen only. Two list levels and the reader, which is the widest of the
+   three because it holds the thing you drilled in to read. The lists are fixed
+   at 300px: a seed title is 30-45 characters and that is what 300px holds, so
+   widening them would only buy whitespace and would buy it out of the reader. */
+/* Why a seed closed, under its state line. Present only on a closed seed, so it
+   never competes with the body of live work. */
+.garden-head__reason {
+  margin: 6px 0 0;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+}
+
+.garden-columns {
+  display: grid;
+  flex: 1 1 auto;
+  grid-template-columns: minmax(0, 1fr);
+  min-height: 0;
+  overflow: hidden;
+}
+
+.garden-columns[data-panes='2'] { grid-template-columns: 300px minmax(0, 1fr); }
+.garden-columns[data-panes='3'] { grid-template-columns: 300px 300px minmax(0, 1fr); }
+.garden-columns[data-panes='4'] { grid-template-columns: 300px 300px 300px minmax(0, 1fr); }
+
+/* The folded middle of the trail. It is a step like any other, so it reads like
+   one — the ellipsis is the label, not an ornament beside a label. */
+.garden-trail__fold { letter-spacing: 1px; }
+
+.garden-column {
+  border-right: 1px solid var(--color-border-subtle);
+  min-height: 0;
+  overflow-y: auto;
+  padding: 10px 8px 40px;
+  scrollbar-width: thin;
+}
+
+.garden-column:last-child { border-right: none; }
+.garden-column:focus-visible { outline: none; }
+
+/* A column that is not the last still has to say which row you walked through.
+   Quiet: the reader on the right is the loud answer to the same question. */
+.garden-row.is-selected > button { background: var(--color-bg-elevated); }
+.garden-row.is-selected .garden-row__title { color: var(--color-text-primary); }
+
+/* At 300px there is room for the title and one word about it. The tender and
+   the id are on the seed's own page, one column to the right. */
+.garden-columns .garden-column:not(.garden-column--reader) .garden-row__tender,
+.garden-columns .garden-column:not(.garden-column--reader) .garden-row__id {
+  display: none;
+}
+
+.garden-columns .garden-column:not(.garden-column--reader) .garden-row__title {
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.garden-seed__relations {
+/* The reader. Wider than the lists, but the prose inside it is still capped: a
+   column that grows to 900px is as unreadable as one squeezed to 300. */
+.garden-column--reader { padding: 0; }
+.garden-column--reader .garden-page { max-width: 760px; padding: 24px 32px 72px; }
+
+/* The root is one list, not three panes with two of them empty. It reads like
+   the stack until there is something to put beside it. */
+.garden-columns[data-panes='1'] .garden-column {
+  border-right: none;
+  padding: 0;
+}
+.garden-columns[data-panes='1'] .garden-list,
+.garden-columns[data-panes='1'] .garden-closed-toggle,
+.garden-columns[data-panes='1'] .garden-capped {
+  margin-left: auto;
+  margin-right: auto;
+  max-width: 880px;
+  padding-top: 8px;
+}
+
+/* The seed's document. The page is already the card, so the reader's own card
+   is stripped: a frame inside a frame is the kind of thing the taste test
+   deletes. */
+.garden-body .md-reader-card {
+  background: none;
+  border: none;
+  padding: 0;
+}
+
+.garden-body .md-reader-wrap {
+  max-width: none;
+}
+
+.garden-body .md-reader p,
+.garden-body .md-reader li {
+  font-size: var(--font-size-md);
+}
+
+.garden-section {
+  border-top: 1px solid var(--color-border-subtle);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 14px;
+}
+
+.garden-section h3 {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  margin: 0;
+  text-transform: uppercase;
+}
+
+.garden-section .garden-list {
+  margin: 0 -8px;
+}
+
+.garden-relations {
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -292,126 +543,121 @@
   padding: 0;
 }
 
-.garden-seed__relations li {
+.garden-relations li {
   align-items: baseline;
   display: flex;
-  gap: 8px;
+  gap: 10px;
   min-width: 0;
 }
 
-.garden-seed__relation-label {
+.garden-relations__label {
   color: var(--color-text-muted);
   flex: none;
   font-size: var(--font-size-sm);
+  width: 84px;
 }
 
-.garden-seed__relation-title {
-  color: var(--color-text-secondary);
-  font-size: var(--font-size-sm);
+.garden-relations button {
+  background: none;
+  border: none;
+  color: var(--color-text-primary);
+  cursor: pointer;
+  flex: 1;
+  font: inherit;
+  min-width: 0;
   overflow: hidden;
+  padding: 0;
+  text-align: left;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.garden-seed__relation-state {
+.garden-relations button:hover {
+  text-decoration: underline;
+}
+
+.garden-relations__state {
   color: var(--color-text-tertiary);
   flex: none;
   font-size: var(--font-size-sm);
-  margin-left: auto;
 }
 
-/* Where you are, and the way back. Every level is its own target so climbing
-   several plots is one click. */
-.garden-panel__trail {
+/* ---- the log ------------------------------------------------------------- */
+
+.garden-log {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.garden-log > li {
+  border-left: 2px solid var(--color-border-subtle);
+  padding-left: 10px;
+}
+
+/* A handoff is addressed to whoever comes next, which is a different thing from
+   a note to nobody in particular. */
+.garden-log > li.is-handoff {
+  border-left-color: var(--accent);
+}
+
+.garden-log__head {
   align-items: baseline;
+  color: var(--color-text-muted);
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
-  padding: 0 12px 8px;
-}
-
-.garden-panel__trail-segment {
-  align-items: baseline;
-  display: flex;
-  gap: 4px;
-  min-width: 0;
-}
-
-.garden-panel__trail-sep {
-  color: var(--color-text-muted);
   font-size: var(--font-size-sm);
-}
-
-.garden-panel__trail-step {
-  background: none;
-  border: none;
-  color: var(--color-text-secondary);
-  cursor: pointer;
-  font-size: var(--font-size-sm);
-  max-width: 220px;
-  overflow: hidden;
-  padding: 0;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.garden-panel__trail-step:hover:not(:disabled) {
-  color: var(--color-text-primary);
-  text-decoration: underline;
-}
-
-.garden-panel__trail-step:disabled {
-  color: var(--color-text-primary);
-  cursor: default;
-}
-
-.garden-panel__crown {
-  align-items: baseline;
-  display: flex;
   gap: 8px;
-  padding: 0 12px 8px;
 }
 
-.garden-panel__crown-progress {
+.garden-log__who {
   color: var(--color-text-secondary);
-  font-size: var(--font-size-sm);
 }
 
-/* A crown's plot, on its row: the counts that say whether it is draining, and
-   the way in. */
-.garden-seed__plot {
-  align-items: baseline;
-  background: none;
-  border: none;
-  color: var(--color-text-muted);
-  cursor: pointer;
-  display: flex;
-  font-size: var(--font-size-sm);
-  gap: 6px;
-  padding: 0 12px 6px 30px;
-  text-align: left;
-  width: 100%;
+.garden-log__kind {
+  color: var(--color-text-tertiary);
 }
 
-.garden-seed__plot:hover {
-  color: var(--color-text-primary);
-}
-
-.garden-seed__plot-arrow {
+.garden-log__head time {
   margin-left: auto;
 }
 
-.garden-seed__relation-link {
-  background: none;
-  border: none;
-  cursor: pointer;
-  padding: 0;
-  text-align: left;
+/* The folded bookkeeping: one line each, no rail — it is a receipt, not a
+   voice. */
+.garden-log--quiet {
+  gap: 2px;
+  margin-top: 6px;
 }
 
-.garden-seed__relation-link:hover {
-  color: var(--color-text-primary);
-  text-decoration: underline;
+.garden-log--quiet > li {
+  border-left: none;
+  padding-left: 0;
+}
+
+.garden-log--quiet .garden-log__kind {
+  min-width: 52px;
+}
+
+.garden-log__body {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-md);
+  margin-top: 4px;
+}
+
+.garden-log__body > :first-child { margin-top: 0; }
+.garden-log__body > :last-child { margin-bottom: 0; }
+
+.garden-note-empty {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+  margin: 0;
+}
+
+.garden-note-empty--error {
+  color: var(--color-error);
 }
 
 /* ── search ───────────────────────────────────────────────────────────────
@@ -419,26 +665,6 @@
    line of type rather than a control: at list density a bordered input reads
    as chrome before it reads as an invitation, and the panel already spends its
    only border on the header rule. */
-
-/* The results scroll, the header and the search line do not: a field that
-   scrolls away is a field you have to hunt for after every result. The panel
-   was one scroller; the list is the scroller now. */
-.garden-panel {
-  overflow: hidden;
-}
-
-.garden-panel__list {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
-  padding-bottom: 8px;
-}
-
-/* A row is as tall as it reads. Inside a flex column with a bounded height,
-   items shrink by default and clip their own second line. */
-.garden-panel__list > .garden-seed {
-  flex: 0 0 auto;
-}
 
 .garden-search {
   align-items: baseline;
@@ -538,7 +764,7 @@
 }
 
 .garden-search kbd,
-.garden-panel__moves kbd {
+.garden-nothing__moves kbd {
   color: var(--color-text-muted);
   font-family: var(--font-mono, ui-monospace, monospace);
   font-size: var(--font-size-sm);
@@ -552,12 +778,12 @@
   font-weight: 600;
 }
 
-.garden-seed__id.garden-hit {
+.garden-row__id.garden-hit {
   color: var(--accent);
 }
 
 /* Where a result lives, for a flat list of them. */
-.garden-seed__home {
+.garden-row__home {
   color: var(--color-text-muted);
   font-size: var(--font-size-sm);
   min-width: 0;
@@ -567,29 +793,30 @@
 }
 
 /* Why a row is here, when its title does not say. */
-.garden-seed__snippet {
+.garden-row__snippet {
   color: var(--color-text-tertiary);
   display: block;
   font-size: var(--font-size-sm);
+  /* Under the title, not under the pip: 8px of button padding, a 6px pip and
+     the 10px gap after it. A snippet starting left of its own title reads as a
+     row of its own. */
+  margin: -2px 0 4px;
   overflow: hidden;
+  padding: 0 8px 0 24px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 /* The row the keyboard is on. Focus stays in the search field, so the row
    needs to carry the mark itself. */
-.garden-seed.is-active {
-  border-color: var(--color-border-hover);
-}
-
-.garden-seed.is-active .garden-seed__head {
+.garden-row.is-active > button {
   background: var(--color-bg-elevated);
   box-shadow: inset 2px 0 0 var(--accent);
 }
 
 /* No results: name the query, then offer only the moves that would find
    something. */
-.garden-panel__nothing {
+.garden-nothing {
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -597,7 +824,7 @@
 }
 
 @media (prefers-reduced-motion: no-preference) {
-  .garden-panel__nothing {
+  .garden-nothing {
     animation: garden-nothing-in 140ms ease-out;
   }
 
@@ -611,17 +838,17 @@
   }
 }
 
-.garden-panel__nothing-line {
+.garden-nothing__line {
   color: var(--color-text-secondary);
   margin: 0;
 }
 
-.garden-panel__echo {
+.garden-nothing__echo {
   color: var(--color-text-primary);
   font-family: var(--font-mono, ui-monospace, monospace);
 }
 
-.garden-panel__moves {
+.garden-nothing__moves {
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -630,13 +857,13 @@
   padding: 0;
 }
 
-.garden-panel__moves li {
+.garden-nothing__moves li {
   align-items: baseline;
   display: flex;
   gap: 10px;
 }
 
-.garden-panel__moves button {
+.garden-nothing__moves button {
   background: none;
   border: none;
   color: var(--color-text-secondary);
@@ -646,23 +873,39 @@
   text-align: left;
 }
 
-.garden-panel__moves button:hover {
+.garden-nothing__moves button:hover {
   color: var(--accent);
 }
 
-.garden-panel__move-count {
+.garden-nothing__count {
   color: var(--color-text-muted);
   font-variant-numeric: tabular-nums;
 }
 
-/* Widened out of a plot: the trail still says where you are standing, so it
-   must stop saying what you are searching. The plot segments recede and the
-   root crumb takes the weight — one line answering both questions instead of
-   two lines contradicting each other. */
-.garden-panel__trail.is-wide .garden-panel__trail-segment {
+
+/* Widened out of a plot: the trail still says where you are standing, so it must
+   stop saying what you are searching. The steps recede and the root takes the
+   weight — one line answering both questions instead of two contradicting. */
+.garden-trail.is-wide .garden-trail__seg {
   opacity: 0.4;
 }
 
-.garden-panel__trail.is-wide > .garden-panel__trail-step {
+.garden-trail.is-wide > .garden-trail__step {
   color: var(--color-text-primary);
+}
+
+/* A search replaces the columns rather than joining them: browsing is a tree,
+   searching is a list, and the answer gets the room the levels were using. */
+.garden-column--results {
+  padding-top: 4px;
+}
+
+/* An answer is not a level: a ranked list carries a home and a snippet per row,
+   so it takes the room a 300px level would have clipped. */
+.garden-columns[data-mode='search'] {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.garden-columns[data-mode='search'][data-panes='2'] {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
 }

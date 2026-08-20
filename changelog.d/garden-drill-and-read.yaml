@@ -1,0 +1,15 @@
+kind: changed
+area: garden
+change: >
+  The garden reads as a stack of places. A row has one target — opening a seed
+  is drilling into it — and what you find is the seed's document, its
+  attachments, what is under it, and what happened to it. Climbing back out
+  returns you to exactly where you were in the list, with the keyboard's place
+  kept too. Fullscreen draws the walk as columns, showing as many levels beside
+  the document as the window is wide enough to hold; the dock keeps drawing one
+  place at a time. Both are the same walk, so moving between them keeps your
+  depth. Searching still flattens the walk into one ranked list, and opening an
+  answer lands you on where that seed actually lives. Attachments render as rows
+  that name their kind in words — markdown, pull request, link, notebook, repo
+  file — and a file that is no longer on disk says so instead of offering to
+  open nothing.

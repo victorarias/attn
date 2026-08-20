@@ -27,7 +27,7 @@
 
 .seed-document__artifacts h3,
 .seed-document__ledger h3 {
-  color: var(--color-text-secondary);
+  color: var(--color-text-muted);
   font-size: var(--font-size-sm);
   font-weight: 600;
   letter-spacing: 0.04em;
@@ -35,37 +35,11 @@
   text-transform: uppercase;
 }
 
-.seed-document__artifacts ul,
 .seed-document__children,
 .seed-document__notes {
   list-style: none;
   margin: 0;
   padding: 0;
-}
-
-.seed-document__artifacts ul {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.seed-document__artifacts button,
-.seed-document__artifacts a {
-  background: var(--color-bg-elevated);
-  border: 1px solid var(--color-border-subtle);
-  border-radius: 5px;
-  color: var(--color-text-secondary);
-  cursor: pointer;
-  display: inline-block;
-  font-size: var(--font-size-sm);
-  padding: 4px 7px;
-  text-decoration: none;
-}
-
-.seed-document__artifacts button:hover,
-.seed-document__artifacts a:hover {
-  border-color: var(--color-border);
-  color: var(--color-text-primary);
 }
 
 .seed-document__children {
@@ -152,8 +126,6 @@
 
 .seed-document__note-body {
   color: var(--color-text-secondary);
-  /* A note is the seed's ledger, read like the body itself — one tier under
-     the markdown, not fine print. */
   font-size: var(--font-size-md);
   margin-top: 3px;
 }
