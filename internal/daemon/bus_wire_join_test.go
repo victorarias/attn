@@ -198,16 +198,17 @@ var wireFixtures = map[string]wireFixture{
 	},
 
 	// The garden: every fact re-pushes the whole list.
-	FactGardenPlanted:    {events: []string{protocol.EventGardenSeedsUpdated}},
-	FactGardenBodyEdited: {events: []string{protocol.EventGardenSeedsUpdated}},
-	FactGardenTended:     {events: []string{protocol.EventGardenSeedsUpdated}},
-	FactGardenParked:     {events: []string{protocol.EventGardenSeedsUpdated}},
-	FactGardenHarvested:  {events: []string{protocol.EventGardenSeedsUpdated}},
-	FactGardenWithered:   {events: []string{protocol.EventGardenSeedsUpdated}},
-	FactGardenReplanted:  {events: []string{protocol.EventGardenSeedsUpdated}},
-	FactGardenNoted:      {events: []string{protocol.EventGardenSeedsUpdated}},
-	FactGardenLinked:     {events: []string{protocol.EventGardenSeedsUpdated}},
-	FactGardenUnlinked:   {events: []string{protocol.EventGardenSeedsUpdated}},
+	FactGardenPlanted:               {events: []string{protocol.EventGardenSeedsUpdated}},
+	FactGardenBodyEdited:            {events: []string{protocol.EventGardenSeedsUpdated}},
+	FactGardenResumeIdentityChanged: {events: []string{protocol.EventGardenSeedsUpdated}},
+	FactGardenTended:                {events: []string{protocol.EventGardenSeedsUpdated}},
+	FactGardenParked:                {events: []string{protocol.EventGardenSeedsUpdated}},
+	FactGardenHarvested:             {events: []string{protocol.EventGardenSeedsUpdated}},
+	FactGardenWithered:              {events: []string{protocol.EventGardenSeedsUpdated}},
+	FactGardenReplanted:             {events: []string{protocol.EventGardenSeedsUpdated}},
+	FactGardenNoted:                 {events: []string{protocol.EventGardenSeedsUpdated}},
+	FactGardenLinked:                {events: []string{protocol.EventGardenSeedsUpdated}},
+	FactGardenUnlinked:              {events: []string{protocol.EventGardenSeedsUpdated}},
 
 	// PRs and their mute lists.
 	FactPRAppeared:       {events: []string{protocol.EventPRsUpdated}},

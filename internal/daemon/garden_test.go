@@ -77,6 +77,19 @@ func editSeed(t *testing.T, d *Daemon, seedID, body string) protocol.Seed {
 	return resp.SeedEditResult.Seed
 }
 
+func setSeedResume(t *testing.T, d *Daemon, seedID, resumeID, cwd, agent string, clear bool) protocol.Response {
+	t.Helper()
+	msg := protocol.SeedSetResumeMessage{
+		Cmd: protocol.CmdSeedSetResume, SeedID: seedID,
+		ResumeSessionID: protocol.Ptr(resumeID), ResumeCwd: protocol.Ptr(cwd), ResumeAgent: protocol.Ptr(agent),
+	}
+	if clear {
+		msg.Clear = protocol.Ptr(true)
+		msg.ResumeSessionID, msg.ResumeCwd, msg.ResumeAgent = nil, nil, nil
+	}
+	return gardenCall(t, func(c net.Conn) { d.handleSeedSetResume(c, &msg) })
+}
+
 // addGardenSession puts a second real session in the workspace, the way the app
 // does — through the registry, not the stored column.
 func addGardenSession(t *testing.T, d *Daemon, id string) {
@@ -195,6 +208,52 @@ func TestGarden_FullLifeIsVisibleAtEveryStep(t *testing.T) {
 	want := []string{"planted", "growing", "growing", "harvested", "planted", "withered"}
 	if !slices.Equal(states, want) {
 		t.Fatalf("the panel saw %v, want %v", states, want)
+	}
+}
+
+func TestSeedResumeIdentityPlantsSetsAndClearsAtomically(t *testing.T) {
+	d := newGardenDaemon(t)
+	cwd := t.TempDir()
+	planted := plant(t, d, protocol.SeedPlantMessage{
+		Title: "external conversation", ResumeSessionID: protocol.Ptr("native-1"),
+		ResumeCwd: protocol.Ptr(cwd), ResumeAgent: protocol.Ptr("claude"),
+	})
+	if protocol.Deref(planted.ResumeSessionID) != "native-1" || protocol.Deref(planted.ResumeCwd) != cwd || protocol.Deref(planted.ResumeAgent) != "claude" {
+		t.Fatalf("planted resume identity = %+v", planted)
+	}
+
+	set := setSeedResume(t, d, planted.ID, "native-2", cwd, "copilot", false)
+	if !set.Ok || protocol.Deref(set.SeedSetResumeResult.Seed.ResumeSessionID) != "native-2" {
+		t.Fatalf("set resume identity = %+v", set)
+	}
+	cleared := setSeedResume(t, d, planted.ID, "", "", "", true)
+	if !cleared.Ok || cleared.SeedSetResumeResult.Seed.ResumeSessionID != nil || cleared.SeedSetResumeResult.Seed.ResumeCwd != nil || cleared.SeedSetResumeResult.Seed.ResumeAgent != nil {
+		t.Fatalf("cleared resume identity = %+v", cleared)
+	}
+
+	partial := gardenCall(t, func(c net.Conn) {
+		d.handleSeedSetResume(c, &protocol.SeedSetResumeMessage{
+			Cmd: protocol.CmdSeedSetResume, SeedID: planted.ID, ResumeSessionID: protocol.Ptr("native-3"),
+		})
+	})
+	if partial.Ok || !strings.Contains(protocol.Deref(partial.Error), "--cwd") {
+		t.Fatalf("partial identity refusal = %+v", partial)
+	}
+	still, _, err := d.readSeed(planted.ID)
+	if err != nil || still.ResumeSessionID != "" || still.ResumeCwd != "" || still.ResumeAgent != "" {
+		t.Fatalf("partial write changed the cleared seed: seed=%+v err=%v", still, err)
+	}
+}
+
+func TestSeedPlantRefusesPartialResumeIdentity(t *testing.T) {
+	d := newGardenDaemon(t)
+	resp := gardenCall(t, func(c net.Conn) {
+		d.handleSeedPlant(c, &protocol.SeedPlantMessage{
+			Cmd: protocol.CmdSeedPlant, Title: "partial", ResumeSessionID: protocol.Ptr("native-1"),
+		})
+	})
+	if resp.Ok || !strings.Contains(protocol.Deref(resp.Error), "--cwd") {
+		t.Fatalf("partial plant refusal = %+v", resp)
 	}
 }
 

@@ -14,9 +14,9 @@ import (
 // the result; the session and pane reach it through the normal
 // session_registered / workspace_layout_updated broadcasts.
 //
-// The inputs all come from the daemon. The seed names its tender, and that
-// session's dispatch record carries the directory and agent it was launched
-// with — a session row is deleted on close, which is why the record holds them.
+// The inputs all come from the daemon. A dispatch record is authoritative when
+// one exists; a seed-owned identity is the fallback for pre-garden and external
+// conversations attn did not launch.
 //
 // Resume writes NOTHING to the seed: reopening a delegate is not a note about
 // its work, and the seed's lifecycle is only ever moved by a deliberate verb.
@@ -27,11 +27,9 @@ type seedResumeOutcome struct {
 	AlreadyRunning bool
 }
 
-// resumeSeed reopens the agent tending seedID. It reuses the tender's session
-// id so the binding survives (the resumed delegate still reports to the same
-// seed) and so handleSpawnSession can resolve the mirrored resume id for a
-// precise resume. When the tender is still a tracked session it is focused, not
-// re-spawned (already_running).
+// resumeSeed reopens the conversation attached to seedID. A surviving tender's
+// session id stays stable; an external conversation uses its agent-native id as
+// the new container id. A tracked container is focused, not spawned twice.
 func (d *Daemon) resumeSeed(seedID string) (*seedResumeOutcome, error) {
 	seedID = strings.TrimSpace(seedID)
 	if seedID == "" {
@@ -45,28 +43,55 @@ func (d *Daemon) resumeSeed(seedID string) (*seedResumeOutcome, error) {
 		return nil, err
 	}
 	sessionID := strings.TrimSpace(seed.TenderSession)
-	if sessionID == "" {
-		return nil, fmt.Errorf("%s is untended — there is nobody to reopen; `attn seed notes %s` has its log", seedID, seedID)
-	}
-	if existing := d.store.Get(sessionID); existing != nil {
-		// The tender is still tracked — focus it instead of spawning a duplicate.
-		// Re-spawning its id would poison the local store; a dead-but-recoverable
-		// pane revives itself via the attach path on mount.
-		return &seedResumeOutcome{
-			SessionID:      existing.ID,
-			WorkspaceID:    existing.WorkspaceID,
-			AlreadyRunning: true,
-		}, nil
+	if sessionID != "" {
+		if existing := d.store.Get(sessionID); existing != nil {
+			// The tender is still tracked — focus it instead of spawning a duplicate.
+			// Re-spawning its id would poison the local store; a dead-but-recoverable
+			// pane revives itself via the attach path on mount.
+			return &seedResumeOutcome{
+				SessionID:      existing.ID,
+				WorkspaceID:    existing.WorkspaceID,
+				AlreadyRunning: true,
+			}, nil
+		}
 	}
 
-	dispatch, ok := d.gardenDispatch(sessionID)
-	if !ok {
-		return nil, fmt.Errorf("%s was tended by session %s, which attn did not launch — nothing to reopen", seedID, sessionID)
+	dispatch, hasDispatch := d.gardenDispatch(sessionID)
+	cwd, agent, resumeID := "", "", ""
+	seedFallback := false
+	if hasDispatch {
+		cwd = strings.TrimSpace(dispatch.Cwd)
+		agent = strings.TrimSpace(dispatch.Agent)
+	} else {
+		resumeID, cwd, agent = strings.TrimSpace(seed.ResumeSessionID), strings.TrimSpace(seed.ResumeCwd), strings.TrimSpace(seed.ResumeAgent)
+		if resumeID == "" || cwd == "" || agent == "" {
+			if sessionID == "" {
+				return nil, fmt.Errorf("%s is untended — there is nobody to reopen; `attn seed notes %s` has its log", seedID, seedID)
+			}
+			return nil, fmt.Errorf("%s was tended by session %s, which attn did not launch — nothing to reopen", seedID, sessionID)
+		}
+		seedFallback = true
+		// An external conversation has no attn container id to preserve. Reusing
+		// its native id gives repeat Resume clicks one stable container to focus.
+		if sessionID == "" {
+			sessionID = resumeID
+		}
+		if existing := d.store.Get(sessionID); existing != nil {
+			return &seedResumeOutcome{
+				SessionID: existing.ID, WorkspaceID: existing.WorkspaceID, AlreadyRunning: true,
+			}, nil
+		}
 	}
-	cwd := strings.TrimSpace(dispatch.Cwd)
-	agent := strings.TrimSpace(dispatch.Agent)
 	if cwd == "" || agent == "" {
 		return nil, fmt.Errorf("%s has no agent session to resume", seedID)
+	}
+
+	// A dispatch-backed resume lets the spawn pipeline resolve its mirrored id.
+	// A seed-backed resume passes it directly; ResumePicker still provides the
+	// cwd picker if the driver says the conversation is gone.
+	var directResume *string
+	if seedFallback {
+		directResume = protocol.Ptr(resumeID)
 	}
 
 	// A worktree may have been removed since the session closed — validate before
@@ -114,15 +139,16 @@ func (d *Daemon) resumeSeed(seedID string) (*seedResumeOutcome, error) {
 	// session, downgrading to the cwd-scoped picker when the transcript is gone.
 	spawnClient := newInternalWSClient()
 	d.handleSpawnSession(spawnClient, &protocol.SpawnSessionMessage{
-		Cmd:          protocol.CmdSpawnSession,
-		ID:           sessionID,
-		Cwd:          directory,
-		WorkspaceID:  workspaceID,
-		Agent:        agent,
-		Cols:         80,
-		Rows:         24,
-		Label:        protocol.Ptr(seed.Title),
-		ResumePicker: protocol.Ptr(true),
+		Cmd:             protocol.CmdSpawnSession,
+		ID:              sessionID,
+		Cwd:             directory,
+		WorkspaceID:     workspaceID,
+		Agent:           agent,
+		Cols:            80,
+		Rows:            24,
+		Label:           protocol.Ptr(seed.Title),
+		ResumePicker:    protocol.Ptr(true),
+		ResumeSessionID: directResume,
 	})
 	if _, err := readInternalActionResult(spawnClient); err != nil {
 		return nil, rollback.fail(fmt.Errorf("spawn resume session: %w", err))
@@ -130,6 +156,13 @@ func (d *Daemon) resumeSeed(seedID string) (*seedResumeOutcome, error) {
 
 	if session := d.store.Get(sessionID); session == nil {
 		return nil, rollback.fail(fmt.Errorf("resume session was not persisted"))
+	}
+	if seedFallback {
+		if err := d.recordGardenDispatch(sessionID, seed.ID, directory, agent, false); err != nil {
+			d.logf("resume: reopened %s but could not bind its fallback session %s: %v", seed.ID, sessionID, err)
+		} else {
+			d.rememberDispatchResume(sessionID, resumeID)
+		}
 	}
 
 	d.logf("resume: reopened seed %q as session %s in %s", seedID, sessionID, directory)

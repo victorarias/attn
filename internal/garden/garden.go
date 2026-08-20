@@ -109,6 +109,12 @@ type Seed struct {
 	Vars     []Var `json:"vars"`
 	// Reason is why a seed was harvested or withered.
 	Reason string `json:"reason,omitempty"`
+	// ResumeSessionID/ResumeCwd/ResumeAgent are one optional fallback identity.
+	// They let Resume reopen work that has no dispatch record, including a seed
+	// planted around an externally launched or pre-garden conversation.
+	ResumeSessionID string `json:"resume_session_id,omitempty"`
+	ResumeCwd       string `json:"resume_cwd,omitempty"`
+	ResumeAgent     string `json:"resume_agent,omitempty"`
 }
 
 // SeedsSchema declares which of a seed's fields a query may name. Everything

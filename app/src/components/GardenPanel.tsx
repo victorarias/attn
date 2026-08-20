@@ -1150,7 +1150,7 @@ export function GardenPanel({
             {onOpenAsTile && (
               <button type="button" onClick={() => onOpenAsTile(here.id)}>Open as tile</button>
             )}
-            {onResumeSeed && here.tender_session && (
+            {onResumeSeed && (here.tender_session || here.resume_session_id) && (
               <button type="button" data-testid={`seed-reopen-${here.id}`} onClick={() => onResumeSeed(here.id)}>
                 Reopen agent
               </button>

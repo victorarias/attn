@@ -45,6 +45,8 @@ func runSeed() {
 		runSeedShow(args)
 	case "edit":
 		runSeedEdit(args)
+	case "set-resume":
+		runSeedSetResume(args)
 	case "export":
 		runSeedExport(args)
 	case "tend", "park", "harvest", "wither", "replant":
@@ -77,10 +79,11 @@ The garden lives at the home daemon. On an outpost every command here refuses,
 naming the home to run it on.
 
 commands:
-  plant "<title>" [-m <body>] [--part-of <crown>] [flags]
+  plant "<title>" [-m <body>] [--part-of <crown>] [resume flags] [flags]
         plant a seed and print its id. -m takes markdown, or - to read stdin —
         on a crown that body is the plan itself. --part-of plants it under a
-        crown, born part of that plot.
+        crown, born part of that plot. --resume-session-id, --cwd and --agent
+        together make a dead conversation resumable without a dispatch record.
 
   plot [-f <path>] [--json]
         plant a whole plot in one move from a JSON payload (-f, or stdin):
@@ -118,6 +121,10 @@ commands:
   edit <id> -m <body>
         replace the seed's markdown body without moving its state or claim.
         - reads stdin; an explicit empty -m clears the body.
+
+  set-resume <id> (--resume-session-id <id> --cwd <path> --agent <name> | --clear)
+        set or clear the seed-owned fallback used when attn has no dispatch
+        record for the conversation. The three identity fields move together.
 
   tend <id> [--member <name>]
         claim the seed and start growing it. One tender at a time: tending a
@@ -164,6 +171,10 @@ commands:
 
 flags:
   --part-of <crown>  plant under a crown (plant)
+  --resume-session-id <id>  agent-native conversation id (plant, set-resume)
+  --cwd <path>        directory to reopen in (plant, set-resume)
+  --agent <name>      agent driver to reopen with (plant, set-resume)
+  --clear             remove the fallback identity (set-resume)
   --plot <crown>     scope a ready answer to one plot
   --tree             nest a listing under its crowns
   --stale            only open seeds whose log has not moved (ls)
@@ -241,6 +252,10 @@ type seedFlags struct {
 	repo     *string
 	notebook *string
 	url      *string
+	resumeID *string
+	cwd      *string
+	agent    *string
+	clear    *bool
 }
 
 func newSeedFlags(verb string) *seedFlags {
@@ -266,6 +281,10 @@ func newSeedFlags(verb string) *seedFlags {
 		repo:     fs.String("repo", "", "the repository the path lives in"),
 		notebook: fs.String("notebook", "", "a Notebook document, by its id"),
 		url:      fs.String("url", "", "anything reachable by URL"),
+		resumeID: fs.String("resume-session-id", "", "agent-native conversation id"),
+		cwd:      fs.String("cwd", "", "directory to reopen in"),
+		agent:    fs.String("agent", "", "agent driver to reopen with"),
+		clear:    fs.Bool("clear", false, "remove the seed-owned resume identity"),
 	}
 }
 
@@ -373,7 +392,10 @@ func runSeedPlant(args []string) {
 	if len(positionals) != 1 {
 		seedFail("plant", fmt.Errorf(`needs exactly one title, got %d: attn seed plant "what this is" [-m "the detail"]`, len(positionals)))
 	}
-	result, err := seedClient().SeedPlant(f.sessionID(), positionals[0], f.text("plant"), strings.TrimSpace(*f.partOf), strings.TrimSpace(*f.member))
+	result, err := seedClient().SeedPlant(
+		f.sessionID(), positionals[0], f.text("plant"), strings.TrimSpace(*f.partOf), strings.TrimSpace(*f.member),
+		strings.TrimSpace(*f.resumeID), strings.TrimSpace(*f.cwd), strings.TrimSpace(*f.agent),
+	)
 	if err != nil {
 		seedFail("plant", err)
 	}
@@ -576,6 +598,25 @@ func runSeedEdit(args []string) {
 		return
 	}
 	fmt.Printf("updated %s at revision %d\n", result.Seed.ID, result.Seed.Rev)
+}
+
+func runSeedSetResume(args []string) {
+	f := newSeedFlags("set-resume")
+	positionals := f.parse("set-resume", args)
+	if len(positionals) != 1 {
+		seedFail("set-resume", fmt.Errorf("needs exactly one seed id, got %d", len(positionals)))
+	}
+	result, err := seedClient().SeedSetResume(
+		positionals[0], strings.TrimSpace(*f.resumeID), strings.TrimSpace(*f.cwd), strings.TrimSpace(*f.agent), *f.clear,
+	)
+	if err != nil {
+		seedFail("set-resume", err)
+	}
+	if *f.json {
+		writeJSON(result.Seed)
+		return
+	}
+	fprintSeed(os.Stdout, result.Seed)
 }
 
 // fprintArtifacts renders the current set as a small block above the log, not
@@ -782,6 +823,9 @@ func fprintSeed(out io.Writer, seed protocol.Seed) {
 	}
 	if seed.Reason != nil && *seed.Reason != "" {
 		fmt.Fprintf(w, "reason\t%s\n", *seed.Reason)
+	}
+	if resumeID := protocol.Deref(seed.ResumeSessionID); resumeID != "" {
+		fmt.Fprintf(w, "resume\t%s in %s on %s\n", resumeID, protocol.Deref(seed.ResumeCwd), protocol.Deref(seed.ResumeAgent))
 	}
 	if seed.Ready {
 		fmt.Fprintf(w, "ready\tyes\n")

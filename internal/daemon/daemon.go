@@ -2889,6 +2889,8 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 		d.handleSeedShow(conn, msg.(*protocol.SeedShowMessage))
 	case protocol.CmdSeedEdit: // wire: seed_edit
 		d.handleSeedEdit(conn, msg.(*protocol.SeedEditMessage))
+	case protocol.CmdSeedSetResume: // wire: seed_set_resume
+		d.handleSeedSetResume(conn, msg.(*protocol.SeedSetResumeMessage))
 	case protocol.CmdSeedTransition: // wire: seed_transition
 		d.handleSeedTransition(conn, msg.(*protocol.SeedTransitionMessage))
 	case protocol.CmdSeedNote: // wire: seed_note

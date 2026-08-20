@@ -1,0 +1,5 @@
+kind: fixed
+area: garden
+change: >
+  Garden seeds can carry the agent identity needed to resume sessions that
+  attn did not dispatch.

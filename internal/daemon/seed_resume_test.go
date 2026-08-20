@@ -3,6 +3,7 @@ package daemon
 import (
 	"encoding/json"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"testing"
 
@@ -184,12 +185,55 @@ func TestSeedResumeFallsBackToPickerWhenTranscriptGone(t *testing.T) {
 	}
 }
 
+func TestSeedResumeUsesSeedIdentityWithoutDispatch(t *testing.T) {
+	for _, agent := range []string{"claude", "copilot"} {
+		t.Run(agent, func(t *testing.T) {
+			d := newGardenDaemon(t)
+			backend := &fakeSpawnBackend{}
+			d.ptyBackend = backend
+			resumeID := agent + "-external-conversation"
+			if agent == "claude" {
+				writeClaudeTranscriptFixture(t, resumeID)
+			}
+			cwd := t.TempDir()
+			canonicalCwd, err := validateDelegationDirectory(cwd)
+			if err != nil {
+				t.Fatalf("validate fixture cwd: %v", err)
+			}
+			seed := plant(t, d, protocol.SeedPlantMessage{
+				Title: "resume external " + agent, ResumeSessionID: protocol.Ptr(resumeID),
+				ResumeCwd: protocol.Ptr(cwd), ResumeAgent: protocol.Ptr(agent),
+			})
+			if _, ok := d.gardenDispatch(resumeID); ok {
+				t.Fatal("fixture unexpectedly has a dispatch record")
+			}
+
+			outcome, err := d.resumeSeed(seed.ID)
+			if err != nil {
+				t.Fatalf("resumeSeed: %v", err)
+			}
+			if outcome.SessionID != resumeID || outcome.AlreadyRunning {
+				t.Fatalf("outcome = %+v, want new session %s", outcome, resumeID)
+			}
+			spawn := resumeSpawnForSession(t, backend, resumeID, 0)
+			if spawn.Agent != agent || spawn.ResumeSessionID != resumeID {
+				t.Fatalf("spawn = %+v, want agent=%s resume=%s", spawn, agent, resumeID)
+			}
+			dispatch, ok := d.gardenDispatch(resumeID)
+			if !ok || dispatch.Crown != seed.ID || dispatch.Cwd != canonicalCwd || dispatch.Agent != agent || dispatch.Resume != resumeID {
+				t.Fatalf("resume did not bind the recovered session: %+v ok=%v", dispatch, ok)
+			}
+		})
+	}
+}
+
 // Every way a resume can have nothing to reopen refuses by name, and leaves no
 // phantom workspace behind.
 func TestSeedResumeValidation(t *testing.T) {
 	cases := []struct {
-		name  string
-		setup func(t *testing.T, d *Daemon) (seedID, tender string)
+		name    string
+		setup   func(t *testing.T, d *Daemon) (seedID, tender string)
+		message string
 	}{
 		{
 			name: "unknown seed",
@@ -207,7 +251,8 @@ func TestSeedResumeValidation(t *testing.T) {
 			},
 		},
 		{
-			name: "tender attn never launched",
+			name:    "tender attn never launched",
+			message: "which attn did not launch — nothing to reopen",
 			setup: func(t *testing.T, d *Daemon) (string, string) {
 				seed := plant(t, d, protocol.SeedPlantMessage{
 					SourceSessionID: protocol.Ptr("sess-a"), Title: "held by a ghost",
@@ -219,7 +264,8 @@ func TestSeedResumeValidation(t *testing.T) {
 			},
 		},
 		{
-			name: "directory is gone",
+			name:    "directory is gone",
+			message: "does-not-exist",
 			setup: func(t *testing.T, d *Daemon) (string, string) {
 				seed := plant(t, d, protocol.SeedPlantMessage{
 					SourceSessionID: protocol.Ptr("sess-a"), Title: "worktree removed",
@@ -241,6 +287,8 @@ func TestSeedResumeValidation(t *testing.T) {
 			seedID, tender := tc.setup(t, d)
 			if _, err := d.resumeSeed(seedID); err == nil {
 				t.Fatal("resumeSeed succeeded, want a refusal")
+			} else if tc.message != "" && !strings.Contains(err.Error(), tc.message) {
+				t.Fatalf("resumeSeed error = %q, want path/message %q", err, tc.message)
 			}
 			if tender != "" {
 				if ws := d.store.GetWorkspace("workspace-" + tender); ws != nil {
@@ -274,16 +322,19 @@ func TestSeedResumeRollsBackPaneWhenSpawnFails(t *testing.T) {
 }
 
 func TestHandleSeedResumeReplyEnvelope(t *testing.T) {
-	d, backend, sourceSessionID := newGardenDelegationDaemon(t)
-	leafID, seedID := delegateBoundSeed(t, d, backend, sourceSessionID, "codex")
-	d.unregisterSession(leafID, syscall.SIGTERM)
-	d.persistResumeSessionID(leafID, "codex-conv-xyz")
+	d := newGardenDaemon(t)
+	d.ptyBackend = &fakeSpawnBackend{}
+	resumeID := "copilot-envelope-external"
+	seed := plant(t, d, protocol.SeedPlantMessage{
+		Title: "external envelope", ResumeSessionID: protocol.Ptr(resumeID),
+		ResumeCwd: protocol.Ptr(t.TempDir()), ResumeAgent: protocol.Ptr("copilot"),
+	})
 
 	client := newInternalWSClient()
 	d.handleSeedResume(client, &protocol.SeedResumeMessage{
 		Cmd:       protocol.CmdSeedResume,
 		RequestID: protocol.Ptr("req-1"),
-		SeedID:    seedID,
+		SeedID:    seed.ID,
 	})
 	msg := <-client.send
 	var reply protocol.SeedResumeResultMessage
@@ -293,7 +344,7 @@ func TestHandleSeedResumeReplyEnvelope(t *testing.T) {
 	if reply.Event != protocol.EventSeedResumeResult || reply.RequestID != "req-1" {
 		t.Fatalf("reply envelope = %+v", reply)
 	}
-	if !reply.Success || protocol.Deref(reply.SessionID) != leafID {
-		t.Fatalf("reply = %+v, want success session=%s", reply, leafID)
+	if !reply.Success || protocol.Deref(reply.SessionID) != resumeID {
+		t.Fatalf("reply = %+v, want success session=%s", reply, resumeID)
 	}
 }
