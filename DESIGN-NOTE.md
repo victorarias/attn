@@ -153,6 +153,13 @@ Kept deliberately small, because drill, search, and expand are all in flight on
   callers are untouched. If two prototypes both bump the version, the later
   rebase takes the higher number — that field is the usual three-way lockstep
   (`constants.go`, `main.tsp`, `useDaemonSocket.ts`).
+- **Automation bridge — additive.** One new verb, `garden_board_get_state`, and
+  a `data-seed` attribute on the card, so the board is drivable from the real-app
+  harness the way every other surface is: DOM verbs for the clicks,
+  `MacOSDriver.pressKeyCode` for real keys. That is how the Escape path was
+  verified — no screenshots, no synthetic pointer choreography. The walk is
+  `board-escape.mjs` in the session scratchpad; it belongs in
+  `app/scripts/real-app-harness/` as a scenario if the board ships.
 - **New files, no conflicts:** `app/src/components/GardenBoard.{tsx,css}`,
   `internal/daemon/garden_board.go`.
 
@@ -170,7 +177,10 @@ closed work, and one seed tended by a session that no longer exists:
   walk the verbs, `Enter` opens the composer, `Enter` commits, `esc` unwinds one
   layer at a time;
 - a drop with no legal verb bounces;
-- both themes.
+- both themes;
+- Escape climbs the trail one plot at a time and leaves the garden at the top,
+  with an open verb menu taking the first press ahead of it — driven through the
+  harness, asserted on the board's own state rather than on a picture of it.
 
 ## The recording
 

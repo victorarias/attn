@@ -1379,6 +1379,54 @@ function frontGardenPanel(): HTMLElement | null {
   return front instanceof HTMLElement ? front : null;
 }
 
+/**
+ * The board prototype's reader. The list has its own above; this one answers
+ * for the columns, so a scenario can drive drill, drag and the verb menu
+ * without a screenshot. Prototype surface — see DESIGN-NOTE.md.
+ */
+function collectGardenBoardUiState() {
+  const board = document.querySelector('.garden-board');
+  if (!(board instanceof HTMLElement)) {
+    return { present: false };
+  }
+  const trail = Array.from(board.querySelectorAll('.garden-board__trail-step')).map((step) => ({
+    label: step.textContent?.trim() ?? '',
+  }));
+  const columns = Array.from(board.querySelectorAll('[data-column]')).map((column) => ({
+    key: (column as HTMLElement).dataset.column ?? '',
+    count: column.querySelector('.garden-board__count')?.textContent?.trim() ?? '',
+    collapsed: column.classList.contains('is-collapsed'),
+    empty: column.querySelector('.garden-board__empty')?.textContent?.trim() ?? '',
+    cards: Array.from(column.querySelectorAll('.garden-card')).map((card) => ({
+      id: card.querySelector('.garden-card__id')?.textContent?.trim() ?? '',
+      title: card.querySelector('.garden-card__title')?.textContent?.trim() ?? '',
+      selected: card.classList.contains('is-selected'),
+      plot: Boolean(card.querySelector('.garden-card__drill')),
+    })),
+    zones: Array.from(column.querySelectorAll('[data-zone]')).map(
+      (zone) => (zone as HTMLElement).dataset.zone ?? '',
+    ),
+  }));
+  const compose = board.querySelector('.garden-compose');
+  return {
+    present: true,
+    trail,
+    // Root renders no trail at all; inside a plot the nav is Garden + one step
+    // per level, so the depth is one less than what it shows.
+    depth: Math.max(0, trail.length - 1),
+    columns,
+    menu: Array.from(board.querySelectorAll('[role="menuitem"]')).map(
+      (item) => item.textContent?.trim() ?? '',
+    ),
+    compose: compose
+      ? {
+          verb: compose.querySelector('.garden-compose__verb')?.textContent?.trim() ?? '',
+          seed: compose.querySelector('.garden-compose__id')?.textContent?.trim() ?? '',
+        }
+      : null,
+  };
+}
+
 function collectGardenUiState() {
   // Two panels can be mounted at once — the dock behind the fullscreen surface —
   // and they draw one shared walk. Report the one in front, and summarise both,
@@ -3307,6 +3355,8 @@ export function useUiAutomationBridge({
       }
       case 'garden_get_state':
         return collectGardenUiState();
+      case 'garden_board_get_state':
+        return collectGardenBoardUiState();
       // Opening a seed IS the drill — one target per row, whether the seed has
       // a plot under it or not.
       case 'garden_open_plot':

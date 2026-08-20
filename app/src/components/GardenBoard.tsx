@@ -333,6 +333,11 @@ export function GardenBoard({
     setTrail((prev) => prev.slice(0, depth));
   }, []);
 
+  // Escape climbs the trail one plot at a time. It registers only once you are
+  // inside a plot, so at the top level the stack falls through to the surface's
+  // own close and Escape leaves the garden.
+  useEscapeStack(() => climbTo(livingTrail.length - 1), livingTrail.length > 0);
+
   const endDrag = useCallback(() => {
     setDragging(null);
     setDragPoint(null);
@@ -787,6 +792,7 @@ function Card({
         seed.plot_progress ? 'is-crown' : '',
         column === 'closed' ? `is-${seed.status}` : '',
       ].filter(Boolean).join(' ')}
+      data-seed={seed.id}
       onPointerDown={onDragPointerDown}
     >
       <button
