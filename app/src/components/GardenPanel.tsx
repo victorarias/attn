@@ -541,7 +541,6 @@ export function GardenPanel({
   const [titlePinned, setTitlePinned] = useState(false);
   const [trailOpen, setTrailOpen] = useState(false);
   const [panelWidth, setPanelWidth] = useState(0);
-  const panelObserver = useRef<ResizeObserver | null>(null);
   const columnsRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
@@ -557,14 +556,11 @@ export function GardenPanel({
   // it has to observe is replaced when the renderer changes, and because the
   // measurement has to land in the same commit as the render that caused it or
   // the first paint is drawn at the wrong width.
-  const measurePanel = useCallback((node: HTMLDivElement | null) => {
-    panelObserver.current?.disconnect();
-    panelObserver.current = null;
-    if (!node) return;
+  const measurePanel = useCallback((node: HTMLDivElement) => {
     setPanelWidth(node.clientWidth);
     const observer = new ResizeObserver(([entry]) => setPanelWidth(entry.contentRect.width));
     observer.observe(node);
-    panelObserver.current = observer;
+    return () => observer.disconnect();
   }, []);
   const layout = panelWidth >= COLUMNS_MIN ? 'columns' : 'stack';
 

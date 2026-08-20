@@ -100,6 +100,21 @@ describe('GardenPanel in its frame', () => {
       expect(document.querySelector('.garden-panel.is-columns')).toBeNull();
     });
 
+    // Crossing the threshold replaces the element being measured, so the ref's
+    // cleanup has to release the old observer. One panel, one observer, however
+    // many times it crosses.
+    it('leaves no observer behind when the renderer changes', () => {
+      boxWidth = 520;
+      render(<GardenPanel isOpen onClose={vi.fn()} seedsTotal={world.length} seeds={world} />);
+      expect(observers).toHaveLength(1);
+
+      widen(1400);
+      expect(observers).toHaveLength(1);
+
+      widen(520);
+      expect(observers).toHaveLength(1);
+    });
+
     it("keeps the reader's place across the crossing, both ways", () => {
       boxWidth = 520;
       render(<GardenPanel isOpen onClose={vi.fn()} seedsTotal={world.length} seeds={world} />);
