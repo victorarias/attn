@@ -242,16 +242,30 @@ func TestParseCrewSetArgs_CarriesTheHarnessAndTheWayBack(t *testing.T) {
 	}
 }
 
+func TestParseCrewSetArgs_CarriesTheModelAndTheWayBack(t *testing.T) {
+	parsed, err := parseCrewSetArgs([]string{"trellis", "--model", "claude-haiku-4-5"})
+	if err != nil {
+		t.Fatalf("parseCrewSetArgs: %v", err)
+	}
+	if parsed.model == nil || *parsed.model != "claude-haiku-4-5" {
+		t.Fatalf("parsed model = %v, want claude-haiku-4-5", parsed.model)
+	}
+	cleared, err := parseCrewSetArgs([]string{"trellis", "--model", ""})
+	if err != nil || cleared.model == nil || *cleared.model != "" {
+		t.Fatalf("empty --model did not reach the daemon as a clear: %+v, %v", cleared.model, err)
+	}
+}
+
 // The AGENT column says what a member lives on without anyone having to wake it
 // to find out.
 func TestPrintCrewList_NamesTheHarnessEachMemberRunsOn(t *testing.T) {
 	var out bytes.Buffer
 	printCrewList(&out, []protocol.CrewMember{
-		{ID: "keel", HomeDir: "/home/.attn/crew/keel", Agent: protocol.Ptr("codex")},
-		{ID: "trellis", HomeDir: "/home/.attn/crew/trellis", Agent: protocol.Ptr("claude")},
+		{ID: "keel", HomeDir: "/home/.attn/crew/keel", Agent: protocol.Ptr("codex"), Model: protocol.Ptr("gpt-5.6-sol")},
+		{ID: "trellis", HomeDir: "/home/.attn/crew/trellis", Agent: protocol.Ptr("claude"), Model: protocol.Ptr("claude-haiku-4-5")},
 	})
 	text := out.String()
-	for _, want := range []string{"AGENT", "codex", "claude"} {
+	for _, want := range []string{"AGENT", "MODEL", "codex", "claude", "gpt-5.6-sol", "claude-haiku-4-5"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("crew list output is missing %q:\n%s", want, text)
 		}

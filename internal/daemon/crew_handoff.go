@@ -310,8 +310,8 @@ func (d *Daemon) crewNap(member crew.Member, oldSessionID string) (string, error
 // crewNapSpawn builds the successor's launch. The closed day's launch intent is
 // the authority for how the member runs — yolo, executable, effort, approval
 // route — so a member woken unattended does not silently come back attended at
-// the first nap. The model is the exception: it is pinned the same way a wake
-// pins it, so no inherited intent can carry a member onto another model.
+// the first nap. Model selection is refreshed from the member and current
+// daemon settings, so changing either takes effect on the next day.
 // Never a resume: a fresh conversation is the point.
 func (d *Daemon) crewNapSpawn(member crew.Member, session *protocol.Session) (*protocol.SpawnSessionMessage, internalSpawnPolicy) {
 	cols, rows := d.crewSessionGeometry(session.ID)
@@ -334,9 +334,7 @@ func (d *Daemon) crewNapSpawn(member crew.Member, session *protocol.Session) (*p
 	spawnMsg.ID = uuid.NewString()
 	spawnMsg.Label = protocol.Ptr(crew.DisplayName(member.ID))
 	spawnMsg.InitialPrompt = protocol.Ptr(crewNapPrompt)
-	if model := crewWakeModelPin(spawnMsg.Agent); model != nil {
-		spawnMsg.Model = model
-	}
+	spawnMsg.Model = d.crewWakeModel(member, spawnMsg.Agent)
 	// A resume would carry the closed day's transcript into the new one, which
 	// is the compaction nap this design exists to replace.
 	spawnMsg.ResumeSessionID = nil

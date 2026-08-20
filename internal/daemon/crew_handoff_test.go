@@ -265,11 +265,13 @@ func TestCrewHandoff_FilesTheLetterAndTurnsTheDayOver(t *testing.T) {
 	}
 }
 
-// The successor wakes on the pinned model too. The nap otherwise inherits the
-// closed day's launch intent, so a member that once started on another model
-// would carry it forever without this.
-func TestCrewHandoff_TheSuccessorWakesOnThePinnedModel(t *testing.T) {
+// The successor re-reads the member's model. The nap otherwise inherits the
+// closed day's launch intent, which must not overrule current member config.
+func TestCrewHandoff_TheSuccessorWakesOnTheMembersModel(t *testing.T) {
 	d, backend, _ := newWakeableDaemon(t)
+	if resp := crewSet(t, d, protocol.CrewSetMessage{Member: "trellis", Model: protocol.Ptr("claude-haiku-4-5")}); !resp.Ok {
+		t.Fatalf("crew set: %v", protocol.Deref(resp.Error))
+	}
 	woken, err := d.crewWake("trellis", "")
 	if err != nil {
 		t.Fatalf("wake: %v", err)
@@ -283,8 +285,8 @@ func TestCrewHandoff_TheSuccessorWakesOnThePinnedModel(t *testing.T) {
 	if len(spawns) != 2 {
 		t.Fatalf("the nap spawned %d sessions in total, want 2", len(spawns))
 	}
-	if spawns[1].Model != crewWakeModel {
-		t.Fatalf("the successor woke on model %q, want %q", spawns[1].Model, crewWakeModel)
+	if spawns[1].Model != "claude-haiku-4-5" {
+		t.Fatalf("the successor woke on model %q, want the member's model", spawns[1].Model)
 	}
 }
 
@@ -599,9 +601,9 @@ func TestCrewHandoff_TheSuccessorCarriesTheClosedDaysLaunchParams(t *testing.T) 
 		t.Errorf("the successor launched effort=%q, want the closed day's high", successor.Effort)
 	}
 	// The one thing a nap does not inherit: an intent naming another model is
-	// overruled, so no member drifts onto one nap by nap.
-	if successor.Model != crewWakeModel {
-		t.Errorf("the successor launched model=%q, want the pinned %q", successor.Model, crewWakeModel)
+	// overruled by the member/default/fallback selection.
+	if successor.Model != crewWakeFallbackModel {
+		t.Errorf("the successor launched model=%q, want the fallback %q", successor.Model, crewWakeFallbackModel)
 	}
 }
 

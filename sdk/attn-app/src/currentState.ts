@@ -232,6 +232,7 @@ export interface CrewMember {
   readonly cwd?: string
   readonly home_dir: string
   readonly id: string
+  readonly model?: string
 }
 
 export interface AppViewInfo {

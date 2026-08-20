@@ -2507,6 +2507,7 @@ export interface Member {
     cwd?:             string;
     home_dir:         string;
     id:               string;
+    model?:           string;
     [property: string]: any;
 }
 
@@ -2518,6 +2519,7 @@ export interface CrewMember {
     cwd?:             string;
     home_dir:         string;
     id:               string;
+    model?:           string;
     [property: string]: any;
 }
 
@@ -2546,6 +2548,7 @@ export interface CrewSetMessage {
     cmd:                   CrewSetMessageCmd;
     cwd?:                  string;
     member:                string;
+    model?:                string;
     [property: string]: any;
 }
 
@@ -14907,6 +14910,7 @@ const typeMap: any = {
         { json: "cwd", js: "cwd", typ: u(undefined, "") },
         { json: "home_dir", js: "home_dir", typ: "" },
         { json: "id", js: "id", typ: "" },
+        { json: "model", js: "model", typ: u(undefined, "") },
     ], "any"),
     "CrewMember": o([
         { json: "agent", js: "agent", typ: u(undefined, "") },
@@ -14916,6 +14920,7 @@ const typeMap: any = {
         { json: "cwd", js: "cwd", typ: u(undefined, "") },
         { json: "home_dir", js: "home_dir", typ: "" },
         { json: "id", js: "id", typ: "" },
+        { json: "model", js: "model", typ: u(undefined, "") },
     ], "any"),
     "CrewPrimeMessage": o([
         { json: "cmd", js: "cmd", typ: r("CrewPrimeMessageCmd") },
@@ -14934,6 +14939,7 @@ const typeMap: any = {
         { json: "cmd", js: "cmd", typ: r("CrewSetMessageCmd") },
         { json: "cwd", js: "cwd", typ: u(undefined, "") },
         { json: "member", js: "member", typ: "" },
+        { json: "model", js: "model", typ: u(undefined, "") },
     ], "any"),
     "CrewSetResult": o([
         { json: "member", js: "member", typ: r("Member") },

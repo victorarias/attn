@@ -603,10 +603,12 @@ a session in its recorded cwd — its own home when none is recorded — reachin
 its **awareness dirs**, the directories its charter is about. A member lives on
 the harness its record names — `attn crew set <name> --agent codex`, claude
 when nothing says otherwise — and `attn crew wake <name> --agent <other>` picks
-one for a single day without moving the member. The default harness wakes on a
-pinned model, hardcoded rather than configurable: a member subtly wrong takes a
-read of its prose to notice. Any other harness takes its own default, because
-the pin names a Claude model. The launch carries **priming**:
+one for a single day without moving the member. Its model can be chosen with
+`attn crew set <name> --model <model>` for its recorded harness; a one-day
+harness override does not carry that model across harnesses. When absent, the
+configured default for the launch harness applies, then the historical Fable
+fallback for Claude when no default is configured. Any other harness takes its
+own default. The launch carries **priming**:
 what a member is, where its charter is to be read, the freshest letter left
 for it inline, and how a day is closed. Skills retire into verbs and the verbs
 are taught, because an agent never told how to handoff cannot file one.

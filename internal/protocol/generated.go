@@ -2178,6 +2178,9 @@ type CrewMember struct {
 
 	// ID corresponds to the JSON schema field "id".
 	ID string `json:"id"`
+
+	// Model corresponds to the JSON schema field "model".
+	Model *string `json:"model,omitempty,omitzero"`
 }
 
 type CrewPrimeMessage struct {
@@ -2220,6 +2223,9 @@ type CrewSetMessage struct {
 
 	// Member corresponds to the JSON schema field "member".
 	Member string `json:"member"`
+
+	// Model corresponds to the JSON schema field "model".
+	Model *string `json:"model,omitempty,omitzero"`
 }
 
 type CrewSetResult struct {
