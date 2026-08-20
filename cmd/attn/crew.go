@@ -73,9 +73,9 @@ commands:
                [--awareness-dir <dir>]...
         record where the member's sessions launch, which harness and model it
         lives on, and which directories its charter is about. Registry state;
-		the home's markdown is never rewritten. --agent takes claude, codex or
-		any installed plugin driver. Pass either flag empty to clear it: agent
-		returns to the crew default, model to the configured harness default.
+        the home's markdown is never rewritten. --agent takes claude, codex or
+        any installed plugin driver. Pass either flag empty to clear it: agent
+        returns to the crew default, model to the configured harness default.
         --awareness-dir repeats and replaces the whole list; pass it once with
         an empty value to clear it.
 `)
