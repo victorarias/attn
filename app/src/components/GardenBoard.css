@@ -632,7 +632,11 @@
   border-radius: 6px;
   display: flex;
   flex: none;
-  gap: 8px;
+  /* The trailing lines drop below rather than squeeze the field: a column is
+     narrow, and the one that says whose work this is has to be readable — it is
+     the whole confirmation. */
+  flex-wrap: wrap;
+  gap: 4px 8px;
   padding: 7px 8px;
 }
 
@@ -704,7 +708,8 @@
    say the same thing: read this before you act. */
 .garden-compose__taking {
   color: var(--color-warning);
-  flex: none;
+  /* Its own line, always whole. */
+  flex: 1 0 100%;
   font-size: var(--font-size-sm);
 }
 
