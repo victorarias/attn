@@ -1,0 +1,23 @@
+kind: added
+area: app
+change: >
+  A nisse reply is now rendered as markdown while it arrives, not as raw text
+  once it lands. Headings, lists, tables, blockquotes and links appear as the
+  agent writes them, fenced code is syntax-coloured the moment its fence closes,
+  and a mermaid fence becomes the diagram it describes. Markdown is not
+  prefix-stable — half a table is not a table, and three backticks are not a
+  code block until there are six — so the settled part of a message is parsed
+  once and only the last line is re-read as it changes.
+
+  The transcript now reads like a document rather than a panel. It holds one
+  centred column at the same measure the markdown reader uses, at a type size
+  cut for prose instead of for chrome. Code blocks and diagrams sit in a frame
+  that names what they are and offers what they can do — copy the code, focus a
+  diagram too large to read in place and zoom it to fit or to actual size.
+  Scrolling stays where the reader put it: following the bottom keeps
+  following, and scrolling away holds still, including across the frame where a
+  diagram finishes drawing and the page grows under it.
+notes: >
+  Highlighting rides on the streaming split, so shiki never runs on text that
+  is still being written. The reading chrome is opt-in per surface: ticket
+  descriptions, comments and Present summaries render exactly as before.
