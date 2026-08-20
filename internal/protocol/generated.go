@@ -6550,6 +6550,9 @@ type SeedNoteMessage struct {
 	// Member corresponds to the JSON schema field "member".
 	Member *string `json:"member,omitempty,omitzero"`
 
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID *string `json:"request_id,omitempty,omitzero"`
+
 	// SeedID corresponds to the JSON schema field "seed_id".
 	SeedID string `json:"seed_id"`
 
@@ -6560,6 +6563,23 @@ type SeedNoteMessage struct {
 type SeedNoteResult struct {
 	// Note corresponds to the JSON schema field "note".
 	Note SeedNote `json:"note"`
+}
+
+type SeedNoteResultMessage struct {
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty,omitzero"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// Note corresponds to the JSON schema field "note".
+	Note *SeedNote `json:"note,omitempty,omitzero"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID string `json:"request_id"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
 }
 
 type SeedNotesMessage struct {
@@ -6819,6 +6839,9 @@ type SeedTransitionMessage struct {
 	// Reason corresponds to the JSON schema field "reason".
 	Reason *string `json:"reason,omitempty,omitzero"`
 
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID *string `json:"request_id,omitempty,omitzero"`
+
 	// SeedID corresponds to the JSON schema field "seed_id".
 	SeedID string `json:"seed_id"`
 
@@ -6835,6 +6858,23 @@ type SeedTransitionResult struct {
 
 	// Seed corresponds to the JSON schema field "seed".
 	Seed Seed `json:"seed"`
+}
+
+type SeedTransitionResultMessage struct {
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty,omitzero"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID string `json:"request_id"`
+
+	// Seed corresponds to the JSON schema field "seed".
+	Seed *Seed `json:"seed,omitempty,omitzero"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
 }
 
 type SeedVar struct {

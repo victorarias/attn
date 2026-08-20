@@ -24,7 +24,8 @@
 
 /* The panel fills the framed surface; its own corners are clipped by the
    surface's overflow:hidden. */
-.garden-surface > .garden-panel {
+.garden-surface > .garden-panel,
+.garden-surface > .garden-board {
   flex: 1 1 auto;
   min-height: 0;
 }

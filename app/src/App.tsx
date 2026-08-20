@@ -875,6 +875,8 @@ function AppContent({
     sendOpenMarkdown,
     sendOpenSeed,
     sendSeedDocumentGet,
+    sendSeedTransition,
+    sendSeedNote,
     sendSessionMessagesGet,
     subscribeSessionMessagesChanged,
     sendSessionAnnotationsGet,
@@ -1771,6 +1773,14 @@ function AppContent({
   const openNotebookBrowser = useCallback(() => {
     setNotebookOpen(true);
   }, []);
+
+  // Which tender sessions the daemon still knows. The board says "session gone"
+  // on a seed whose claim outlived its agent — the one card on it somebody has
+  // to act on.
+  const liveGardenSessions = useMemo(
+    () => new Set(daemonSessions.map((session) => session.id)),
+    [daemonSessions],
+  );
 
   const openGardenSurface = useCallback(() => {
     setGardenSurfaceOpen(true);
@@ -4349,6 +4359,10 @@ function AppContent({
         isOpen={gardenSurfaceOpen}
         seeds={seeds}
         seedsTotal={seedsTotal}
+        liveSessions={liveGardenSessions}
+        loaded={hasReceivedInitialState}
+        moveSeed={sendSeedTransition}
+        noteSeed={sendSeedNote}
         fetchSeedDocument={sendSeedDocumentGet}
         onOpenAsTile={(seedId) => {
           closeGardenSurface();
