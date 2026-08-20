@@ -1112,24 +1112,42 @@ func (d *Daemon) gardenDispatchResume(sessionID string) string {
 	return strings.TrimSpace(dispatch.Resume)
 }
 
-// validateDispatchCrown refuses a dispatch aimed at a seed that is not here.
+// validateDispatchCrown refuses a dispatch aimed at a seed that cannot take it.
 // It is deliberately not a check that the seed already has children: a crown
 // planted for a plot that is about to be filled is the normal way to start one.
-func (d *Daemon) validateDispatchCrown(crown string) error {
+//
+// It runs before any worktree, workspace or runtime exists, because a dispatch
+// the garden will refuse must cost nothing: the delegate is bound as the seed's
+// tender (bindDelegatedSeed), and the alternative to refusing here is an agent
+// that launched without holding the work it was launched for.
+//
+// A tender only holds against the dispatch while its session is one the daemon
+// still knows — Tender.Holds, the same predicate `ready` reads. A tender whose
+// session was deleted is not a holder, so the dispatch takes the seed over. The
+// delegating session's own claim never blocks it either: handing your own seed
+// to a delegate is what the dispatch is.
+func (d *Daemon) validateDispatchCrown(crown, sourceSessionID string) error {
 	if crown == "" {
 		return nil
 	}
 	if err := d.requireHome(garden.Surface); err != nil {
 		return fmt.Errorf("dispatch at %s: %w", crown, err)
 	}
-	schema, err := d.seedsCollection()
+	seed, _, err := d.readSeed(crown)
 	if err != nil {
 		return err
 	}
-	if _, found, err := d.store.GetDocument(*schema, crown); err != nil {
-		return err
-	} else if !found {
-		return fmt.Errorf("no seed %s to dispatch at", crown)
+	if garden.Closed(seed.Status) {
+		return fmt.Errorf(
+			"%s is %s, so there is no open work to dispatch at; reopen it first with `attn seed replant %s`",
+			crown, seed.Status, crown)
+	}
+	held := seed.Tender()
+	if held.Holds(d.sessionExists) && !held.Is(garden.Tender{Session: strings.TrimSpace(sourceSessionID)}) {
+		return fmt.Errorf(
+			"%s is being tended by %s, and a seed has one tender at a time; dispatching here would hand it to a new agent.\n"+
+				"Wait for %s to harvest or park it, plant the work as its own seed, or say what you need on the log: attn seed note %s -m \"…\"",
+			crown, held.DisplayName(), held.DisplayName(), crown)
 	}
 	return nil
 }
@@ -1396,6 +1414,16 @@ func (d *Daemon) handleSeedTransition(conn net.Conn, msg *protocol.SeedTransitio
 // attempts is a tripwire — two agents contending is one retry, and a seed
 // rewritten three times inside one call is something else entirely.
 func (d *Daemon) applySeedTransition(id string, verb garden.Verb, actor garden.Tender, reason string) (garden.Seed, docstore.Document, error) {
+	return d.applySeedTransitionAs(id, verb, actor, reason, d.sessionExists)
+}
+
+// applySeedTransitionAs is applySeedTransition with the liveness predicate
+// spelled out. Only the dispatch hand-over passes its own: a delegator
+// dispatching at the seed it holds is giving that seed away, so its own claim
+// must not refuse the delegate — every other caller reads live sessions.
+func (d *Daemon) applySeedTransitionAs(
+	id string, verb garden.Verb, actor garden.Tender, reason string, sessionLive func(string) bool,
+) (garden.Seed, docstore.Document, error) {
 	schema, err := d.seedsCollection()
 	if err != nil {
 		return garden.Seed{}, docstore.Document{}, err
@@ -1410,7 +1438,7 @@ func (d *Daemon) applySeedTransition(id string, verb garden.Verb, actor garden.T
 		if err != nil {
 			return garden.Seed{}, docstore.Document{}, err
 		}
-		next, err := garden.Transition(seed, verb, actor, reason, d.sessionExists)
+		next, err := garden.Transition(seed, verb, actor, reason, sessionLive)
 		if err != nil {
 			return garden.Seed{}, docstore.Document{}, err
 		}

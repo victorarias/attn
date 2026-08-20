@@ -656,7 +656,7 @@ func (d *Daemon) delegateOperation(msg *protocol.DelegateMessage, operationID, r
 	}
 	// The crown is resolved before any worktree or runtime side effect: a
 	// delegation aimed at nothing should refuse, not launch unaimed.
-	if err := d.validateDispatchCrown(strings.TrimSpace(protocol.Deref(msg.Plot))); err != nil {
+	if err := d.validateDispatchCrown(strings.TrimSpace(protocol.Deref(msg.Plot)), sourceSessionID); err != nil {
 		return nil, err
 	}
 	sessionID := reservedSessionID

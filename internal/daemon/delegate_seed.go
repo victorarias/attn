@@ -14,10 +14,12 @@ import (
 // report to" is one read from anywhere rather than a field private to this
 // file. Design: docs/plans/2026-08-18-delegation-reporting-on-seeds.md.
 //
-// A delegation aimed at a crown (`--plot`) binds it — the plot's plan is where
-// its work reports. Any other delegation plants its own seed: the delegation's
-// name is the title, the brief is the body, the delegating session is the
-// planter and the delegate session is the tender.
+// A delegation aimed at an existing seed (`--plot`) binds it and claims it: the
+// seed's plan is where the delegate's work reports, and the delegate is the one
+// working it. Any other delegation plants its own seed: the delegation's name is
+// the title, the brief is the body, the delegating session is the planter and
+// the delegate session is the tender. Either way the delegate holds the seed its
+// launch prompt names.
 //
 // The bind runs before the runtime spawns, for the same reason the crown
 // dispatch always has: the delegate's own prompt names the seed, and a prompt
@@ -64,6 +66,8 @@ func (d *Daemon) bindDelegatedSeed(sessionID, plannerSessionID, brief, name, cro
 			return "", err
 		}
 		seedID = seed.ID
+	} else if err := d.tendDispatchedSeed(sessionID, plannerSessionID, seedID); err != nil {
+		return "", err
 	}
 	if err := d.recordGardenDispatch(sessionID, seedID, cwd, agent, fromChief); err != nil {
 		return "", fmt.Errorf("bind %s to session %s: %w", seedID, sessionID, err)
@@ -126,4 +130,34 @@ func (d *Daemon) plantDelegatedSeed(sessionID, plannerSessionID, brief, name str
 func delegationSeedUnavailable(err error) bool {
 	var fenced *enrollment.FencedError
 	return errors.As(err, &fenced)
+}
+
+// tendDispatchedSeed claims an existing seed for the delegate about to launch.
+//
+// The delegate's own prompt tells it the seed is its work and it is its tender,
+// so a dispatch that leaves the claim on somebody else ships an agent whose
+// prompt is a lie — which is how a deleted session kept holding a seed while a
+// replacement worked it. The claim goes through garden.Transition like every
+// other tend, so a tender whose session is still around refuses the take-over
+// rather than losing it silently; validateDispatchCrown already answered that
+// case before anything was created, and this is the race backstop behind it.
+func (d *Daemon) tendDispatchedSeed(sessionID, plannerSessionID, seedID string) error {
+	actor := garden.Tender{Session: sessionID, Member: d.resolveTenderMember("", sessionID)}
+	if _, _, err := d.applySeedTransitionAs(seedID, garden.VerbTend, actor, "", d.dispatchSessionLive(plannerSessionID)); err != nil {
+		return fmt.Errorf("tend %s as session %s: %w", seedID, sessionID, err)
+	}
+	return nil
+}
+
+// dispatchSessionLive is the liveness the dispatch's claim reads: every session
+// as it really is, except the delegating one, which is handing the seed over
+// and so does not hold it against its own delegate.
+func (d *Daemon) dispatchSessionLive(plannerSessionID string) func(string) bool {
+	planner := strings.TrimSpace(plannerSessionID)
+	return func(sessionID string) bool {
+		if planner != "" && strings.TrimSpace(sessionID) == planner {
+			return false
+		}
+		return d.sessionExists(sessionID)
+	}
 }

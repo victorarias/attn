@@ -68,7 +68,9 @@ When the work is already planted, dispatch at it instead of planting a duplicate
 
     attn delegate --brief-file "$brief_file" --plot <seed-id>
 
-The delegate binds that seed rather than a new one, and launches knowing it.
+The delegate binds that seed rather than a new one, launches knowing it, and
+becomes its tender. A seed a live session is already tending refuses the
+dispatch, naming who holds it, before any worktree or agent exists.
 Aimed at a **crown**, a flag-free `attn seed ready` inside the delegate answers
 with that plot's ready seeds. `--name`, placement, and worktree flags behave as
 usual.
