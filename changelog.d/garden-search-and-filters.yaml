@@ -1,0 +1,22 @@
+kind: added
+area: garden
+change: >
+  The garden panel can be searched. A line of type under the header matches
+  free text against a seed's title, body, id, and whoever holds it, and the
+  same line takes two operators: `is:open|closed|any|ready|blocked|dormant`
+  and `tender:<name>`. Search and filters are one mechanism, not two — the
+  query is the only filter state there is, so the header's closed toggle and
+  the panel's other affordances write into the query rather than keeping a
+  flag beside it, and the line always says exactly what is on screen. The
+  garden opens with the cursor already in it; `/` and `Cmd+F` return to it,
+  arrows walk the answers without leaving the field, and escape clears the
+  query before it closes the panel. Inside a plot, search covers the plot and
+  says how much more the rest of the garden holds; `Alt+Enter` widens to the
+  whole garden and back without moving you out of where you are standing.
+  Matching runs over the snapshot the daemon already pushes, so there is no
+  round trip and no loading state.
+notes: >
+  Design and the measurements behind the client-side decision:
+  docs/plans/2026-08-20-garden-search.md. The receipt for the per-keystroke
+  numbers is app/src/components/gardenSearch.bench.ts, which runs under both
+  node and JavaScriptCore.
