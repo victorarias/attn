@@ -23,9 +23,12 @@ with their measurements in the header comment:
   meaning. The settled head is the same string for tens of deltas in a row, so
   React skips that subtree — parser included — and only the tail is re-read.
 
-Cost, measured on the 27,540-char recording (`Markdown.streamingCost.test.tsx`
-prints it on every run): whole-document reparse p50 19.4ms, settled/tail split
-p50 0.54ms — a 35x p50 ratio on that machine.
+Cost, measured on the 27,540-char recording: whole-document reparse p50 19.4ms
+vs settled/tail split p50 0.54ms, a 35x p50 ratio; on a second machine the same
+test read 12ms vs 0.68ms, 17.6x. The ratio is not a contract — it moves with
+the box, and happy-dom is not a browser, so the absolute numbers mean less
+still. `Markdown.streamingCost.test.tsx` prints both legs on every run, which
+is the receipt to read rather than either number here.
 
 Highlighting rides the same split. `VolatileTextContext` is true only inside
 the tail document, and shiki is held off there, so it never runs on text that

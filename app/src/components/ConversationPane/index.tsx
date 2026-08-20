@@ -27,6 +27,16 @@ interface ConversationPaneProps {
   resolvedTheme?: ResolvedTheme;
 }
 
+/**
+ * Close enough to the bottom to count as reading the live end.
+ *
+ * The tolerance is a line or two of slack, not a threshold anyone tunes: a
+ * reader who stopped a few pixels short of the end is still at the end.
+ */
+function isAtBottom(list: HTMLElement): boolean {
+  return list.scrollHeight - list.scrollTop - list.clientHeight < 80;
+}
+
 /** How much text an item contributes, for the follow-the-stream check. */
 function itemLength(item: ConversationItem): number {
   if (item.kind === 'message') return item.text.length;
@@ -94,10 +104,23 @@ export function ConversationPane({ sessionId, paneActive, sessionState, resolved
   // returns. Appending content does not move scrollTop and fires no scroll
   // event, so this ref only moves when the reader (or the line below) moves it.
   const followingRef = useRef(true);
+  const openedRef = useRef(false);
   const lastLength = items.reduce((total, item) => total + itemLength(item), 0);
   useLayoutEffect(() => {
     const list = listRef.current;
     if (!list) return;
+    if (!openedRef.current && items.length > 0) {
+      openedRef.current = true;
+      // Opening a conversation lands on its newest message. That is one move at
+      // the moment the transcript first exists, not a follow decision — and it
+      // is taken only from the position the pane mounted at, since a scrollTop
+      // already set is someone restoring a reader mid-transcript. Follow mode
+      // is then measured rather than assumed, so their first delta does not
+      // yank them to the bottom before any scroll event has fired.
+      if (list.scrollTop === 0) list.scrollTop = list.scrollHeight;
+      followingRef.current = isAtBottom(list);
+      return;
+    }
     if (followingRef.current) list.scrollTop = list.scrollHeight;
   }, [lastLength, items.length]);
 
@@ -141,7 +164,7 @@ export function ConversationPane({ sessionId, paneActive, sessionState, resolved
     const list = listRef.current;
     if (!list) return;
     anchorRef.current = { key: oldestKey, fromBottom: list.scrollHeight - list.scrollTop };
-    followingRef.current = list.scrollHeight - list.scrollTop - list.clientHeight < 80;
+    followingRef.current = isAtBottom(list);
     // Fetch before the reader arrives at the top. The threshold is a screen of
     // reading, so on a fast host the page has landed by the time they get there
     // and the conversation just keeps going up.

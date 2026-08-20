@@ -22,6 +22,10 @@ vi.mock('shiki', () => shikiMock);
  * component would do. The numbers are printed rather than asserted — happy-dom
  * is not a browser and its absolute cost means little — but the RATIO between
  * the two runs is the same work in the same place, and that is the receipt.
+ *
+ * The ratio moves with the machine too: 35x and 17.6x on two boxes in 2026-08.
+ * Read it as an order of magnitude, not as a threshold — a smaller number here
+ * is a different box until something else says otherwise.
  */
 
 function prefixes(): string[] {
