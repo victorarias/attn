@@ -15,7 +15,7 @@ import (
 func bindMirrorFixture(t *testing.T, d *Daemon, sessionID string) (seedID, ticketID string) {
 	t.Helper()
 	seed := plant(t, d, protocol.SeedPlantMessage{SourceSessionID: protocol.Ptr("sess-a"), Title: "Migrate the store to X", Body: protocol.Ptr("the brief")})
-	if err := d.recordGardenDispatch(sessionID, seed.ID, "/tmp/a", "codex", false); err != nil {
+	if err := d.recordGardenDispatch(sessionID, seed.ID, "", "/tmp/a", "codex", false); err != nil {
 		t.Fatalf("record dispatch: %v", err)
 	}
 	created, err := d.createTicketWithUniqueSlug(store.Ticket{
@@ -102,7 +102,7 @@ func TestMirrorIsSilentWithoutTheSessionsOwnTicket(t *testing.T) {
 	t.Run("no ticket", func(t *testing.T) {
 		d := newGardenDaemon(t)
 		seed := plant(t, d, protocol.SeedPlantMessage{SourceSessionID: protocol.Ptr("sess-a"), Title: "Post-cutover work", Body: protocol.Ptr("the brief")})
-		if err := d.recordGardenDispatch("sess-a", seed.ID, "/tmp/a", "codex", false); err != nil {
+		if err := d.recordGardenDispatch("sess-a", seed.ID, "", "/tmp/a", "codex", false); err != nil {
 			t.Fatalf("record dispatch: %v", err)
 		}
 		move(t, d, "sess-a", seed.ID, garden.VerbTend, "", "")

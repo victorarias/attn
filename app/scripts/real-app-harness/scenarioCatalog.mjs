@@ -90,6 +90,12 @@ export const scenarioCatalog = [
     timeoutMs: 240_000,
   },
   {
+    id: 'garden-seed-nudges',
+    label: 'Garden seed nudges: a ringing note and harvest reach the dispatcher with a read reset between them',
+    command: ['pnpm', 'run', 'real-app:scenario-garden-seed-nudges'],
+    timeoutMs: 240_000,
+  },
+  {
     id: 'garden-seed-reopen',
     label: 'Garden surfaces: a delegated pane names its seed, and a closed tender is reopened from the drill',
     command: ['pnpm', 'run', 'real-app:scenario-garden-seed-reopen'],

@@ -162,10 +162,11 @@ func NotesSchema() docstore.CollectionSchema {
 // row is deleted when the session closes, and reopening a delegate whose
 // session is gone is exactly the case that has to work.
 type Dispatch struct {
-	SessionID string `json:"session_id"`
-	Crown     string `json:"crown"`
-	Cwd       string `json:"cwd,omitempty"`
-	Agent     string `json:"agent,omitempty"`
+	SessionID         string `json:"session_id"`
+	Crown             string `json:"crown"`
+	DispatcherSession string `json:"dispatcher_session,omitempty"`
+	Cwd               string `json:"cwd,omitempty"`
+	Agent             string `json:"agent,omitempty"`
 	// FromChief records that the chief of staff started this delegation. The
 	// board used to carry it as the ticket's owning role; the dispatch record is
 	// where it lives now, and it stays true through a role transfer for the same

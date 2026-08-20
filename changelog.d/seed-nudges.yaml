@@ -1,0 +1,10 @@
+kind: added
+area: cli
+change: >
+  `attn seed watch` gives an agent session a quiet, durable stake in a seed and
+  its whole plot, with `unwatch` as the way out. Lifecycle moves ring watchers
+  automatically; ordinary notes stay silent unless their author adds `--ring`.
+  Delegators automatically watch the seed they dispatch at, so a delegate's
+  harvest cannot pass silently. Bells carry only the seed and event, coalesce
+  until `show` or `notes` reads them, and travel through the same durable
+  session delivery path as `attn agent msg`.

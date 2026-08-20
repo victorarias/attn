@@ -50,6 +50,7 @@ func (d *Daemon) handleSeedTransitionWS(client *wsClient, msg *protocol.SeedTran
 		}
 	}
 	d.mirrorSeedMoveOntoTicket("", seed.ID, verb, protocol.Deref(msg.Reason))
+	d.ringSeedActivity(seed.ID, gardenRingEvents[verb], "")
 	result.Seed = &wire
 	result.Success = true
 	d.sendToClient(client, result)
@@ -81,6 +82,9 @@ func (d *Daemon) handleSeedNoteWS(client *wsClient, msg *protocol.SeedNoteMessag
 		return
 	}
 	d.mirrorSeedNoteOntoTicket("", msg.SeedID, note.Body)
+	if protocol.Deref(msg.Ring) {
+		d.ringSeedActivity(msg.SeedID, "note", "")
+	}
 	result.Note = &note
 	result.Success = true
 	d.sendToClient(client, result)

@@ -6250,6 +6250,9 @@ type Response struct {
 	// "seed_transition_result".
 	SeedTransitionResult *SeedTransitionResult `json:"seed_transition_result,omitempty,omitzero"`
 
+	// SeedWatchResult corresponds to the JSON schema field "seed_watch_result".
+	SeedWatchResult *SeedWatchResult `json:"seed_watch_result,omitempty,omitzero"`
+
 	// SessionInstructionsResult corresponds to the JSON schema field
 	// "session_instructions_result".
 	SessionInstructionsResult *SessionInstructionsResult `json:"session_instructions_result,omitempty,omitzero"`
@@ -6607,6 +6610,9 @@ type SeedNoteMessage struct {
 	// RequestID corresponds to the JSON schema field "request_id".
 	RequestID *string `json:"request_id,omitempty,omitzero"`
 
+	// Ring corresponds to the JSON schema field "ring".
+	Ring *bool `json:"ring,omitempty,omitzero"`
+
 	// SeedID corresponds to the JSON schema field "seed_id".
 	SeedID string `json:"seed_id"`
 
@@ -6645,6 +6651,9 @@ type SeedNotesMessage struct {
 
 	// SeedID corresponds to the JSON schema field "seed_id".
 	SeedID string `json:"seed_id"`
+
+	// SourceSessionID corresponds to the JSON schema field "source_session_id".
+	SourceSessionID *string `json:"source_session_id,omitempty,omitzero"`
 }
 
 type SeedNotesResult struct {
@@ -6861,6 +6870,9 @@ type SeedShowMessage struct {
 
 	// SeedID corresponds to the JSON schema field "seed_id".
 	SeedID string `json:"seed_id"`
+
+	// SourceSessionID corresponds to the JSON schema field "source_session_id".
+	SourceSessionID *string `json:"source_session_id,omitempty,omitzero"`
 }
 
 type SeedShowResult struct {
@@ -6881,6 +6893,9 @@ type SeedShowResult struct {
 
 	// Seed corresponds to the JSON schema field "seed".
 	Seed Seed `json:"seed"`
+
+	// Watching corresponds to the JSON schema field "watching".
+	Watching bool `json:"watching"`
 }
 
 type SeedTransitionMessage struct {
@@ -6949,6 +6964,31 @@ type SeedVar struct {
 
 	// Required corresponds to the JSON schema field "required".
 	Required *bool `json:"required,omitempty,omitzero"`
+}
+
+type SeedWatchMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// SeedID corresponds to the JSON schema field "seed_id".
+	SeedID string `json:"seed_id"`
+
+	// SourceSessionID corresponds to the JSON schema field "source_session_id".
+	SourceSessionID string `json:"source_session_id"`
+
+	// Unwatch corresponds to the JSON schema field "unwatch".
+	Unwatch *bool `json:"unwatch,omitempty,omitzero"`
+}
+
+type SeedWatchResult struct {
+	// Changed corresponds to the JSON schema field "changed".
+	Changed bool `json:"changed"`
+
+	// SeedID corresponds to the JSON schema field "seed_id".
+	SeedID string `json:"seed_id"`
+
+	// Watching corresponds to the JSON schema field "watching".
+	Watching bool `json:"watching"`
 }
 
 type Session struct {

@@ -546,13 +546,24 @@ always holds: attn has no signal that a person in a terminal pane walked away.
 
 A **note** is one entry on a seed's log: what happened and what was learned,
 written for whoever tends that seed next. Notes are anchored to the work and
-routed to nobody — a message with an addressee is a message, not a note — and
-they are read where the tender already looks, in the seed's own `show`.
+quiet by default — a message with an addressee is a message, not a note — and
+they are read where the tender already looks, in the seed's own `show`. Adding
+`--ring` is a separate speech act: the note stays on the log while a contentless
+bell tells the seed's watchers to look.
+
+A **watch** is one session's standing interest in a seed. Every lifecycle move
+rings watchers automatically; a note rings only by choice. Watching a crown
+covers its whole plot by following `part-of` edges upward when activity lands,
+including children planted after the watch. A delegation automatically makes
+its dispatcher a watcher of the seed it was aimed at. One unread bell per
+watcher and moved seed coalesces a busy log until that watcher reads `show` or
+`notes`; a session never rings itself for its own write. `unwatch` removes an
+explicit watch, while the dispatch relationship remains automatic.
 
 A **handoff** is a note kind: one written to your successor on this seed
 (`attn seed note <id> -m "…" --handoff`). It is still a note on the log and
-still routed to nobody, but the freshest one is put in front of whoever picks
-the seed up — `attn seed show` renders it above the seed, and `attn seed tend`
+stays quiet unless its author rings it, but the freshest one is put in front of
+whoever picks the seed up — `attn seed show` renders it above the seed, and `attn seed tend`
 prints it on the claim — so pickup primes without anybody being told to go
 looking. This is continuity along the *seed*: a crew member's handoff, filed in
 their home when they wrap, is continuity along the *member*, and the two are

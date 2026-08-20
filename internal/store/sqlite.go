@@ -1229,6 +1229,27 @@ CREATE TABLE IF NOT EXISTS app_reconcile_progress (
 	// zero so upgrading does not suppress demand already tracked by a live
 	// definition.
 	{119, "record review automation activation baselines", ``},
+	// A watch is standing interest in one seed. A bell is the unread fence for
+	// one watcher and one moved seed; its agent-message id lets a read cancel a
+	// doorbell that was queued but had not reached the session yet.
+	{120, "watch seeds and coalesce their unread bells", `
+		CREATE TABLE IF NOT EXISTS garden_seed_watches (
+			watcher_session_id TEXT NOT NULL,
+			seed_id TEXT NOT NULL,
+			created_at TEXT NOT NULL,
+			PRIMARY KEY(watcher_session_id, seed_id)
+		);
+		CREATE INDEX IF NOT EXISTS idx_garden_seed_watches_seed
+			ON garden_seed_watches(seed_id, watcher_session_id);
+		CREATE TABLE IF NOT EXISTS garden_seed_bells (
+			watcher_session_id TEXT NOT NULL,
+			seed_id TEXT NOT NULL,
+			event_kind TEXT NOT NULL,
+			message_id TEXT NOT NULL UNIQUE,
+			created_at TEXT NOT NULL,
+			PRIMARY KEY(watcher_session_id, seed_id)
+		);
+	`},
 }
 
 // migration99SQL is everything migration 99 does after its guarded ALTER.

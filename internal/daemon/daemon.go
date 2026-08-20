@@ -2898,6 +2898,8 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 		d.handleSeedNote(conn, msg.(*protocol.SeedNoteMessage))
 	case protocol.CmdSeedNotes: // wire: seed_notes
 		d.handleSeedNotes(conn, msg.(*protocol.SeedNotesMessage))
+	case protocol.CmdSeedWatch: // wire: seed_watch
+		d.handleSeedWatch(conn, msg.(*protocol.SeedWatchMessage))
 	case protocol.CmdSeedLink: // wire: seed_link
 		d.handleSeedLink(conn, msg.(*protocol.SeedLinkMessage))
 	case protocol.CmdSeedReady: // wire: seed_ready
