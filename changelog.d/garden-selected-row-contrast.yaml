@@ -1,0 +1,8 @@
+kind: fixed
+area: garden
+change: >
+  The selected row in the garden's seed list is visible again. It shared
+  its background with hover and every other raised surface, which put it
+  1.09:1 against the panel behind it — legible on a good laptop display
+  and on nothing else. Selection now has its own fill, 1.62:1 in dark and
+  1.64:1 in light.

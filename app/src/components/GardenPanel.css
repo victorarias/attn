@@ -457,9 +457,10 @@
 .garden-column:last-child { border-right: none; }
 .garden-column:focus-visible { outline: none; }
 
-/* A column that is not the last still has to say which row you walked through.
-   Quiet: the reader on the right is the loud answer to the same question. */
-.garden-row.is-selected > button { background: var(--color-bg-elevated); }
+/* A column that is not the last still has to say which row you walked through,
+   and it has to say it on a mediocre external monitor too — hence a fill a
+   clear step above the hover shade rather than a tint of it. */
+.garden-row.is-selected > button { background: var(--color-bg-selected); }
 .garden-row.is-selected .garden-row__title { color: var(--color-text-primary); }
 
 /* At 300px there is room for the title and one word about it. The tender and
@@ -810,7 +811,7 @@
 /* The row the keyboard is on. Focus stays in the search field, so the row
    needs to carry the mark itself. */
 .garden-row.is-active > button {
-  background: var(--color-bg-elevated);
+  background: var(--color-bg-selected);
   box-shadow: inset 2px 0 0 var(--accent);
 }
 
