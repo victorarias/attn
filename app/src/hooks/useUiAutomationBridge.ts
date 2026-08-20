@@ -1383,13 +1383,38 @@ function collectGardenUiState() {
     blocked: row.querySelector('.garden-seed__blocked')?.textContent?.trim() ?? '',
     tender: row.querySelector('.garden-seed__tender')?.textContent?.trim() ?? '',
     plot: row.querySelector('.garden-seed__plot-counts')?.textContent?.trim() ?? '',
+    // Why this row is in a result list: the plot it came from, and the line of
+    // body that matched when the title did not explain itself.
+    home: row.querySelector('.garden-seed__home')?.textContent?.trim() ?? '',
+    snippet: row.querySelector('.garden-seed__snippet')?.textContent?.trim() ?? '',
   }));
+  const field = panel.querySelector('.garden-search__input');
+  const closed = panel.querySelector('.garden-panel__scope');
+  const active = field instanceof HTMLInputElement ? field.getAttribute('aria-activedescendant') : null;
   return {
     present: true,
     trail,
     crown: panel.querySelector('.garden-panel__crown-progress')?.textContent?.trim() ?? '',
     empty: panel.querySelector('.garden-panel__empty')?.textContent?.trim() ?? '',
     seeds,
+    // Search and filters are one line and one state, so one reader answers for
+    // both: what the query says, where it is looking, what it found, and every
+    // move the panel is offering out of the current answer.
+    search: {
+      query: field instanceof HTMLInputElement ? field.value : '',
+      focused: document.activeElement === field,
+      scope: field?.getAttribute('aria-label') ?? '',
+      hint: panel.querySelector('.garden-search__meta')?.textContent?.trim() ?? '',
+      count: panel.querySelector('.garden-panel__count')?.textContent?.trim() ?? '',
+      activeSeed: active?.replace('garden-row-', '') ?? '',
+      closedToggle: closed
+        ? { label: closed.textContent?.trim() ?? '', on: closed.getAttribute('aria-pressed') === 'true' }
+        : null,
+      nothing: panel.querySelector('.garden-panel__nothing-line')?.textContent?.trim() ?? '',
+      moves: Array.from(panel.querySelectorAll('.garden-panel__moves button')).map(
+        (move) => move.textContent?.trim() ?? '',
+      ),
+    },
   };
 }
 
@@ -3225,6 +3250,43 @@ export function useUiAutomationBridge({
           throw new Error(`no plot to open on ${seedId} (it is not a crown, or the panel is not showing it)`);
         }
         open.click();
+        await settleUi(2);
+        return collectGardenUiState();
+      }
+      // Typing into the search line, through the field the reader types into:
+      // the query is the panel's only filter state, so a scenario that sets it
+      // has set every filter there is.
+      case 'garden_search': {
+        const query = typeof payload.query === 'string' ? payload.query : null;
+        if (query === null) throw new Error('garden_search requires query');
+        const field = document.querySelector('.garden-search__input');
+        if (!(field instanceof HTMLInputElement)) {
+          throw new Error('the garden panel is not open, so there is nothing to search');
+        }
+        field.focus();
+        setInputValue(field, query);
+        await settleUi(2);
+        return collectGardenUiState();
+      }
+      // The keyboard paths that have no pointer equivalent: walking the answers,
+      // widening the scope, and clearing the query.
+      case 'garden_search_key': {
+        const key = typeof payload.key === 'string' ? payload.key : null;
+        if (!key) throw new Error('garden_search_key requires key');
+        const field = document.querySelector('.garden-search__input');
+        if (!(field instanceof HTMLInputElement)) {
+          throw new Error('the garden panel is not open, so there is nothing to walk');
+        }
+        field.focus();
+        field.dispatchEvent(
+          new KeyboardEvent('keydown', {
+            key,
+            altKey: Boolean(payload.altKey),
+            metaKey: Boolean(payload.metaKey),
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
         await settleUi(2);
         return collectGardenUiState();
       }

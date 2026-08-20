@@ -413,3 +413,256 @@
   color: var(--color-text-primary);
   text-decoration: underline;
 }
+
+/* ── search ───────────────────────────────────────────────────────────────
+   Search and filters are one line and one state. The field is a
+   line of type rather than a control: at list density a bordered input reads
+   as chrome before it reads as an invitation, and the panel already spends its
+   only border on the header rule. */
+
+/* The results scroll, the header and the search line do not: a field that
+   scrolls away is a field you have to hunt for after every result. The panel
+   was one scroller; the list is the scroller now. */
+.garden-panel {
+  overflow: hidden;
+}
+
+.garden-panel__list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding-bottom: 8px;
+}
+
+/* A row is as tall as it reads. Inside a flex column with a bounded height,
+   items shrink by default and clip their own second line. */
+.garden-panel__list > .garden-seed {
+  flex: 0 0 auto;
+}
+
+.garden-search {
+  align-items: baseline;
+  border-bottom: 1px solid var(--color-border-subtle);
+  column-gap: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  padding: 2px 0 6px;
+}
+
+.garden-search:focus-within,
+.garden-search.is-active {
+  border-bottom-color: var(--color-border);
+}
+
+/* The prompt is a slash: the character that focuses the field, sitting where
+   the field begins. A magnifier glyph would say the same thing and teach
+   nothing. */
+.garden-search__glyph {
+  color: var(--color-text-dimmed);
+  flex: none;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--font-size-md);
+}
+
+.garden-search:focus-within .garden-search__glyph {
+  color: var(--accent);
+}
+
+.garden-search__input {
+  background: transparent;
+  border: none;
+  color: var(--color-text-primary);
+  flex: 1 1 12ch;
+  font-family: inherit;
+  font-size: var(--font-size-md);
+  min-width: 0;
+  outline: none;
+  padding: 2px 0;
+}
+
+.garden-search__input::placeholder {
+  color: var(--color-text-muted);
+}
+
+/* Everything the query has to say about itself, on the same line it was typed
+   on. Never more than two facts. */
+.garden-search__meta {
+  align-items: baseline;
+  column-gap: 10px;
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  font-size: var(--font-size-sm);
+}
+
+.garden-search__unknown {
+  color: var(--color-error);
+}
+
+.garden-search__values {
+  display: flex;
+  gap: 8px;
+}
+
+.garden-search__value {
+  background: none;
+  border: none;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--font-size-sm);
+  padding: 0;
+}
+
+.garden-search__value:hover {
+  color: var(--accent);
+}
+
+.garden-search__value-hint {
+  color: var(--color-text-muted);
+}
+
+.garden-search__widen {
+  background: none;
+  border: none;
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+  font-size: var(--font-size-sm);
+  font-variant-numeric: tabular-nums;
+  padding: 0;
+  white-space: nowrap;
+}
+
+.garden-search__widen:hover {
+  color: var(--color-text-primary);
+}
+
+.garden-search kbd,
+.garden-panel__moves kbd {
+  color: var(--color-text-muted);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--font-size-sm);
+}
+
+/* A hit is color and weight, not a filled box: a wall of highlight blocks
+   reads as decoration at this density. */
+.garden-hit {
+  background: none;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.garden-seed__id.garden-hit {
+  color: var(--accent);
+}
+
+/* Where a result lives, for a flat list of them. */
+.garden-seed__home {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Why a row is here, when its title does not say. */
+.garden-seed__snippet {
+  color: var(--color-text-tertiary);
+  display: block;
+  font-size: var(--font-size-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The row the keyboard is on. Focus stays in the search field, so the row
+   needs to carry the mark itself. */
+.garden-seed.is-active {
+  border-color: var(--color-border-hover);
+}
+
+.garden-seed.is-active .garden-seed__head {
+  background: var(--color-bg-elevated);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+/* No results: name the query, then offer only the moves that would find
+   something. */
+.garden-panel__nothing {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 8px 0 0;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .garden-panel__nothing {
+    animation: garden-nothing-in 140ms ease-out;
+  }
+
+  @keyframes garden-nothing-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+}
+
+.garden-panel__nothing-line {
+  color: var(--color-text-secondary);
+  margin: 0;
+}
+
+.garden-panel__echo {
+  color: var(--color-text-primary);
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+
+.garden-panel__moves {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.garden-panel__moves li {
+  align-items: baseline;
+  display: flex;
+  gap: 10px;
+}
+
+.garden-panel__moves button {
+  background: none;
+  border: none;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font-size: var(--font-size-md);
+  padding: 0;
+  text-align: left;
+}
+
+.garden-panel__moves button:hover {
+  color: var(--accent);
+}
+
+.garden-panel__move-count {
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Widened out of a plot: the trail still says where you are standing, so it
+   must stop saying what you are searching. The plot segments recede and the
+   root crumb takes the weight — one line answering both questions instead of
+   two lines contradicting each other. */
+.garden-panel__trail.is-wide .garden-panel__trail-segment {
+  opacity: 0.4;
+}
+
+.garden-panel__trail.is-wide > .garden-panel__trail-step {
+  color: var(--color-text-primary);
+}
