@@ -45,16 +45,17 @@ WRITING A BODY
   tender's authority ends: when to stop and ask versus when to make the call
   and keep going. A body that says nothing here defaults to checking in.
 
-  A body may say "ship till done": that is an instruction to work end to end
-  on your own, following the stop conditions and requirements until they are
-  met, without stopping to check in along the way.
+  A body may say "ship till done": carry the work end to end on your own,
+  following the stop conditions and requirements until they are met, and
+  deliver the shipped result when the stop condition says to ship.
 
   When you plant something you discovered, say what it fell out of: the work
   you were doing and how you hit it. Provenance is useful context, so name it
   in the body and link the backing document when there is one.
 
-  The body is the stable contract; the log is the live thread. Don't script the
-  whole job in the body; that belongs in notes and steering.
+  The body describes the work: the stop condition, the constraints, the scope.
+  The log records the history of the work as it happens. Write the work into
+  the body and the history into the log.
 
 DELIVERABLE TYPES BEND THE SHAPE
 
