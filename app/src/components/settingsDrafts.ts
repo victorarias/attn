@@ -88,6 +88,11 @@ export function useSettingDraft({
 type AgentValues = Partial<Record<SessionAgent, string>>;
 
 export interface AgentSettingDraftOptions extends DraftDeps {
+  /**
+   * Must be a stable object — the reseed guard compares it by reference during
+   * render, so a fresh literal per render reseeds forever. Every caller today
+   * hands over a useMemo'd record.
+   */
   actual: AgentValues;
   settingKey: (agent: SessionAgent) => string;
   /**
