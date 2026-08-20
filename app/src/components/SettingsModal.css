@@ -287,6 +287,27 @@
   line-height: 1.4;
 }
 
+/* The affordance for settings that apply on change or on blur: a flag beside
+   the field that takes itself away. One finite fade-in, never a loop — the
+   settings panel sits open beside GPU terminals. */
+.settings-saved-mark {
+  justify-self: start;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  animation: settings-saved-mark-in 120ms ease-out;
+}
+
+@keyframes settings-saved-mark-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
 .settings-warning {
   color: #ff9f7a;
   font-size: var(--font-size-sm);

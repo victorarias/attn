@@ -14,6 +14,7 @@ import { BackgroundTasksSettings } from './BackgroundTasksSettings';
 import { EventBusSettings } from './EventBusSettings';
 import { AutoModeSettings } from './AutoModeSettings';
 import { useAutoModePolicy } from '../hooks/useAutoModePolicy';
+import { SavedMark, useSavedFlash } from './useSavedFlash';
 import {
   assertValidSettingsSectionID,
   setSettingsAutomationHandle,
@@ -102,7 +103,22 @@ interface SettingsModalProps {
   taskChangeSignal?: number;
 }
 
-type SettingsSectionID = 'general' | 'connectivity' | 'plugins' | 'agents' | 'data' | 'review' | 'hygiene' | 'backgroundTasks' | 'eventBus' | 'autoMode';
+// Section ids are the deep-link and automation vocabulary, so they outlive the
+// labels above them: `general` still names the appearance section it was
+// narrowed to. `review` is gone — its single model override moved in beside the
+// other model overrides — and settingsAutomation.ts moves with this union.
+type SettingsSectionID =
+  | 'general'
+  | 'workspace'
+  | 'hygiene'
+  | 'agents'
+  | 'keeper'
+  | 'autoMode'
+  | 'connectivity'
+  | 'plugins'
+  | 'backgroundTasks'
+  | 'eventBus'
+  | 'data';
 
 // Fallback shown when the daemon has not yet sent a normalized value; the daemon
 // mirrors this default (agent.DefaultContextWindowCap) for both context-window caps.
@@ -212,6 +228,8 @@ export function SettingsModal({
     sendAutoModeGet,
     sendAutoModePromote,
     sendAutoModeDiscard,
+    sendAutoModePatternAdd,
+    sendAutoModePatternRemove,
   } = useDaemonApi();
   // Read here rather than inside the section: the nav badge needs the pending
   // count before the section mounts, and one read serves both. Gated on the
@@ -221,7 +239,13 @@ export function SettingsModal({
     getState: sendAutoModeGet,
     promoteProposal: sendAutoModePromote,
     discardProposal: sendAutoModeDiscard,
+    addPattern: sendAutoModePatternAdd,
+    removePattern: sendAutoModePatternRemove,
   });
+  // Auto-save is the house rule here, so every commit raises a quiet mark
+  // beside its field: a blur that wrote something has to look different from a
+  // blur that did nothing.
+  const savedFlash = useSavedFlash();
   const [projectsDir, setProjectsDir] = useState(settings.projects_directory || '');
   const [notebookRoot, setNotebookRoot] = useState(settings['notebook.root'] || '');
   const [agentExecutables, setAgentExecutables] = useState<Record<SessionAgent, string>>({});
@@ -569,15 +593,17 @@ export function SettingsModal({
     const next = autoSettleArm.trim();
     if (next !== actualAutoSettleArm.trim()) {
       onSetSetting(AUTO_SETTLE_ARM_SETTING, next);
+      savedFlash.flash(AUTO_SETTLE_ARM_SETTING);
     }
-  }, [autoSettleArm, actualAutoSettleArm, onSetSetting]);
+  }, [autoSettleArm, actualAutoSettleArm, onSetSetting, savedFlash]);
 
   const commitAutoSettleCountdown = useCallback(() => {
     const next = autoSettleCountdown.trim();
     if (next !== actualAutoSettleCountdown.trim()) {
       onSetSetting(AUTO_SETTLE_COUNTDOWN_SETTING, next);
+      savedFlash.flash(AUTO_SETTLE_COUNTDOWN_SETTING);
     }
-  }, [autoSettleCountdown, actualAutoSettleCountdown, onSetSetting]);
+  }, [autoSettleCountdown, actualAutoSettleCountdown, onSetSetting, savedFlash]);
 
   const handleToggleWorkflows = useCallback(() => {
     onSetSetting('workflows_enabled', workflowsEnabled ? 'false' : 'true');
@@ -590,16 +616,15 @@ export function SettingsModal({
   const handleInputBlur = useCallback(() => {
     if (projectsDir !== actualProjectsDir) {
       onSetSetting('projects_directory', projectsDir);
+      savedFlash.flash('projects_directory');
     }
-  }, [projectsDir, actualProjectsDir, onSetSetting]);
+  }, [projectsDir, actualProjectsDir, onSetSetting, savedFlash]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Enter') {
-      if (projectsDir !== actualProjectsDir) {
-        onSetSetting('projects_directory', projectsDir);
-      }
+      handleInputBlur();
     }
-  }, [projectsDir, actualProjectsDir, onSetSetting]);
+  }, [handleInputBlur]);
 
   const handleBrowseNotebookRoot = useCallback(async () => {
     const selected = await open({
@@ -622,8 +647,9 @@ export function SettingsModal({
   const commitNotebookRoot = useCallback(() => {
     if (notebookRoot !== actualNotebookRoot) {
       onSetSetting('notebook.root', notebookRoot);
+      savedFlash.flash('notebook.root');
     }
-  }, [notebookRoot, actualNotebookRoot, onSetSetting]);
+  }, [notebookRoot, actualNotebookRoot, onSetSetting, savedFlash]);
 
   const handleNotebookRootKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Enter') {
@@ -640,8 +666,9 @@ export function SettingsModal({
     const currentValue = actualAgentExecutables[agent] || '';
     if (nextValue !== currentValue) {
       onSetSetting(`${agent}_executable`, nextValue);
+      savedFlash.flash(`${agent}_executable`);
     }
-  }, [actualAgentExecutables, agentExecutables, onSetSetting]);
+  }, [actualAgentExecutables, agentExecutables, onSetSetting, savedFlash]);
 
   const handleChiefModelChange = useCallback((agent: SessionAgent, value: string) => {
     setChiefModels((prev) => ({ ...prev, [agent]: value }));
@@ -652,14 +679,16 @@ export function SettingsModal({
     const currentValue = (actualChiefModels[agent] || '').trim();
     if (nextValue !== currentValue) {
       onSetSetting(`chief_model_${agent}`, nextValue);
+      savedFlash.flash(`chief_model_${agent}`);
     }
-  }, [actualChiefModels, chiefModels, onSetSetting]);
+  }, [actualChiefModels, chiefModels, onSetSetting, savedFlash]);
 
   // A <select>, so change commits immediately rather than waiting for blur.
   const handleChiefEffortChange = useCallback((agent: SessionAgent, value: string) => {
     setChiefEfforts((prev) => ({ ...prev, [agent]: value }));
     onSetSetting(`chief_effort_${agent}`, value);
-  }, [onSetSetting]);
+    savedFlash.flash(`chief_model_${agent}`);
+  }, [onSetSetting, savedFlash]);
 
   const handleDefaultModelChange = useCallback((agent: SessionAgent, value: string) => {
     setDefaultModels((prev) => ({ ...prev, [agent]: value }));
@@ -670,14 +699,16 @@ export function SettingsModal({
     const currentValue = (actualDefaultModels[agent] || '').trim();
     if (nextValue !== currentValue) {
       onSetSetting(`default_model_${agent}`, nextValue);
+      savedFlash.flash(`default_model_${agent}`);
     }
-  }, [actualDefaultModels, defaultModels, onSetSetting]);
+  }, [actualDefaultModels, defaultModels, onSetSetting, savedFlash]);
 
   // A <select>, so change commits immediately rather than waiting for blur.
   const handleDefaultEffortChange = useCallback((agent: SessionAgent, value: string) => {
     setDefaultEfforts((prev) => ({ ...prev, [agent]: value }));
     onSetSetting(`default_effort_${agent}`, value);
-  }, [onSetSetting]);
+    savedFlash.flash(`default_model_${agent}`);
+  }, [onSetSetting, savedFlash]);
 
   const handleToggleAutoApprove = useCallback(() => {
     onSetSetting('auto_approve_enabled', autoApproveEnabled ? 'false' : 'true');
@@ -690,16 +721,15 @@ export function SettingsModal({
   const handleEditorBlur = useCallback(() => {
     if (editorExecutable !== actualEditorExecutable) {
       onSetSetting('editor_executable', editorExecutable);
+      savedFlash.flash('editor_executable');
     }
-  }, [editorExecutable, actualEditorExecutable, onSetSetting]);
+  }, [editorExecutable, actualEditorExecutable, onSetSetting, savedFlash]);
 
   const handleEditorKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Enter') {
-      if (editorExecutable !== actualEditorExecutable) {
-        onSetSetting('editor_executable', editorExecutable);
-      }
+      handleEditorBlur();
     }
-  }, [editorExecutable, actualEditorExecutable, onSetSetting]);
+  }, [handleEditorBlur]);
 
   const handleDefaultAgentChange = useCallback((agent: SessionAgent) => {
     if (!isAgentAvailable(agentAvailability, agent)) return;
@@ -719,24 +749,40 @@ export function SettingsModal({
     onSetSetting(duty.enabledSettingKey, keeperDutyEnabled[dutyKey] ? 'false' : 'true');
   }, [keeperDutyEnabled, onSetSetting]);
 
+  const commitKeeperDuty = useCallback((
+    dutyKey: KeeperDutyKey,
+    agent: SessionAgent | '',
+    rawModel: string,
+  ) => {
+    const model = rawModel.trim();
+    if (!agent || !model) return;
+    onSetSetting(
+      KEEPER_DUTY_BY_KEY[dutyKey].settingKey,
+      serializeKeeperConfig({ agent, model }),
+    );
+    savedFlash.flash(KEEPER_DUTY_BY_KEY[dutyKey].settingKey);
+  }, [onSetSetting, savedFlash]);
+
   // Switching a duty's agent resets its model to that agent's recommended default
   // (the first preset); choosing the empty "Disabled" agent (opt-in duties only)
   // clears the model so Save stays disabled.
   const handleKeeperAgentChange = useCallback((dutyKey: KeeperDutyKey, agent: SessionAgent | '') => {
-    setKeeperDrafts((prev) => ({
-      ...prev,
-      [dutyKey]: { agent, model: agent ? defaultKeeperDutyModel(dutyKey, agent) : '' },
-    }));
-  }, []);
+    const model = agent ? defaultKeeperDutyModel(dutyKey, agent) : '';
+    setKeeperDrafts((prev) => ({ ...prev, [dutyKey]: { agent, model } }));
+    // Both halves are whole here — the agent brings its own recommended model —
+    // so there is nothing half-entered to protect the user from.
+    commitKeeperDuty(dutyKey, agent, model);
+  }, [commitKeeperDuty]);
 
-  // The model <select> emits a preset value or the 'custom' sentinel; 'custom' blanks
-  // the model so the free-form input takes over and Save waits for it to be filled.
+  // The model <select> emits a preset value or the 'custom' sentinel. A preset is
+  // whole and applies at once; 'custom' blanks the model so the free-form input
+  // takes over, and that is the one keeper edit with nothing to write yet — it
+  // waits for the input's blur.
   const handleKeeperModelSelection = useCallback((dutyKey: KeeperDutyKey, model: string) => {
-    setKeeperDrafts((prev) => ({
-      ...prev,
-      [dutyKey]: { ...prev[dutyKey], model: model === 'custom' ? '' : model },
-    }));
-  }, []);
+    const next = model === 'custom' ? '' : model;
+    setKeeperDrafts((prev) => ({ ...prev, [dutyKey]: { ...prev[dutyKey], model: next } }));
+    if (next) commitKeeperDuty(dutyKey, keeperDrafts[dutyKey].agent, next);
+  }, [commitKeeperDuty, keeperDrafts]);
 
   const handleKeeperCustomModelChange = useCallback((dutyKey: KeeperDutyKey, model: string) => {
     setKeeperDrafts((prev) => ({
@@ -745,15 +791,10 @@ export function SettingsModal({
     }));
   }, []);
 
-  const saveKeeperDuty = useCallback((dutyKey: KeeperDutyKey) => {
+  const commitKeeperCustomModel = useCallback((dutyKey: KeeperDutyKey) => {
     const draft = keeperDrafts[dutyKey];
-    const model = draft.model.trim();
-    if (!draft.agent || !model) return;
-    onSetSetting(
-      KEEPER_DUTY_BY_KEY[dutyKey].settingKey,
-      serializeKeeperConfig({ agent: draft.agent, model }),
-    );
-  }, [keeperDrafts, onSetSetting]);
+    commitKeeperDuty(dutyKey, draft.agent, draft.model);
+  }, [commitKeeperDuty, keeperDrafts]);
 
   // Clearing writes a blank override. For an opt-in duty that disables it; for a
   // default-configured duty it reverts to the built-in tier default. Either way the
@@ -770,22 +811,25 @@ export function SettingsModal({
   const commitReviewerModel = useCallback(() => {
     if (reviewerModel !== actualReviewerModel) {
       onSetSetting('reviewer_model', reviewerModel);
+      savedFlash.flash('reviewer_model');
     }
-  }, [actualReviewerModel, onSetSetting, reviewerModel]);
+  }, [actualReviewerModel, onSetSetting, reviewerModel, savedFlash]);
 
   const commitChiefContextCap = useCallback(() => {
     const next = chiefContextCap.trim();
     if (next !== actualChiefContextCap.trim()) {
       onSetSetting('chief_context_window_cap', next);
+      savedFlash.flash('chief_context_window_cap');
     }
-  }, [chiefContextCap, actualChiefContextCap, onSetSetting]);
+  }, [chiefContextCap, actualChiefContextCap, onSetSetting, savedFlash]);
 
   const commitHeadlessContextCap = useCallback(() => {
     const next = headlessContextCap.trim();
     if (next !== actualHeadlessContextCap.trim()) {
       onSetSetting('headless_context_window_cap', next);
+      savedFlash.flash('headless_context_window_cap');
     }
-  }, [headlessContextCap, actualHeadlessContextCap, onSetSetting]);
+  }, [headlessContextCap, actualHeadlessContextCap, onSetSetting, savedFlash]);
 
   const handleDefaultContextCapChange = useCallback((agent: SessionAgent, value: string) => {
     setDefaultContextCaps((prev) => ({ ...prev, [agent]: value }));
@@ -796,8 +840,9 @@ export function SettingsModal({
     const currentValue = (actualDefaultContextCaps[agent] || '').trim();
     if (nextValue !== currentValue) {
       onSetSetting(`default_context_window_cap_${agent}`, nextValue);
+      savedFlash.flash(`default_context_window_cap_${agent}`);
     }
-  }, [actualDefaultContextCaps, defaultContextCaps, onSetSetting]);
+  }, [actualDefaultContextCaps, defaultContextCaps, onSetSetting, savedFlash]);
 
   const handleAddEndpoint = useCallback(async () => {
     const name = newEndpointName.trim();
@@ -1006,8 +1051,12 @@ export function SettingsModal({
     setPluginPriorityDrafts((prev) => ({ ...prev, [name]: value }));
   }, []);
 
-  const handleSavePluginPriority = useCallback(async (name: string) => {
+  // Commits on blur rather than behind a Save button. Priority is a dispatch
+  // order, so a half-typed one applies nothing worse than a different order,
+  // and a blur is the first moment the number is whole.
+  const commitPluginPriority = useCallback(async (name: string, current: number) => {
     const raw = (pluginPriorityDrafts[name] ?? '').trim();
+    if (raw === String(current)) return;
     const priority = Number(raw);
     if (!Number.isInteger(priority)) {
       setPluginError('Plugin priority must be an integer');
@@ -1018,12 +1067,13 @@ export function SettingsModal({
     try {
       await onSetPluginPriority(name, priority);
       await refreshPlugins();
+      savedFlash.flash(`plugin_priority_${name}`);
     } catch (error) {
       setPluginError(error instanceof Error ? error.message : 'Failed to update plugin priority');
     } finally {
       setPluginActionName(null);
     }
-  }, [onSetPluginPriority, pluginPriorityDrafts, refreshPlugins]);
+  }, [onSetPluginPriority, pluginPriorityDrafts, refreshPlugins, savedFlash]);
 
   const connectedEndpointCount = endpoints.filter((endpoint) => endpoint.status === 'connected').length;
   const activePluginCount = plugins.filter((plugin) => plugin.connected || plugin.running).length;
@@ -1033,17 +1083,65 @@ export function SettingsModal({
   const hasProjectsDirChange = projectsDir !== actualProjectsDir;
   const hasReviewModelChange = reviewerModel !== actualReviewerModel;
 
+  // Grouped by what the user is trying to do, not by the subsystem the code
+  // talks to. Auto mode used to sit under Background Tasks because both landed
+  // in the same week of work; it belongs with the agents whose reach it decides.
   const settingsNavGroups = useMemo<SettingsNavGroup[]>(() => [
     {
-      label: 'General',
+      label: 'attn',
       items: [
         {
           id: 'general',
-          label: 'Appearance and projects',
-          title: 'Appearance, project roots, and Notebook',
-          description: 'Theme selection, the directory attn uses when opening repositories and worktrees, and where your Notebook lives.',
+          label: 'Appearance',
+          title: 'Appearance',
+          description: 'Theme and text size, for the app and for the garden.',
+          count: 2,
+          keywords: 'theme appearance dark light system font size text scale zoom garden',
+        },
+        {
+          id: 'workspace',
+          label: 'Files and locations',
+          title: 'Files and locations',
+          description: 'Where attn opens repositories and worktrees, where your Notebook lives, and what it does with a file an agent sends you.',
           count: 3,
-          keywords: 'theme appearance dark light system projects directory worktrees roots notebook folder knowledge base journal location',
+          keywords: 'projects directory worktrees roots notebook folder knowledge base journal location sent files tiles open markdown',
+        },
+        {
+          id: 'hygiene',
+          label: 'Attention queue',
+          title: 'Attention queue',
+          description: 'When a turn settles itself, and which repositories and authors never reach the queue at all.',
+          count: mutedItemCount + 1,
+          keywords: 'muted repositories repos authors hide unmute hygiene auto-settle settle turn countdown sidebar attention queue',
+        },
+      ],
+    },
+    {
+      label: 'Agents',
+      items: [
+        {
+          id: 'agents',
+          label: 'Executables and models',
+          title: 'Agents and models',
+          description: 'Which binary each agent runs, which model and effort it launches with, its context caps, and how its terminal is hosted.',
+          count: orderedAgentList.length + 7,
+          keywords: 'agents executables claude codex cursor default capabilities pty backend editor model effort chief reviewer review sdk context window cap tokens compaction headless workflows auto-approve unattended',
+        },
+        {
+          id: 'keeper',
+          label: 'Context maintenance',
+          title: 'Context maintenance',
+          description: 'The keeper: which agent summarizes, narrates and compacts your workspace context, and whether it runs at all.',
+          count: 4,
+          keywords: 'keeper context maintenance summarize summaries narrate compact background tasks duty roster haiku costs',
+        },
+        {
+          id: 'autoMode',
+          label: 'Auto mode',
+          title: 'Auto mode',
+          description: "Work inside a session's own directory runs free; anything reaching further is judged by a classifier against what the conversation asked for. Edit the two pattern lists here, and promote what agents propose.",
+          count: autoModePolicy.pendingCount,
+          keywords: 'auto mode automode pi safety envelope classifier proposals promote discard allow deny hard deny patterns policy permissions denials',
         },
       ],
     },
@@ -1074,20 +1172,7 @@ export function SettingsModal({
       ],
     },
     {
-      label: 'Agents',
-      items: [
-        {
-          id: 'agents',
-          label: 'Executables and defaults',
-          title: 'Agent runtime',
-          description: 'Agent executable paths, defaults, context maintenance, capabilities, and PTY runtime mode.',
-          count: orderedAgentList.length + 8,
-          keywords: 'agents executables claude codex cursor default capabilities pty backend editor context keeper compact model summaries summarize haiku costs workflows auto-approve unattended chief context window cap tokens compaction auto-compact headless',
-        },
-      ],
-    },
-    {
-      label: 'Background Tasks',
+      label: 'System',
       items: [
         {
           id: 'backgroundTasks',
@@ -1106,51 +1191,12 @@ export function SettingsModal({
           keywords: 'event bus log durable facts producers consumers cursor lag retention compaction trim stalled disabled kill switch seq',
         },
         {
-          id: 'autoMode',
-          label: 'Auto mode',
-          title: 'Auto mode',
-          description: "pi's safety envelope: the policy sessions launch with, and the rule changes agents have proposed.",
-          count: autoModePolicy.pendingCount,
-          keywords: 'auto mode automode pi safety envelope classifier proposals promote discard allow deny hard deny patterns policy permissions',
-        },
-      ],
-    },
-    {
-      label: 'Data',
-      items: [
-        {
           id: 'data',
           label: 'Model data capture',
           title: 'Local model data capture',
           description: 'Opt-in collection of visible Codex and Claude terminal viewports for local model evaluation and training.',
           count: 3,
           keywords: 'model training dataset capture privacy terminal viewport local retention sampling',
-        },
-      ],
-    },
-    {
-      label: 'Review',
-      items: [
-        {
-          id: 'review',
-          label: 'Reviewer model',
-          title: 'Reviewer model',
-          description: 'Model override for SDK-based review work.',
-          count: 1,
-          keywords: 'review model reviewer',
-        },
-      ],
-    },
-    {
-      label: 'Hygiene',
-      items: [
-        {
-          id: 'hygiene',
-          label: 'Muted repos and authors',
-          title: 'Muted repositories and authors',
-          description: 'Repositories and authors hidden from the attention queue.',
-          count: mutedItemCount,
-          keywords: 'muted repositories repos authors hide unmute hygiene',
         },
       ],
     },
@@ -1212,16 +1258,16 @@ export function SettingsModal({
             <span className={`settings-pill ${hasAvailableAgents ? 'good' : 'bad'}`}>
               {availableAgentCount}/{orderedAgentList.length} available
             </span>
-            <span className="settings-pill">
-              {keeperTasksEnabled ? 'keeper on' : 'keeper off'}
+            <span className={`settings-pill ${hasReviewModelChange ? 'warn' : 'good'}`}>
+              {hasReviewModelChange ? 'reviewer model edited' : 'reviewer model saved'}
             </span>
           </>
         );
-      case 'review':
+      case 'keeper':
         return (
           <>
-            <span className={`settings-pill ${hasReviewModelChange ? 'warn' : 'good'}`}>
-              {hasReviewModelChange ? 'unsaved edits' : 'model saved'}
+            <span className={`settings-pill ${keeperTasksEnabled ? 'good' : ''}`}>
+              {keeperTasksEnabled ? 'keeper on' : 'keeper off'}
             </span>
           </>
         );
@@ -1252,8 +1298,22 @@ export function SettingsModal({
       case 'hygiene':
         return (
           <>
+            <span className={`settings-pill ${autoSettleEnabled ? 'good' : ''}`}>
+              {autoSettleEnabled ? 'auto-settle on' : 'auto-settle off'}
+            </span>
             <span className="settings-pill">{mutedRepos.length} repos</span>
             <span className="settings-pill">{mutedAuthors.length} authors</span>
+          </>
+        );
+      case 'workspace':
+        return (
+          <>
+            <span className={`settings-pill ${hasProjectsDirChange ? 'warn' : 'good'}`}>
+              {hasProjectsDirChange ? 'project path edited' : 'project path saved'}
+            </span>
+            <span className={`settings-pill ${openSentFilesEnabled ? 'good' : ''}`}>
+              {openSentFilesEnabled ? 'sent files open' : 'sent files ignored'}
+            </span>
           </>
         );
       case 'general':
@@ -1261,15 +1321,16 @@ export function SettingsModal({
         return (
           <>
             <span className="settings-pill">{themePreference}</span>
-            <span className={`settings-pill ${hasProjectsDirChange ? 'warn' : 'good'}`}>
-              {hasProjectsDirChange ? 'project path edited' : 'project path saved'}
-            </span>
+            <span className="settings-pill">{Math.round(uiScale * 100)}% text</span>
           </>
         );
     }
   };
 
-  const renderGeneralSettings = () => (
+  // Appearance: how attn looks, and nothing else. Where the user's things live
+  // moved to renderWorkspaceSettings, and when a turn leaves the queue moved to
+  // the attention-queue section beside the muted lists.
+  const renderAppearanceSettings = () => (
     <>
       <section className="settings-block">
         <div className="settings-block-intro">
@@ -1398,126 +1459,13 @@ export function SettingsModal({
           </div>
         </div>
       </section>
+    </>
+  );
 
-      <section className="settings-block">
-        <div className="settings-block-intro">
-          <div className="settings-kicker">Workspace</div>
-          <h3>Sent files</h3>
-          <p className="settings-description">
-            When an agent hands you a file with its send-file tool, attn opens the ones it
-            can show as workspace tiles. On by default.
-          </p>
-        </div>
-        <div className="settings-block-body">
-          <div className="settings-row-card">
-            <div>
-              <p className="settings-row-title">Open files agents send you</p>
-              <p className="settings-row-copy">
-                A markdown file an agent sends opens as a live-reloading tile beside its
-                terminal, so you see it without hunting through the transcript. File types
-                attn cannot show are left alone.
-              </p>
-            </div>
-            <button
-              type="button"
-              className="settings-action"
-              data-testid="settings-open-sent-files-toggle"
-              onClick={handleToggleOpenSentFiles}
-            >
-              {openSentFilesEnabled ? 'Disable' : 'Enable'}
-            </button>
-          </div>
-        </div>
-      </section>
-
-      <section className="settings-block">
-        <div className="settings-block-intro">
-          <div className="settings-kicker">Sidebar</div>
-          <h3>Auto-settle</h3>
-          <p className="settings-description">
-            Closes a turn for you once you have steered the agent and walked away, so the queue
-            does not fill up with turns you have already dealt with. Off by default.
-          </p>
-        </div>
-        <div className="settings-block-body">
-          <div className="settings-row-card">
-            <div>
-              <p className="settings-row-title">Settle a turn once you have steered the agent</p>
-              <p className="settings-row-copy">
-                When an agent you owe a turn goes back to work and stays there, its terminal
-                tile runs a countdown and then settles the turn for you — the same thing ⌘⇧E
-                does. Press ⌘. to keep the turn instead. Anything that makes the agent want you
-                again — a question, an approval, an error, a finished run — cancels it. Off by
-                default.
-              </p>
-            </div>
-            <button
-              type="button"
-              className="settings-action"
-              data-testid="settings-auto-settle-toggle"
-              onClick={handleToggleAutoSettle}
-            >
-              {autoSettleEnabled ? 'Disable' : 'Enable'}
-            </button>
-          </div>
-
-          <div className="settings-field-grid">
-            <div className="settings-field">
-              <label className="settings-label" htmlFor="settings-auto-settle-arm">
-                Wait before counting down (seconds)
-              </label>
-              <input
-                id="settings-auto-settle-arm"
-                data-testid="settings-auto-settle-arm"
-                type="number"
-                min={5}
-                max={3600}
-                step={5}
-                value={autoSettleArm}
-                onChange={(e) => setAutoSettleArm(e.target.value)}
-                onBlur={commitAutoSettleArm}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    commitAutoSettleArm();
-                  }
-                }}
-                className="settings-input"
-              />
-              <p className="settings-hint">
-                How long the agent must keep working before anything starts. Nothing is shown
-                during this window.
-              </p>
-            </div>
-            <div className="settings-field">
-              <label className="settings-label" htmlFor="settings-auto-settle-countdown">
-                Countdown before settling (seconds)
-              </label>
-              <input
-                id="settings-auto-settle-countdown"
-                data-testid="settings-auto-settle-countdown"
-                type="number"
-                min={3}
-                max={600}
-                step={1}
-                value={autoSettleCountdown}
-                onChange={(e) => setAutoSettleCountdown(e.target.value)}
-                onBlur={commitAutoSettleCountdown}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    commitAutoSettleCountdown();
-                  }
-                }}
-                className="settings-input"
-              />
-              <p className="settings-hint">
-                How long the countdown runs on the tile — your window to press ⌘. and keep the
-                turn.
-              </p>
-            </div>
-          </div>
-        </div>
-      </section>
-
+  // One question: where the user's things live, and what attn does with a file
+  // an agent hands them.
+  const renderWorkspaceSettings = () => (
+    <>
       <section className="settings-block">
         <div className="settings-block-intro">
           <div className="settings-kicker">Projects</div>
@@ -1540,6 +1488,10 @@ export function SettingsModal({
               autoCapitalize="none"
               autoCorrect="off"
               spellCheck={false}
+            />
+            <SavedMark
+              shown={savedFlash.saved('projects_directory')}
+              testID="settings-projects-directory-saved"
             />
             <button className="settings-action" onClick={handleBrowse}>
               Browse
@@ -1574,6 +1526,7 @@ export function SettingsModal({
               autoCorrect="off"
               spellCheck={false}
             />
+            <SavedMark shown={savedFlash.saved('notebook.root')} testID="settings-notebook-root-saved" />
             <button className="settings-action" onClick={handleBrowseNotebookRoot}>
               Browse
             </button>
@@ -1583,6 +1536,37 @@ export function SettingsModal({
               Currently: <code>{effectiveNotebookRoot}</code>
             </p>
           )}
+        </div>
+      </section>
+
+      <section className="settings-block">
+        <div className="settings-block-intro">
+          <div className="settings-kicker">Workspace</div>
+          <h3>Sent files</h3>
+          <p className="settings-description">
+            When an agent hands you a file with its send-file tool, attn opens the ones it
+            can show as workspace tiles. On by default.
+          </p>
+        </div>
+        <div className="settings-block-body">
+          <div className="settings-row-card">
+            <div>
+              <p className="settings-row-title">Open files agents send you</p>
+              <p className="settings-row-copy">
+                A markdown file an agent sends opens as a live-reloading tile beside its
+                terminal, so you see it without hunting through the transcript. File types
+                attn cannot show are left alone.
+              </p>
+            </div>
+            <button
+              type="button"
+              className="settings-action"
+              data-testid="settings-open-sent-files-toggle"
+              onClick={handleToggleOpenSentFiles}
+            >
+              {openSentFilesEnabled ? 'Disable' : 'Enable'}
+            </button>
+          </div>
         </div>
       </section>
     </>
@@ -2019,17 +2003,20 @@ export function SettingsModal({
                         type="number"
                         value={draftPriority}
                         onChange={(e) => handlePluginPriorityChange(plugin.name, e.target.value)}
+                        onBlur={() => void commitPluginPriority(plugin.name, plugin.priority)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            void commitPluginPriority(plugin.name, plugin.priority);
+                          }
+                        }}
                         className="settings-input plugin-priority-input"
                         aria-label={`${plugin.name} priority`}
                         disabled={pluginActionName !== null}
                       />
-                      <button
-                        className="settings-action"
-                        onClick={() => void handleSavePluginPriority(plugin.name)}
-                        disabled={pluginActionName !== null || draftPriority === String(plugin.priority)}
-                      >
-                        Save
-                      </button>
+                      <SavedMark
+                        shown={savedFlash.saved(`plugin_priority_${plugin.name}`)}
+                        testID={`settings-plugin-priority-saved-${plugin.name}`}
+                      />
                     </label>}
                   </div>
                   {busy && <div className="settings-hint">Updating {plugin.name}...</div>}
@@ -2081,6 +2068,7 @@ export function SettingsModal({
                     autoCorrect="off"
                     spellCheck={false}
                   />
+                  <SavedMark shown={savedFlash.saved(`${agent}_executable`)} testID={`settings-executable-saved-${agent}`} />
                 </div>
               );
             })}
@@ -2100,6 +2088,7 @@ export function SettingsModal({
                 autoCorrect="off"
                 spellCheck={false}
               />
+              <SavedMark shown={savedFlash.saved('editor_executable')} testID="settings-editor-saved" />
             </div>
           </div>
         </div>
@@ -2132,160 +2121,6 @@ export function SettingsModal({
                 >
                   {agentLabel(agent)}
                 </button>
-              );
-            })}
-          </div>
-        </div>
-      </section>
-
-      <section className="settings-block">
-        <div className="settings-block-intro">
-          <div className="settings-kicker">Notebook</div>
-          <h3>Keeper</h3>
-          <p className="settings-description">
-            The keeper runs three background duties off the notebook: it summarizes finished
-            sessions, curates the work journal, and compacts large shared workspace contexts.
-            Each duty picks its own non-interactive agent and model.
-          </p>
-        </div>
-        <div className="settings-block-body">
-          <div className="settings-row-card">
-            <div>
-              <p className="settings-row-title">Background tasks</p>
-              <p className="settings-row-copy">
-                Master switch for every keeper duty below. While off, the keeper queues and
-                runs no background work; the per-duty agent and model stay configurable.
-                Turning it off won't interrupt a run already in flight.
-              </p>
-            </div>
-            <button
-              type="button"
-              className="settings-action"
-              data-testid="settings-keeper-tasks-toggle"
-              onClick={handleToggleKeeperTasks}
-            >
-              {keeperTasksEnabled ? 'Disable' : 'Enable'}
-            </button>
-          </div>
-          {keeperAgents.length === 0 && (
-            <div className="settings-warning">No installed agent supports scoped headless tasks.</div>
-          )}
-          <div className={`settings-keeper-duties${keeperTasksEnabled ? '' : ' is-disabled'}`}>
-            {KEEPER_DUTIES.map((duty) => {
-              const draft = keeperDrafts[duty.key];
-              const presets = duty.modelPresets(draft.agent);
-              const modelSelection = keeperDutyModelSelection(duty.key, draft.agent, draft.model);
-              const hasOverride = actualKeeperConfigs[duty.key] !== null;
-              const agentId = `${duty.testIdPrefix}-agent`;
-              const modelId = `${duty.testIdPrefix}-model`;
-              const customId = `${duty.testIdPrefix}-model-custom`;
-              const dutyEnabled = keeperDutyEnabled[duty.key];
-              return (
-                <div
-                  className={`settings-keeper-duty${dutyEnabled ? '' : ' is-disabled'}`}
-                  key={duty.key}
-                >
-                  <div className="settings-keeper-duty-head">
-                    <div>
-                      <p className="settings-row-title">{duty.title}</p>
-                      <p className="settings-row-copy">{duty.description}</p>
-                    </div>
-                    {duty.enabledSettingKey && (
-                      <button
-                        type="button"
-                        className="settings-action"
-                        data-testid={`${duty.testIdPrefix}-toggle`}
-                        aria-label={`${dutyEnabled ? 'Disable' : 'Enable'} ${duty.title.toLowerCase()}`}
-                        onClick={() => handleToggleKeeperDuty(duty.key)}
-                      >
-                        {dutyEnabled ? 'Disable' : 'Enable'}
-                      </button>
-                    )}
-                  </div>
-                  <div className="settings-field-grid two-column">
-                    <div className="settings-field">
-                      <label className="settings-label" htmlFor={agentId}>Agent</label>
-                      <select
-                        id={agentId}
-                        data-testid={agentId}
-                        className="settings-input"
-                        value={draft.agent}
-                        onChange={(event) => handleKeeperAgentChange(duty.key, event.target.value as SessionAgent | '')}
-                      >
-                        {duty.optInOnly && <option value="">Disabled</option>}
-                        {keeperAgents.map((agent) => (
-                          <option key={agent} value={agent}>{agentLabel(agent)}</option>
-                        ))}
-                      </select>
-                    </div>
-                    <div className="settings-field">
-                      <label className="settings-label" htmlFor={modelId}>Model</label>
-                      <select
-                        id={modelId}
-                        data-testid={modelId}
-                        value={modelSelection}
-                        onChange={(event) => handleKeeperModelSelection(duty.key, event.target.value)}
-                        className="settings-input"
-                        disabled={!draft.agent}
-                      >
-                        {!draft.agent && <option value="">Select an agent</option>}
-                        {presets.map((preset) => (
-                          <option key={preset.value} value={preset.value}>{preset.label}</option>
-                        ))}
-                        <option value="custom">Custom...</option>
-                      </select>
-                    </div>
-                  </div>
-                  {draft.agent && modelSelection === 'custom' && (
-                    <div className="settings-field">
-                      <label className="settings-label" htmlFor={customId}>Custom model</label>
-                      <input
-                        id={customId}
-                        data-testid={customId}
-                        type="text"
-                        value={draft.model}
-                        onChange={(event) => handleKeeperCustomModelChange(duty.key, event.target.value)}
-                        placeholder={draft.agent === 'claude' ? 'claude-opus-4-6' : 'model ID'}
-                        className="settings-input"
-                        autoCapitalize="none"
-                        autoCorrect="off"
-                        spellCheck={false}
-                      />
-                    </div>
-                  )}
-                  <div className="settings-row-inline">
-                    <button
-                      type="button"
-                      className="settings-action"
-                      data-testid={`${duty.testIdPrefix}-save`}
-                      onClick={() => saveKeeperDuty(duty.key)}
-                      disabled={!draft.agent || !draft.model.trim()}
-                    >
-                      Save
-                    </button>
-                    <button
-                      type="button"
-                      className="settings-action"
-                      data-testid={`${duty.testIdPrefix}-clear`}
-                      onClick={() => clearKeeperDuty(duty.key)}
-                      disabled={!hasOverride}
-                    >
-                      {duty.optInOnly ? 'Disable' : 'Use default'}
-                    </button>
-                  </div>
-                  {duty.optInOnly ? (
-                    <div className="settings-hint">
-                      Runs after a 10-minute debounce when canonical context exceeds 12 KiB. Use
-                      `attn workspace context compact` to run it immediately.
-                    </div>
-                  ) : (
-                    <div className="settings-hint">
-                      {duty.enabledSettingKey && !dutyEnabled
-                        ? `Disabled. Its ${duty.defaultLabel} model setting is preserved.`
-                        : `Defaults to ${duty.defaultLabel} when unset.`}
-                    </div>
-                  )}
-                </div>
               );
             })}
           </div>
@@ -2404,6 +2239,7 @@ export function SettingsModal({
                         autoCorrect="off"
                         spellCheck={false}
                       />
+                      <SavedMark shown={savedFlash.saved(`chief_model_${agent}`)} testID={`settings-chief-model-saved-${agent}`} />
                     </div>
                     <div className="settings-field">
                       <label className="settings-label" htmlFor={effortId}>{agentLabel(agent)} effort</label>
@@ -2472,6 +2308,7 @@ export function SettingsModal({
                         autoCorrect="off"
                         spellCheck={false}
                       />
+                      <SavedMark shown={savedFlash.saved(`default_model_${agent}`)} testID={`settings-default-model-saved-${agent}`} />
                     </div>
                     <div className="settings-field">
                       <label className="settings-label" htmlFor={effortId}>{agentLabel(agent)} effort</label>
@@ -2533,6 +2370,7 @@ export function SettingsModal({
                 }}
                 className="settings-input"
               />
+              <SavedMark shown={savedFlash.saved('chief_context_window_cap')} testID="settings-chief-context-cap-saved" />
             </div>
             <div className="settings-field">
               <label className="settings-label" htmlFor="settings-headless-context-cap">Headless runs</label>
@@ -2553,6 +2391,7 @@ export function SettingsModal({
                 }}
                 className="settings-input"
               />
+              <SavedMark shown={savedFlash.saved('headless_context_window_cap')} testID="settings-headless-context-cap-saved" />
             </div>
             {defaultOverrideAgentList.map((agent) => {
               const inputId = `settings-default-context-cap-${agent}`;
@@ -2577,6 +2416,7 @@ export function SettingsModal({
                     placeholder="blank — agent default"
                     className="settings-input"
                   />
+                  <SavedMark shown={savedFlash.saved(`default_context_window_cap_${agent}`)} testID={`settings-default-context-cap-saved-${agent}`} />
                 </div>
               );
             })}
@@ -2646,11 +2486,7 @@ export function SettingsModal({
           </div>
         </div>
       </section>
-    </>
-  );
 
-  const renderReviewSettings = () => (
-    <>
       <section className="settings-block">
         <div className="settings-block-intro">
           <div className="settings-kicker">Models</div>
@@ -2680,7 +2516,165 @@ export function SettingsModal({
                 autoCorrect="off"
                 spellCheck={false}
               />
+              <SavedMark shown={savedFlash.saved('reviewer_model')} testID="settings-reviewer-model-saved" />
             </div>
+          </div>
+        </div>
+      </section>
+    </>
+  );
+
+  const renderKeeperSettings = () => (
+    <>
+      <section className="settings-block">
+        <div className="settings-block-intro">
+          <div className="settings-kicker">Notebook</div>
+          <h3>Keeper</h3>
+          <p className="settings-description">
+            The keeper runs three background duties off the notebook: it summarizes finished
+            sessions, curates the work journal, and compacts large shared workspace contexts.
+            Each duty picks its own non-interactive agent and model.
+          </p>
+        </div>
+        <div className="settings-block-body">
+          <div className="settings-row-card">
+            <div>
+              <p className="settings-row-title">Background tasks</p>
+              <p className="settings-row-copy">
+                Master switch for every keeper duty below. While off, the keeper queues and
+                runs no background work; the per-duty agent and model stay configurable.
+                Turning it off won't interrupt a run already in flight.
+              </p>
+            </div>
+            <button
+              type="button"
+              className="settings-action"
+              data-testid="settings-keeper-tasks-toggle"
+              onClick={handleToggleKeeperTasks}
+            >
+              {keeperTasksEnabled ? 'Disable' : 'Enable'}
+            </button>
+          </div>
+          {keeperAgents.length === 0 && (
+            <div className="settings-warning">No installed agent supports scoped headless tasks.</div>
+          )}
+          <div className={`settings-keeper-duties${keeperTasksEnabled ? '' : ' is-disabled'}`}>
+            {KEEPER_DUTIES.map((duty) => {
+              const draft = keeperDrafts[duty.key];
+              const presets = duty.modelPresets(draft.agent);
+              const modelSelection = keeperDutyModelSelection(duty.key, draft.agent, draft.model);
+              const hasOverride = actualKeeperConfigs[duty.key] !== null;
+              const agentId = `${duty.testIdPrefix}-agent`;
+              const modelId = `${duty.testIdPrefix}-model`;
+              const customId = `${duty.testIdPrefix}-model-custom`;
+              const dutyEnabled = keeperDutyEnabled[duty.key];
+              return (
+                <div
+                  className={`settings-keeper-duty${dutyEnabled ? '' : ' is-disabled'}`}
+                  key={duty.key}
+                >
+                  <div className="settings-keeper-duty-head">
+                    <div>
+                      <p className="settings-row-title">{duty.title}</p>
+                      <p className="settings-row-copy">{duty.description}</p>
+                    </div>
+                    {duty.enabledSettingKey && (
+                      <button
+                        type="button"
+                        className="settings-action"
+                        data-testid={`${duty.testIdPrefix}-toggle`}
+                        aria-label={`${dutyEnabled ? 'Disable' : 'Enable'} ${duty.title.toLowerCase()}`}
+                        onClick={() => handleToggleKeeperDuty(duty.key)}
+                      >
+                        {dutyEnabled ? 'Disable' : 'Enable'}
+                      </button>
+                    )}
+                  </div>
+                  <div className="settings-field-grid two-column">
+                    <div className="settings-field">
+                      <label className="settings-label" htmlFor={agentId}>Agent</label>
+                      <select
+                        id={agentId}
+                        data-testid={agentId}
+                        className="settings-input"
+                        value={draft.agent}
+                        onChange={(event) => handleKeeperAgentChange(duty.key, event.target.value as SessionAgent | '')}
+                      >
+                        {duty.optInOnly && <option value="">Disabled</option>}
+                        {keeperAgents.map((agent) => (
+                          <option key={agent} value={agent}>{agentLabel(agent)}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="settings-field">
+                      <label className="settings-label" htmlFor={modelId}>Model</label>
+                      <select
+                        id={modelId}
+                        data-testid={modelId}
+                        value={modelSelection}
+                        onChange={(event) => handleKeeperModelSelection(duty.key, event.target.value)}
+                        className="settings-input"
+                        disabled={!draft.agent}
+                      >
+                        {!draft.agent && <option value="">Select an agent</option>}
+                        {presets.map((preset) => (
+                          <option key={preset.value} value={preset.value}>{preset.label}</option>
+                        ))}
+                        <option value="custom">Custom...</option>
+                      </select>
+                    </div>
+                  </div>
+                  {draft.agent && modelSelection === 'custom' && (
+                    <div className="settings-field">
+                      <label className="settings-label" htmlFor={customId}>Custom model</label>
+                      <input
+                        id={customId}
+                        data-testid={customId}
+                        type="text"
+                        value={draft.model}
+                        onChange={(event) => handleKeeperCustomModelChange(duty.key, event.target.value)}
+                        onBlur={() => commitKeeperCustomModel(duty.key)}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter') commitKeeperCustomModel(duty.key);
+                        }}
+                        placeholder={draft.agent === 'claude' ? 'claude-opus-4-6' : 'model ID'}
+                        className="settings-input"
+                        autoCapitalize="none"
+                        autoCorrect="off"
+                        spellCheck={false}
+                      />
+                    </div>
+                  )}
+                  <div className="settings-row-inline">
+                    <SavedMark
+                      shown={savedFlash.saved(duty.settingKey)}
+                      testID={`${duty.testIdPrefix}-saved`}
+                    />
+                    <button
+                      type="button"
+                      className="settings-action"
+                      data-testid={`${duty.testIdPrefix}-clear`}
+                      onClick={() => clearKeeperDuty(duty.key)}
+                      disabled={!hasOverride}
+                    >
+                      {duty.optInOnly ? 'Disable' : 'Use default'}
+                    </button>
+                  </div>
+                  {duty.optInOnly ? (
+                    <div className="settings-hint">
+                      Runs after a 10-minute debounce when canonical context exceeds 12 KiB. Use
+                      `attn workspace context compact` to run it immediately.
+                    </div>
+                  ) : (
+                    <div className="settings-hint">
+                      {duty.enabledSettingKey && !dutyEnabled
+                        ? `Disabled. Its ${duty.defaultLabel} model setting is preserved.`
+                        : `Defaults to ${duty.defaultLabel} when unset.`}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
       </section>
@@ -2782,6 +2776,96 @@ export function SettingsModal({
     <>
       <section className="settings-block">
         <div className="settings-block-intro">
+          <div className="settings-kicker">Sidebar</div>
+          <h3>Auto-settle</h3>
+          <p className="settings-description">
+            Closes a turn for you once you have steered the agent and walked away, so the queue
+            does not fill up with turns you have already dealt with. Off by default.
+          </p>
+        </div>
+        <div className="settings-block-body">
+          <div className="settings-row-card">
+            <div>
+              <p className="settings-row-title">Settle a turn once you have steered the agent</p>
+              <p className="settings-row-copy">
+                When an agent you owe a turn goes back to work and stays there, its terminal
+                tile runs a countdown and then settles the turn for you — the same thing ⌘⇧E
+                does. Press ⌘. to keep the turn instead. Anything that makes the agent want you
+                again — a question, an approval, an error, a finished run — cancels it. Off by
+                default.
+              </p>
+            </div>
+            <button
+              type="button"
+              className="settings-action"
+              data-testid="settings-auto-settle-toggle"
+              onClick={handleToggleAutoSettle}
+            >
+              {autoSettleEnabled ? 'Disable' : 'Enable'}
+            </button>
+          </div>
+
+          <div className="settings-field-grid">
+            <div className="settings-field">
+              <label className="settings-label" htmlFor="settings-auto-settle-arm">
+                Wait before counting down (seconds)
+              </label>
+              <input
+                id="settings-auto-settle-arm"
+                data-testid="settings-auto-settle-arm"
+                type="number"
+                min={5}
+                max={3600}
+                step={5}
+                value={autoSettleArm}
+                onChange={(e) => setAutoSettleArm(e.target.value)}
+                onBlur={commitAutoSettleArm}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    commitAutoSettleArm();
+                  }
+                }}
+                className="settings-input"
+              />
+              <SavedMark shown={savedFlash.saved(AUTO_SETTLE_ARM_SETTING)} testID="settings-auto-settle-arm-saved" />
+              <p className="settings-hint">
+                How long the agent must keep working before anything starts. Nothing is shown
+                during this window.
+              </p>
+            </div>
+            <div className="settings-field">
+              <label className="settings-label" htmlFor="settings-auto-settle-countdown">
+                Countdown before settling (seconds)
+              </label>
+              <input
+                id="settings-auto-settle-countdown"
+                data-testid="settings-auto-settle-countdown"
+                type="number"
+                min={3}
+                max={600}
+                step={1}
+                value={autoSettleCountdown}
+                onChange={(e) => setAutoSettleCountdown(e.target.value)}
+                onBlur={commitAutoSettleCountdown}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    commitAutoSettleCountdown();
+                  }
+                }}
+                className="settings-input"
+              />
+              <SavedMark shown={savedFlash.saved(AUTO_SETTLE_COUNTDOWN_SETTING)} testID="settings-auto-settle-countdown-saved" />
+              <p className="settings-hint">
+                How long the countdown runs on the tile — your window to press ⌘. and keep the
+                turn.
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="settings-block">
+        <div className="settings-block-intro">
           <div className="settings-kicker">Repositories</div>
           <h3>Muted Repositories</h3>
           <p className="settings-description">
@@ -2872,15 +2956,17 @@ export function SettingsModal({
   const renderSelectedSection = () => {
     switch (selectedSection) {
       case 'general':
-        return renderGeneralSettings();
+        return renderAppearanceSettings();
+      case 'workspace':
+        return renderWorkspaceSettings();
+      case 'keeper':
+        return renderKeeperSettings();
       case 'plugins':
         return renderPluginSettings();
       case 'agents':
         return renderAgentSettings();
       case 'data':
         return renderDataSettings();
-      case 'review':
-        return renderReviewSettings();
       case 'hygiene':
         return renderHygieneSettings();
       case 'backgroundTasks':

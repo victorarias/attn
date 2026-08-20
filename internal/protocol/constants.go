@@ -10,7 +10,7 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "264"
+const ProtocolVersion = "265"
 
 // Error codes. A failed response may carry one beside its message text, naming
 // what a caller can do about it rather than leaving it to match English. The
@@ -374,9 +374,11 @@ const (
 	CmdAutoModePropose   = "automode_propose"
 	CmdAutoModeDenials   = "automode_denials"
 
-	CmdAutoModeGet     = "automode_get"
-	CmdAutoModePromote = "automode_promote"
-	CmdAutoModeDiscard = "automode_discard"
+	CmdAutoModeGet           = "automode_get"
+	CmdAutoModePromote       = "automode_promote"
+	CmdAutoModeDiscard       = "automode_discard"
+	CmdAutoModePatternAdd    = "automode_pattern_add"
+	CmdAutoModePatternRemove = "automode_pattern_remove"
 )
 
 // Per-action automations result events (socket + WS share one command set;
@@ -522,6 +524,7 @@ const (
 	EventAutoModeStateResult             = "automode_state_result"
 	EventAutoModePromoteResult           = "automode_promote_result"
 	EventAutoModeDiscardResult           = "automode_discard_result"
+	EventAutoModePatternResult           = "automode_pattern_result"
 	EventSessionAnnotationsGetResult     = "session_annotations_get_result"
 	EventSessionAnnotationsSaveResult    = "session_annotations_save_result"
 	EventSessionAnnotationsClearResult   = "session_annotations_clear_result"
@@ -1991,6 +1994,20 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 		var msg AutoModeDiscardMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, fmt.Errorf("unmarshal automode_discard: %w", err)
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdAutoModePatternAdd:
+		var msg AutoModePatternAddMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, fmt.Errorf("unmarshal automode_pattern_add: %w", err)
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdAutoModePatternRemove:
+		var msg AutoModePatternRemoveMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, fmt.Errorf("unmarshal automode_pattern_remove: %w", err)
 		}
 		return peek.Cmd, &msg, nil
 

@@ -114,3 +114,55 @@
   gap: 10px;
   margin-top: 6px;
 }
+
+/* The two editable lists. A built-in hard deny reads as furniture — no button,
+   a label saying why — so the removable entries are the ones that look
+   actionable. */
+.automode-editor {
+  display: grid;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 6px;
+  background: var(--color-bg-elevated);
+}
+
+.automode-pattern-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 2px 0;
+}
+
+.automode-pattern-row.is-builtin .automode-value {
+  color: var(--color-text-tertiary);
+}
+
+.automode-pattern-add {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+}
+
+/* The denial ledger: what was refused, who decided, when. */
+.automode-denials {
+  display: grid;
+  gap: 4px;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 6px;
+  background: var(--color-bg-elevated);
+}
+
+.automode-denial {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.automode-denial-rule {
+  white-space: nowrap;
+}

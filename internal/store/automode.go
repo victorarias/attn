@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/victorarias/attn/internal/automode"
@@ -14,10 +15,11 @@ import (
 // waiting on a human, and the denials a session reported.
 //
 // The asymmetry between the two write paths is the point, and it lives here
-// rather than in any one caller: PromoteAutoModeProposal is the ONLY way a
-// pattern or a model reaches the config row, and it is reachable from the app
-// alone. Everything an agent can call writes a proposal, which changes nothing
-// a session launches with.
+// rather than in any one caller: PromoteAutoModeProposal, AddAutoModePattern
+// and RemoveAutoModePattern are the ONLY ways a pattern or a model reaches the
+// config row, and all three are reachable from the app alone. Everything an
+// agent can call writes a proposal, which changes nothing a session launches
+// with.
 //
 // Design: docs/plans/2026-08-16-pi-auto-mode.md.
 
@@ -142,6 +144,78 @@ func (s *Store) SetAutoModeEnabledDefault(enabled bool, now time.Time) (automode
 		cfg.EnabledDefault = enabled
 		return nil
 	})
+}
+
+// AddAutoModePattern adds one entry to the allow or hard-deny list, and
+// RemoveAutoModePattern takes one out. These are the app's direct-edit path:
+// only the WebSocket carries them, so what they change is still only ever
+// changed by a human, the same boundary PromoteAutoModeProposal sits on.
+//
+// Both go through mutateAutoModeConfig, which reads the config resolved and
+// writes it back stripped — so a shipped hard-deny is never persisted by an
+// edit that merely passed through the list it appears in.
+func (s *Store) AddAutoModePattern(list, pattern string, now time.Time) (automode.Config, error) {
+	pattern = strings.TrimSpace(pattern)
+	if err := automode.ValidatePattern(list, pattern); err != nil {
+		return automode.Config{}, err
+	}
+	return s.mutateAutoModeConfig(now, func(cfg *automode.Config) error {
+		values := autoModePatternList(cfg, list)
+		for _, existing := range *values {
+			if existing == pattern {
+				return fmt.Errorf("%q is already in the %s list", pattern, list)
+			}
+		}
+		*values = append(*values, pattern)
+		return nil
+	})
+}
+
+// RemoveAutoModePattern drops one entry. A shipped hard-deny is refused rather
+// than quietly ignored: it is resolved in at read, so a caller looking at the
+// list has every reason to think it is removable, and silence would read as a
+// removal that worked.
+func (s *Store) RemoveAutoModePattern(list, pattern string, now time.Time) (automode.Config, error) {
+	pattern = strings.TrimSpace(pattern)
+	if list != automode.ListAllow && list != automode.ListHardDeny {
+		return automode.Config{}, fmt.Errorf("unknown pattern list %q (want %s or %s)",
+			list, automode.ListAllow, automode.ListHardDeny)
+	}
+	if list == automode.ListHardDeny {
+		for _, shipped := range automode.ShippedHardDeny(config.WSPort()) {
+			if shipped == pattern {
+				return automode.Config{}, fmt.Errorf(
+					"%q is a built-in hard deny and cannot be removed: it is what stops a session "+
+						"under auto mode from rewriting its own policy", pattern)
+			}
+		}
+	}
+	return s.mutateAutoModeConfig(now, func(cfg *automode.Config) error {
+		values := autoModePatternList(cfg, list)
+		kept := make([]string, 0, len(*values))
+		found := false
+		for _, existing := range *values {
+			if existing == pattern {
+				found = true
+				continue
+			}
+			kept = append(kept, existing)
+		}
+		if !found {
+			return fmt.Errorf("%q is not in the %s list", pattern, list)
+		}
+		*values = kept
+		return nil
+	})
+}
+
+// autoModePatternList points at the field one list name means, so add and
+// remove share the naming rather than each switching on it.
+func autoModePatternList(cfg *automode.Config, list string) *[]string {
+	if list == automode.ListAllow {
+		return &cfg.Allow
+	}
+	return &cfg.HardDeny
 }
 
 // CreateAutoModeProposal records a proposed change. It validates first, so a

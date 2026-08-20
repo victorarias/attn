@@ -5278,6 +5278,11 @@ model AutoModeConfigInfo {
   "environment": string[];
   "allow": string[];
   "hard_deny": string[];
+  // The subset of "hard_deny" auto mode ships with rather than a human adding:
+  // resolved in at read, never stored, and not removable. It names this
+  // daemon's own WebSocket port, so a client cannot derive it and has to be
+  // told which entries are built-in.
+  "shipped_hard_deny": string[];
   "classifier_models": string[];
   "escalation_models": string[];
 }
@@ -5404,6 +5409,39 @@ model AutoModePromoteResultMessage {
   error?: string;
   proposal?: AutoModeProposalInfo;
   // The config as it stands after the promotion.
+  config?: AutoModeConfigInfo;
+}
+
+// Add one pattern to the allow or hard-deny list, or take one out. App-only,
+// for the same reason promotion is: the lists decide what a session may do
+// without asking, so only a human at the trust boundary edits them. An agent
+// reaching the unix socket still has nothing but `automode_propose`.
+//
+// "list" is "allow" or "hard_deny", naming the field in AutoModeConfigInfo. A
+// removal names the pattern rather than an index, because the hard-deny list a
+// client renders has the shipped entries resolved into it and an index into
+// that list is not an index into what is stored.
+model AutoModePatternAddMessage {
+  cmd: "automode_pattern_add";
+  list: string;
+  pattern: string;
+  request_id: string;
+}
+
+model AutoModePatternRemoveMessage {
+  cmd: "automode_pattern_remove";
+  list: string;
+  pattern: string;
+  request_id: string;
+}
+
+// Both edits answer with the config they produced, so the section re-renders
+// from what the daemon stored rather than from what it hoped it stored.
+model AutoModePatternResultMessage {
+  event: "automode_pattern_result";
+  request_id: string;
+  success: boolean;
+  error?: string;
   config?: AutoModeConfigInfo;
 }
 
@@ -6516,4 +6554,5 @@ alias DaemonEvent =
   | DocSubscriptionEndedMessage
   | AutoModeStateResultMessage
   | AutoModePromoteResultMessage
+  | AutoModePatternResultMessage
   | AutoModeDiscardResultMessage;

@@ -556,3 +556,156 @@ func containsString(values []string, want string) bool {
 	}
 	return false
 }
+
+// The app's direct-edit path. Everything here is what a human typing into the
+// settings section reaches; nothing an agent can call touches it.
+
+func TestAutoModePatternAddAndRemoveRoundTrip(t *testing.T) {
+	s := New()
+	now := time.Now()
+
+	if _, err := s.AddAutoModePattern(automode.ListAllow, "git status*", now); err != nil {
+		t.Fatalf("add allow: %v", err)
+	}
+	if _, err := s.AddAutoModePattern(automode.ListHardDeny, "*terraform apply*", now); err != nil {
+		t.Fatalf("add hard deny: %v", err)
+	}
+
+	cfg, err := s.GetAutoModeConfig()
+	if err != nil {
+		t.Fatalf("get config: %v", err)
+	}
+	if len(cfg.Allow) != 1 || cfg.Allow[0] != "git status*" {
+		t.Fatalf("allow = %v", cfg.Allow)
+	}
+	if got := userHardDeny(cfg.HardDeny); len(got) != 1 || got[0] != "*terraform apply*" {
+		t.Fatalf("stored hard deny = %v", got)
+	}
+
+	if _, err := s.RemoveAutoModePattern(automode.ListAllow, "git status*", now); err != nil {
+		t.Fatalf("remove allow: %v", err)
+	}
+	if _, err := s.RemoveAutoModePattern(automode.ListHardDeny, "*terraform apply*", now); err != nil {
+		t.Fatalf("remove hard deny: %v", err)
+	}
+	cfg, err = s.GetAutoModeConfig()
+	if err != nil {
+		t.Fatalf("re-read config: %v", err)
+	}
+	if len(cfg.Allow) != 0 || len(userHardDeny(cfg.HardDeny)) != 0 {
+		t.Fatalf("removal left something behind: allow=%v hard_deny=%v", cfg.Allow, cfg.HardDeny)
+	}
+	// A read still resolves the shipped denies in, which a removal must not
+	// have been able to shorten.
+	if len(cfg.HardDeny) != len(automode.ShippedHardDeny(config.WSPort())) {
+		t.Fatalf("resolved hard deny = %v, want exactly the shipped denies", cfg.HardDeny)
+	}
+}
+
+// The invariant the whole hard-deny design rests on: an edit that reads the
+// resolved list and writes it back must not persist what the read added.
+func TestAutoModePatternEditNeverStoresAShippedHardDeny(t *testing.T) {
+	s := New()
+	now := time.Now()
+
+	if _, err := s.AddAutoModePattern(automode.ListHardDeny, "*terraform apply*", now); err != nil {
+		t.Fatalf("add hard deny: %v", err)
+	}
+	var stored string
+	if err := s.db.QueryRow(`SELECT hard_deny FROM automode_config WHERE id = 1`).Scan(&stored); err != nil {
+		t.Fatalf("read the row: %v", err)
+	}
+	for _, shipped := range automode.ShippedHardDeny(config.WSPort()) {
+		if strings.Contains(stored, shipped) {
+			t.Fatalf("the row persisted the shipped deny %q: %s", shipped, stored)
+		}
+	}
+}
+
+func TestAutoModeRemoveRefusesAShippedHardDeny(t *testing.T) {
+	s := New()
+	shipped := automode.ShippedHardDeny(config.WSPort())[0]
+
+	_, err := s.RemoveAutoModePattern(automode.ListHardDeny, shipped, time.Now())
+	if err == nil {
+		t.Fatal("removing a shipped hard deny succeeded")
+	}
+	if !strings.Contains(err.Error(), "built-in") || !strings.Contains(err.Error(), shipped) {
+		t.Fatalf("refusal does not name what it refused: %v", err)
+	}
+}
+
+func TestAutoModeAddRefusesABroadAllowAndAnEmptyDeny(t *testing.T) {
+	s := New()
+	now := time.Now()
+
+	_, err := s.AddAutoModePattern(automode.ListAllow, "* *", now)
+	if err == nil {
+		t.Fatal("a broad allow was accepted")
+	}
+	// The direct editor refuses it with the message the proposal path has
+	// always used, so the two paths cannot drift apart.
+	if !strings.Contains(err.Error(), "must name something") {
+		t.Fatalf("broad allow refusal = %v", err)
+	}
+	// A broad hard deny refuses everything, which is safe; only an empty one is
+	// rejected.
+	if _, err := s.AddAutoModePattern(automode.ListHardDeny, "*", now); err != nil {
+		t.Fatalf("a broad hard deny was refused: %v", err)
+	}
+	if _, err := s.AddAutoModePattern(automode.ListHardDeny, "   ", now); err == nil {
+		t.Fatal("an empty deny was accepted")
+	}
+}
+
+// Silence would read as a removal or an add that worked. Both misses name what
+// the caller asked for.
+func TestAutoModePatternEditNamesADuplicateAndAMiss(t *testing.T) {
+	s := New()
+	now := time.Now()
+
+	if _, err := s.AddAutoModePattern(automode.ListAllow, "git status*", now); err != nil {
+		t.Fatalf("add allow: %v", err)
+	}
+	_, err := s.AddAutoModePattern(automode.ListAllow, "git status*", now)
+	if err == nil || !strings.Contains(err.Error(), "already in the allow list") {
+		t.Fatalf("duplicate add = %v", err)
+	}
+	_, err = s.RemoveAutoModePattern(automode.ListAllow, "never added", now)
+	if err == nil || !strings.Contains(err.Error(), "not in the allow list") {
+		t.Fatalf("missing removal = %v", err)
+	}
+	_, err = s.AddAutoModePattern("models", "x", now)
+	if err == nil || !strings.Contains(err.Error(), "unknown pattern list") {
+		t.Fatalf("unknown list = %v", err)
+	}
+}
+
+// The two write paths land in the same list and neither erases the other.
+func TestAutoModeDirectEditAndPromotionShareTheList(t *testing.T) {
+	s := New()
+	now := time.Now()
+
+	if _, err := s.AddAutoModePattern(automode.ListAllow, "git status*", now); err != nil {
+		t.Fatalf("add allow: %v", err)
+	}
+	proposal, err := s.CreateAutoModeProposal(automode.KindAllow, "", "git push origin*", "session-a", now)
+	if err != nil {
+		t.Fatalf("propose: %v", err)
+	}
+	_, cfg, err := s.PromoteAutoModeProposal(proposal.ID, now)
+	if err != nil {
+		t.Fatalf("promote: %v", err)
+	}
+	if len(cfg.Allow) != 2 || cfg.Allow[0] != "git status*" || cfg.Allow[1] != "git push origin*" {
+		t.Fatalf("allow after promotion = %v", cfg.Allow)
+	}
+	// And the hand-added one is still removable afterwards.
+	cfg, err = s.RemoveAutoModePattern(automode.ListAllow, "git status*", now)
+	if err != nil {
+		t.Fatalf("remove after promotion: %v", err)
+	}
+	if len(cfg.Allow) != 1 || cfg.Allow[0] != "git push origin*" {
+		t.Fatalf("allow after removal = %v", cfg.Allow)
+	}
+}

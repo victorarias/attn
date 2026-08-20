@@ -5,17 +5,22 @@
 // This is a test affordance only — it exposes read state and section
 // selection, reusing the same code path as a real nav-item click.
 
+// Must match SettingsModal's SettingsSectionID union. `review` is gone: its
+// reviewer-model field moved in beside the other model overrides in `agents`,
+// and `workspace` and `keeper` split out of the two sections that had grown
+// past one question each.
 const SETTINGS_SECTION_IDS = [
   'general',
+  'workspace',
+  'hygiene',
+  'agents',
+  'keeper',
+  'autoMode',
   'connectivity',
   'plugins',
-  'agents',
-  'data',
-  'review',
-  'hygiene',
   'backgroundTasks',
   'eventBus',
-  'autoMode',
+  'data',
 ] as const;
 
 export type SettingsAutomationSectionID = (typeof SETTINGS_SECTION_IDS)[number];

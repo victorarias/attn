@@ -10,6 +10,8 @@ const daemonApi = vi.hoisted(() => ({
   sendAutoModeGet: vi.fn(),
   sendAutoModePromote: vi.fn(),
   sendAutoModeDiscard: vi.fn(),
+  sendAutoModePatternAdd: vi.fn(),
+  sendAutoModePatternRemove: vi.fn(),
 }));
 vi.mock('../contexts/DaemonApiContext', () => ({ useDaemonApi: () => daemonApi }));
 
@@ -19,6 +21,7 @@ const autoModeState = (proposals: number): AutoModeState => ({
     environment: [],
     allow: [],
     hard_deny: [],
+    shipped_hard_deny: [],
     classifier_models: ['opencode-go/glm-5.3'],
     escalation_models: ['opencode-go/qwen3.8-max'],
   },

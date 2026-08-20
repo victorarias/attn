@@ -75,6 +75,7 @@ import { handleAppDaemonEvent, type AppCommandResult } from './daemonAppEvents';
 import { handleBusDaemonEvent, type BusStatus } from './daemonBusEvents';
 import {
   handleAutoModeDaemonEvent,
+  type AutoModePatternEdit,
   type AutoModePromotion,
   type AutoModeState,
 } from './daemonAutoModeEvents';
@@ -282,7 +283,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-export const PROTOCOL_VERSION = '264';
+export const PROTOCOL_VERSION = '265';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 // Identifies this app process to the daemon across its own reconnects, so a
@@ -3491,10 +3492,10 @@ export function useDaemonSocket({
   }, [sendRequest]);
 
   // Auto mode's app-only surface. `automode_get` reads the promoted policy and
-  // the proposals waiting on a human; promote and discard resolve one. The CLI
-  // can propose and nothing else — a human in the app is the trust boundary
-  // that keeps an agent from writing its own leash, which is why these three
-  // exist on this transport alone.
+  // the proposals waiting on a human; promote and discard resolve one; the two
+  // pattern verbs edit a list directly. The CLI can propose and nothing else —
+  // a human in the app is the trust boundary that keeps an agent from writing
+  // its own leash, which is why all five exist on this transport alone.
   const sendAutoModeGet = useCallback((): Promise<AutoModeState> => {
     return sendRequest<AutoModeState>(
       'automode_get',
@@ -3518,6 +3519,28 @@ export function useDaemonSocket({
       'Discarding the proposal timed out',
     );
   }, [sendRequest]);
+
+  const sendAutoModePatternAdd = useCallback(
+    (list: string, pattern: string): Promise<AutoModePatternEdit> => {
+      return sendRequest<AutoModePatternEdit>(
+        'automode_pattern_add',
+        { list, pattern },
+        'Adding the pattern timed out',
+      );
+    },
+    [sendRequest],
+  );
+
+  const sendAutoModePatternRemove = useCallback(
+    (list: string, pattern: string): Promise<AutoModePatternEdit> => {
+      return sendRequest<AutoModePatternEdit>(
+        'automode_pattern_remove',
+        { list, pattern },
+        'Removing the pattern timed out',
+      );
+    },
+    [sendRequest],
+  );
 
   // Pushes the app's resolved terminal theme colors to the daemon, which uses
   // them to seed the worker's authoritative color model and answer OSC
@@ -5812,6 +5835,8 @@ export function useDaemonSocket({
     sendAutoModeGet,
     sendAutoModePromote,
     sendAutoModeDiscard,
+    sendAutoModePatternAdd,
+    sendAutoModePatternRemove,
     sendBusSetConsumerEnabled,
     sendTriggerNudge,
     sendSettleTurn,

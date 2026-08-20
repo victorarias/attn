@@ -264,11 +264,14 @@ describe('SettingsModal', () => {
     fireEvent.click(screen.getByTestId('settings-nav-plugins'));
     const priority = await screen.findByLabelText('services-pilot-worktrees priority');
     fireEvent.change(priority, { target: { value: '25' } });
-    fireEvent.click(screen.getByText('Save'));
+    fireEvent.blur(priority);
 
     await waitFor(() => {
       expect(onSetPluginPriority).toHaveBeenCalledWith('services-pilot-worktrees', 25);
     });
+    expect(
+      await screen.findByTestId('settings-plugin-priority-saved-services-pilot-worktrees'),
+    ).toBeInTheDocument();
   });
 
   it('refreshes a plugin status when the live daemon snapshot changes', async () => {
@@ -337,8 +340,8 @@ describe('SettingsModal', () => {
     );
 
     expect(await screen.findByText('degraded')).toBeInTheDocument();
-    expect(screen.getByText('Restart attempt')).toBeInTheDocument();
-    expect(screen.getByText('2')).toBeInTheDocument();
+    const restartRow = screen.getByText('Restart attempt').closest('.settings-meta-row');
+    expect(restartRow).toHaveTextContent('2');
     expect(screen.getByText(/Last exit: 2026-07-15T22:19:59Z: exit code 1/)).toBeInTheDocument();
 
     rerender(
@@ -424,7 +427,7 @@ describe('SettingsModal', () => {
     });
 
     render(<SettingsModal {...props('false')} />);
-    fireEvent.click(screen.getByTestId('settings-nav-general'));
+    fireEvent.click(screen.getByTestId('settings-nav-workspace'));
     await screen.findByTestId('settings-projects-directory-input');
 
     expect(screen.queryByTestId('settings-queue-toggle')).toBeNull();
@@ -633,7 +636,7 @@ describe('SettingsModal', () => {
     expect(document.getElementById('settings-snipe-exec')).toBeNull();
   });
 
-  it('saves the workspace context keeper agent and model atomically', async () => {
+  it('applies a keeper agent and model as they change, waiting on a custom model', async () => {
     const onSetSetting = vi.fn();
     render(
       <SettingsModal
@@ -669,21 +672,34 @@ describe('SettingsModal', () => {
       />
     );
 
-    fireEvent.click(screen.getByTestId('settings-nav-agents'));
+    fireEvent.click(screen.getByTestId('settings-nav-keeper'));
     expect(screen.queryByRole('option', { name: 'Snipe' })).not.toBeInTheDocument();
+
+    // Picking an agent carries its recommended model, so the pair is whole and
+    // applies at once.
     fireEvent.change(await screen.findByTestId('settings-context-keeper-agent'), {
       target: { value: 'codex' },
     });
     expect(screen.getByTestId('settings-context-keeper-model')).toHaveValue('gpt-5.4');
     expect(screen.queryByTestId('settings-context-keeper-model-custom')).not.toBeInTheDocument();
+    expect(onSetSetting).toHaveBeenCalledWith(
+      'workspace_keeper_compact',
+      '{"agent":"codex","model":"gpt-5.4"}',
+    );
+    expect(await screen.findByTestId('settings-context-keeper-saved')).toBeInTheDocument();
+
+    // 'custom' is the one half-entered state: it blanks the model and writes
+    // nothing until the free-form input says what the model is.
+    onSetSetting.mockClear();
     fireEvent.change(screen.getByTestId('settings-context-keeper-model'), {
       target: { value: 'custom' },
     });
-    expect(screen.getByTestId('settings-context-keeper-save')).toBeDisabled();
+    expect(onSetSetting).not.toHaveBeenCalled();
     fireEvent.change(screen.getByTestId('settings-context-keeper-model-custom'), {
       target: { value: 'gpt-test' },
     });
-    fireEvent.click(screen.getByTestId('settings-context-keeper-save'));
+    expect(onSetSetting).not.toHaveBeenCalled();
+    fireEvent.blur(screen.getByTestId('settings-context-keeper-model-custom'));
 
     expect(onSetSetting).toHaveBeenCalledWith(
       'workspace_keeper_compact',
@@ -694,12 +710,10 @@ describe('SettingsModal', () => {
       target: { value: 'claude' },
     });
     expect(screen.getByTestId('settings-context-keeper-model')).toHaveValue('opus');
-    expect(screen.getByTestId('settings-context-keeper-save')).toBeEnabled();
-    fireEvent.change(screen.getByTestId('settings-context-keeper-agent'), {
-      target: { value: 'codex' },
-    });
-    expect(screen.getByTestId('settings-context-keeper-model')).toHaveValue('gpt-5.4');
-    expect(screen.getByTestId('settings-context-keeper-save')).toBeEnabled();
+    expect(onSetSetting).toHaveBeenCalledWith(
+      'workspace_keeper_compact',
+      '{"agent":"claude","model":"opus"}',
+    );
   });
 
   it('preserves a configured custom keeper model for editing', async () => {
@@ -734,7 +748,7 @@ describe('SettingsModal', () => {
       />
     );
 
-    fireEvent.click(screen.getByTestId('settings-nav-agents'));
+    fireEvent.click(screen.getByTestId('settings-nav-keeper'));
     expect(await screen.findByTestId('settings-context-keeper-model')).toHaveValue('custom');
     expect(screen.getByTestId('settings-context-keeper-model-custom')).toHaveValue('gpt-custom');
   });
@@ -892,7 +906,7 @@ describe('SettingsModal notebook folder', () => {
       'notebook.root.effective': '/Users/me/my-notes',
     });
 
-    fireEvent.click(screen.getByTestId('settings-nav-general'));
+    fireEvent.click(screen.getByTestId('settings-nav-workspace'));
     const input = await screen.findByTestId('settings-notebook-root-input');
     expect(input).toHaveValue('~/my-notes');
     expect(screen.getByTestId('settings-notebook-root-effective')).toHaveTextContent(
@@ -903,7 +917,7 @@ describe('SettingsModal notebook folder', () => {
   it('falls back to the effective default as placeholder when no override is set', async () => {
     renderModal({ 'notebook.root.effective': '/Users/me/attn-notebook' });
 
-    fireEvent.click(screen.getByTestId('settings-nav-general'));
+    fireEvent.click(screen.getByTestId('settings-nav-workspace'));
     const input = await screen.findByTestId('settings-notebook-root-input');
     expect(input).toHaveValue('');
     expect(input).toHaveAttribute('placeholder', '/Users/me/attn-notebook');
@@ -915,7 +929,7 @@ describe('SettingsModal notebook folder', () => {
       'notebook.root.effective': '/Users/me/my-notes',
     });
 
-    fireEvent.click(screen.getByTestId('settings-nav-general'));
+    fireEvent.click(screen.getByTestId('settings-nav-workspace'));
     const input = await screen.findByTestId('settings-notebook-root-input');
 
     fireEvent.change(input, { target: { value: '/Users/me/elsewhere' } });
@@ -972,7 +986,7 @@ describe('SettingsModal keeper', () => {
 
   it('treats the master switch as on by default and toggles it off', async () => {
     const onSetSetting = renderModal({});
-    fireEvent.click(screen.getByTestId('settings-nav-agents'));
+    fireEvent.click(screen.getByTestId('settings-nav-keeper'));
 
     // Unset notebook.tasks_enabled reads as ON, so the action offers to disable.
     const toggle = await screen.findByTestId('settings-keeper-tasks-toggle');
@@ -983,7 +997,7 @@ describe('SettingsModal keeper', () => {
 
   it('re-enables the master switch when it is off', async () => {
     const onSetSetting = renderModal({ 'notebook.tasks_enabled': 'false' });
-    fireEvent.click(screen.getByTestId('settings-nav-agents'));
+    fireEvent.click(screen.getByTestId('settings-nav-keeper'));
 
     const toggle = await screen.findByTestId('settings-keeper-tasks-toggle');
     expect(toggle).toHaveTextContent('Enable');
@@ -993,7 +1007,7 @@ describe('SettingsModal keeper', () => {
 
   it('toggles session summaries independently and defaults them on', async () => {
     const onSetSetting = renderModal({});
-    fireEvent.click(screen.getByTestId('settings-nav-agents'));
+    fireEvent.click(screen.getByTestId('settings-nav-keeper'));
 
     const toggle = await screen.findByTestId('settings-keeper-summarize-toggle');
     expect(toggle).toHaveTextContent('Disable');
@@ -1010,7 +1024,7 @@ describe('SettingsModal keeper', () => {
       'notebook.summarize_session.enabled': 'false',
       'notebook.summarize_session': '{"agent":"codex","model":"gpt-5.4-mini"}',
     });
-    fireEvent.click(screen.getByTestId('settings-nav-agents'));
+    fireEvent.click(screen.getByTestId('settings-nav-keeper'));
 
     const toggle = await screen.findByTestId('settings-keeper-summarize-toggle');
     expect(toggle).toHaveTextContent('Enable');
@@ -1026,7 +1040,7 @@ describe('SettingsModal keeper', () => {
 
   it('toggles journal narration independently and defaults it on', async () => {
     const onSetSetting = renderModal({});
-    fireEvent.click(screen.getByTestId('settings-nav-agents'));
+    fireEvent.click(screen.getByTestId('settings-nav-keeper'));
 
     const toggle = await screen.findByTestId('settings-keeper-narrate-toggle');
     expect(toggle).toHaveTextContent('Disable');
@@ -1043,7 +1057,7 @@ describe('SettingsModal keeper', () => {
       'notebook.narrate_workspace.enabled': 'false',
       'notebook.narrate_workspace': '{"agent":"codex","model":"gpt-5.4"}',
     });
-    fireEvent.click(screen.getByTestId('settings-nav-agents'));
+    fireEvent.click(screen.getByTestId('settings-nav-keeper'));
 
     const toggle = await screen.findByTestId('settings-keeper-narrate-toggle');
     expect(toggle).toHaveTextContent('Enable');
@@ -1059,7 +1073,7 @@ describe('SettingsModal keeper', () => {
 
   it('seeds default-configured duties with their tier default and saves an override', async () => {
     const onSetSetting = renderModal({});
-    fireEvent.click(screen.getByTestId('settings-nav-agents'));
+    fireEvent.click(screen.getByTestId('settings-nav-keeper'));
 
     // Session summaries default to Claude Haiku; narration to Claude Sonnet.
     expect(await screen.findByTestId('settings-keeper-summarize-agent')).toHaveValue('claude');
@@ -1072,16 +1086,18 @@ describe('SettingsModal keeper', () => {
     });
     expect(screen.getByTestId('settings-keeper-summarize-model')).toHaveValue('gpt-5.4-mini');
 
-    fireEvent.click(screen.getByTestId('settings-keeper-summarize-save'));
+    // No Save button to press — the override is already written, and the mark
+    // beside the duty is how the user knows it landed.
     expect(onSetSetting).toHaveBeenCalledWith(
       'notebook.summarize_session',
       '{"agent":"codex","model":"gpt-5.4-mini"}',
     );
+    expect(await screen.findByTestId('settings-keeper-summarize-saved')).toBeInTheDocument();
   });
 
   it('offers no Disabled agent for default-configured duties but does for compaction', async () => {
     renderModal({});
-    fireEvent.click(screen.getByTestId('settings-nav-agents'));
+    fireEvent.click(screen.getByTestId('settings-nav-keeper'));
 
     const summarizeAgent = await screen.findByTestId('settings-keeper-summarize-agent');
     expect(
@@ -1098,7 +1114,7 @@ describe('SettingsModal keeper', () => {
     const onSetSetting = renderModal({
       'notebook.narrate_workspace': '{"agent":"claude","model":"opus"}',
     });
-    fireEvent.click(screen.getByTestId('settings-nav-agents'));
+    fireEvent.click(screen.getByTestId('settings-nav-keeper'));
 
     // The saved override is shown, and "Use default" is enabled because one exists.
     expect(await screen.findByTestId('settings-keeper-narrate-model')).toHaveValue('opus');
@@ -1611,7 +1627,7 @@ describe('SettingsModal automation handle', () => {
 
     // Mounted with nothing from the daemon yet.
     const { rerender } = render(<SettingsModal {...props} settings={{}} />);
-    fireEvent.click(screen.getByTestId('settings-nav-general'));
+    fireEvent.click(screen.getByTestId('settings-nav-hygiene'));
     const arm = await screen.findByTestId('settings-auto-settle-arm');
     expect((arm as HTMLInputElement).value).toBe('30');
 
@@ -1622,7 +1638,7 @@ describe('SettingsModal automation handle', () => {
         settings={{ auto_settle_arm_seconds: '60', auto_settle_countdown_seconds: '20' }}
       />
     );
-    fireEvent.click(screen.getByTestId('settings-nav-general'));
+    fireEvent.click(screen.getByTestId('settings-nav-hygiene'));
 
     await waitFor(() => {
       expect((screen.getByTestId('settings-auto-settle-arm') as HTMLInputElement).value).toBe('60');
@@ -1674,7 +1690,7 @@ describe('SettingsModal sent files', () => {
 
   it('reads as on by default and toggles off', async () => {
     const onSetSetting = renderModal({});
-    fireEvent.click(screen.getByTestId('settings-nav-general'));
+    fireEvent.click(screen.getByTestId('settings-nav-workspace'));
 
     const toggle = await screen.findByTestId('settings-open-sent-files-toggle');
     expect(toggle).toHaveTextContent('Disable');
@@ -1684,7 +1700,7 @@ describe('SettingsModal sent files', () => {
 
   it('re-enables when off', async () => {
     const onSetSetting = renderModal({ open_sent_files_enabled: 'false' });
-    fireEvent.click(screen.getByTestId('settings-nav-general'));
+    fireEvent.click(screen.getByTestId('settings-nav-workspace'));
 
     const toggle = await screen.findByTestId('settings-open-sent-files-toggle');
     expect(toggle).toHaveTextContent('Enable');

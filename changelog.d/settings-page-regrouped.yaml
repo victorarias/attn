@@ -1,0 +1,9 @@
+kind: changed
+area: app
+change: >
+  Settings is grouped by what you are trying to do rather than by which
+  part of attn the code talks to, and settings apply as you change them
+  (or when you leave a text field) with a quiet "Saved" beside the field.
+  Auto mode moved in beside the agents whose reach it decides, the context
+  keeper and the file locations got sections of their own, and the reviewer
+  model sits with the other model overrides.
