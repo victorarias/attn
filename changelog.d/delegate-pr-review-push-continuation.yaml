@@ -1,0 +1,11 @@
+kind: fixed
+area: automations
+change: >
+  GitHub review-request automations now continue their existing reviewer when a
+  still-requested pull request receives new commits. Each automation keeps its
+  own seed and session, records every accepted head, and leaves the reviewer's
+  worktree checkout and local evidence untouched. A harvested review seed is
+  replanted and returned to the same reviewer when more work arrives.
+symptom: >
+  Pushing another commit after requesting review left the automated reviewer on
+  the original pull request head.

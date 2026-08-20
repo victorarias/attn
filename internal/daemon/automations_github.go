@@ -94,7 +94,7 @@ func pullRequestAutomationInput(host, owner, repository string, snapshot *github
 }
 
 // observeGitHubReviewRequests consumes one host's already-refreshed PR snapshot.
-// It does not poll GitHub itself: only a newly active durable edge performs the
+// It does not poll GitHub itself: a candidate edge or changed head performs the
 // focused PR GET needed to pin the immutable review input.
 func (d *Daemon) observeGitHubReviewRequests(host string, prs []*protocol.PR, observedAt time.Time) {
 	definitions, err := d.store.ListAutomationDefinitions()
@@ -120,7 +120,7 @@ func (d *Daemon) observeGitHubReviewRequests(host string, prs []*protocol.PR, ob
 			continue
 		}
 		bySubject := make(map[string]*protocol.PR)
-		var subjects []string
+		var observations []store.AutomationReviewRequestObservation
 		for _, pr := range prs {
 			if pr == nil || pr.ApprovedByMe || pr.Role != protocol.PRRoleReviewer || pr.Reason != protocol.PRReasonReviewNeeded || pr.State != protocol.PRStateWaiting {
 				continue
@@ -134,9 +134,12 @@ func (d *Daemon) observeGitHubReviewRequests(host string, prs []*protocol.PR, ob
 				continue
 			}
 			bySubject[subject] = pr
-			subjects = append(subjects, subject)
+			observations = append(observations, store.AutomationReviewRequestObservation{
+				SubjectKey: subject,
+				HeadSHA:    protocol.Deref(pr.HeadSHA),
+			})
 		}
-		candidates, err := d.reconcileAutomationReviewRequests(definition.ID, host, subjects, observedAt)
+		candidates, err := d.reconcileAutomationReviewRequestHeads(definition.ID, host, observations, observedAt)
 		if err != nil {
 			d.logf("automation GitHub observation reconcile %s: %v", definition.ID, err)
 			continue
@@ -148,7 +151,7 @@ func (d *Daemon) observeGitHubReviewRequests(host string, prs []*protocol.PR, ob
 			}
 			observationLock := d.automationObservationLock(definition.ID, candidate.SubjectKey, candidate.Cycle)
 			observationLock.Lock()
-			needsClaim, err := d.store.AutomationReviewRequestNeedsClaim(definition.ID, candidate.SubjectKey, candidate.Cycle)
+			needsClaim, err := d.store.AutomationReviewRequestHeadNeedsClaim(definition.ID, candidate.SubjectKey, candidate.Cycle, candidate.HeadSHA)
 			if err != nil || !needsClaim {
 				observationLock.Unlock()
 				if err != nil {
@@ -222,6 +225,14 @@ func (d *Daemon) observeGitHubReviewRequests(host string, prs []*protocol.PR, ob
 	}
 }
 func (d *Daemon) reconcileAutomationReviewRequests(definitionID, host string, subjects []string, observedAt time.Time) ([]store.AutomationReviewRequestCandidate, error) {
+	observations := make([]store.AutomationReviewRequestObservation, 0, len(subjects))
+	for _, subject := range subjects {
+		observations = append(observations, store.AutomationReviewRequestObservation{SubjectKey: subject})
+	}
+	return d.reconcileAutomationReviewRequestHeads(definitionID, host, observations, observedAt)
+}
+
+func (d *Daemon) reconcileAutomationReviewRequestHeads(definitionID, host string, observations []store.AutomationReviewRequestObservation, observedAt time.Time) ([]store.AutomationReviewRequestCandidate, error) {
 	d.automationMu.Lock()
 	defer d.automationMu.Unlock()
 	// Finish any cancellation made durable by an earlier observation before a
@@ -230,7 +241,7 @@ func (d *Daemon) reconcileAutomationReviewRequests(definitionID, host string, su
 	if err := d.cancelWithdrawnAutomationRuns(definitionID, host); err != nil {
 		return nil, err
 	}
-	candidates, err := d.store.ReconcileAutomationReviewRequests(definitionID, host, subjects, observedAt)
+	candidates, err := d.store.ReconcileAutomationReviewRequestHeads(definitionID, host, observations, observedAt)
 	if err != nil {
 		return nil, err
 	}

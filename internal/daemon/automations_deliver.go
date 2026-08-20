@@ -13,6 +13,7 @@ import (
 
 	agentdriver "github.com/victorarias/attn/internal/agent"
 	"github.com/victorarias/attn/internal/automation"
+	"github.com/victorarias/attn/internal/garden"
 	attngit "github.com/victorarias/attn/internal/git"
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/pty"
@@ -291,9 +292,8 @@ func (d *Daemon) validateAutomationContinuation(req automation.WorkRequest) erro
 	if !originSnapshot.ContinuationContract().Equal(reqContract) {
 		return errors.New("automation reviewer contract changed; refusing to reuse a session with stale instructions")
 	}
-	// The origin/current pull-request revision comparison only applies to
-	// GitHub-provider occurrences. A scheduled occurrence's payload is
-	// ScheduledInput, not a pull request; parsing it here would always fail.
+	// GitHub continuity stays bound to one PR subject while its immutable head
+	// input advances. Scheduled occurrences carry a different payload shape.
 	if req.Provider == "github" {
 		originOccurrence, err := d.store.GetAutomationOccurrence(origin.OccurrenceID)
 		if err != nil || originOccurrence == nil {
@@ -307,8 +307,8 @@ func (d *Daemon) validateAutomationContinuation(req automation.WorkRequest) erro
 		if err != nil {
 			return err
 		}
-		if originPR.HeadSHA != currentPR.HeadSHA {
-			return errors.New("reviewer continuity across a changed pull-request revision is not enabled yet")
+		if originPR.SubjectKey() != currentPR.SubjectKey() || currentPR.SubjectKey() != req.ContinuityKey {
+			return errors.New("automation reviewer pull-request identity changed; refusing to reuse its session")
 		}
 	}
 	if d.canStartWithdrawnUndeliveredReviewer(origin, req.IDs.SessionID) {
@@ -410,12 +410,40 @@ func (d *Daemon) activateAutomationContinuationTicket(req automation.WorkRequest
 	if ticket.AutomationRunID == req.RunID || !ticket.Status.IsTerminal() {
 		return nil
 	}
+	if err := d.activateAutomationContinuationSeed(req.IDs.SessionID); err != nil {
+		return err
+	}
 	comment := "Reopened for automation occurrence " + req.RunID + "."
 	if _, err := d.store.SetTicketStatus(ticket.ID, store.TicketStatusWorking, "automation:"+req.DefinitionID, comment, time.Now()); err != nil {
 		return err
 	}
 	d.publishTicketFact(FactTicketStatusChanged, ticket.ID)
 	d.notifyTicketObservers(ticket.ID)
+	return nil
+}
+
+func (d *Daemon) activateAutomationContinuationSeed(sessionID string) error {
+	seedID, ok := d.gardenDispatchCrown(sessionID)
+	if !ok {
+		return nil
+	}
+	seed, _, err := d.readSeed(seedID)
+	if err != nil {
+		return fmt.Errorf("read automation continuation seed %s: %w", seedID, err)
+	}
+	actor := garden.Tender{Session: sessionID}
+	if garden.Closed(seed.Status) {
+		if _, _, err := d.applySeedTransition(seedID, garden.VerbReplant, actor, ""); err != nil {
+			return fmt.Errorf("replant automation continuation seed %s: %w", seedID, err)
+		}
+		seed.Status = garden.StatusPlanted
+	}
+	if seed.Status == garden.StatusGrowing && seed.TenderSession == sessionID {
+		return nil
+	}
+	if _, _, err := d.applySeedTransition(seedID, garden.VerbTend, actor, ""); err != nil {
+		return fmt.Errorf("tend automation continuation seed %s: %w", seedID, err)
+	}
 	return nil
 }
 func (d *Daemon) prepareAutomationLocation(_ context.Context, req automation.WorkRequest) (automation.PreparedLocation, error) {
@@ -450,8 +478,8 @@ func (d *Daemon) prepareAutomationLocation(_ context.Context, req automation.Wor
 		if err != nil {
 			return automation.PreparedLocation{}, fmt.Errorf("continuity origin payload: %w", err)
 		}
-		if originPR.HeadSHA != pr.HeadSHA {
-			return automation.PreparedLocation{}, errors.New("reviewer continuity across a changed pull-request revision is not enabled yet")
+		if originPR.SubjectKey() != pr.SubjectKey() || (req.ContinuityKey != "" && pr.SubjectKey() != req.ContinuityKey) {
+			return automation.PreparedLocation{}, errors.New("automation reviewer pull-request identity changed; refusing to reuse its worktree")
 		}
 	}
 	identity := pr.RepositoryIdentity()

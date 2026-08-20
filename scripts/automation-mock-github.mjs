@@ -2,7 +2,7 @@
 
 import http from 'node:http';
 
-const sha = String(process.env.ATTN_AUTOMATION_MOCK_SHA || '').trim();
+let sha = String(process.env.ATTN_AUTOMATION_MOCK_SHA || '').trim();
 if (!/^[0-9a-f]{40}$/i.test(sha)) {
   console.error('ATTN_AUTOMATION_MOCK_SHA must be a full commit SHA');
   process.exit(2);
@@ -38,8 +38,23 @@ const server = http.createServer((request, response) => {
     });
     return;
   }
+  if (request.method === 'POST' && url.pathname === '/__control/head') {
+    let body = '';
+    request.setEncoding('utf8');
+    request.on('data', (chunk) => { body += chunk; });
+    request.on('end', () => {
+      const next = String(JSON.parse(body).sha || '').trim().toLowerCase();
+      if (!/^[0-9a-f]{40}$/.test(next)) {
+        json(response, 400, { error: 'sha must be a full commit SHA' });
+        return;
+      }
+      sha = next;
+      json(response, 200, { sha });
+    });
+    return;
+  }
   if (request.method === 'GET' && url.pathname === '/__control') {
-    json(response, 200, { active, requests });
+    json(response, 200, { active, sha, requests });
     return;
   }
   if (request.method === 'GET' && url.pathname === '/search/issues') {
