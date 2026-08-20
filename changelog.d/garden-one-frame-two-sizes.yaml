@@ -1,0 +1,28 @@
+kind: changed
+area: garden
+change: >
+  The garden's dock panel and its fullscreen surface are now one object at two
+  sizes, with a way between them. `Cmd+Shift+T` promotes the docked garden into
+  the window and hands it back; so does a quiet control in the panel header,
+  beside the close button. The promotion carries everything you were doing —
+  the plot you had drilled into, the seed you had open, where you had scrolled,
+  and the keyboard focus — because the panel is never rebuilt, only resized.
+  The Miller columns are part of that: the panel now decides between the stack
+  and the columns from how wide it actually is, so the columns arrive during
+  the flight, as the box grows wide enough to hold them, rather than being
+  switched on at the far end. Escape goes down exactly one level — it clears
+  the search query, else climbs one step out of the plot, else returns the
+  garden to the dock, else closes it — and the sidebar rail now carries one
+  garden button instead of two.
+notes: >
+  `GardenSurface` is replaced by `GardenFrame`, which renders a single
+  `GardenPanel` in a fixed box that animates between the dock's rectangle and
+  the window's. `RightDock` gained a first-class `detached` panel: the dock
+  still reserves the panel's width and lays out an empty slot where it would
+  have gone, which is how a surface rendered outside the dock finds where to
+  be. `layout` is no longer a prop on `GardenPanel`. Motion is 180ms out,
+  150ms back, on the dock's own easing, and `prefers-reduced-motion` skips it
+  entirely. The list/board switch moves from the deleted fullscreen surface to
+  the frame; the board is offered only where there is room for it, and
+  promoting always lands on the list you were already reading.
+  Design and the alternatives that lost: docs/plans/2026-08-20-garden-one-frame.md.

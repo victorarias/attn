@@ -62,7 +62,7 @@ describe('GardenPanel keeps the reader s place', () => {
   // column the reader climbs out of and back into comes back as they left it.
   it('keeps the closed lens across a walk that leaves the column behind', () => {
     vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(1200);
-    render(<GardenPanel layout="columns" isOpen onClose={vi.fn()} seedsTotal={5} seeds={world} />);
+    render(<GardenPanel isOpen onClose={vi.fn()} seedsTotal={5} seeds={world} />);
 
     open(/the migration/);
     fireEvent.click(screen.getByRole('button', { name: /1 closed/ }));
@@ -95,7 +95,8 @@ describe('GardenPanel keeps the reader s place', () => {
     unmount();
 
     // The other size opens on the place the reader was already in.
-    render(<GardenPanel layout="columns" isOpen onClose={vi.fn()} seedsTotal={5} seeds={world} />);
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(1200);
+    render(<GardenPanel isOpen onClose={vi.fn()} seedsTotal={5} seeds={world} />);
     expect(screen.getByRole('heading', { name: 'one panel' })).toBeInTheDocument();
   });
 });

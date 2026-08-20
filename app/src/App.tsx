@@ -18,10 +18,9 @@ import { ChiefOfStaffTransferPrompt } from './components/ChiefOfStaffTransferPro
 import { SessionContextCapPrompt } from './components/SessionContextCapPrompt';
 import { AppViewParamsPrompt } from './components/appViews/AppViewParamsPrompt';
 import { appViewTileKind } from './utils/appBundle';
-import { GardenSurface } from './components/GardenSurface';
+import { GardenFrame, useDockSlotRect, type GardenMode } from './components/GardenFrame';
 import { WorkflowRunView } from './components/WorkflowRunView';
 import { AutomationsPanel } from './components/AutomationsPanel';
-import { GardenPanel } from './components/GardenPanel';
 import {
   useWorkflowRunsStore,
   selectLatestWorkflowRunForSession,
@@ -1087,7 +1086,7 @@ function AppContent({
   const [workspaceContextsOpen, setWorkspaceContextsOpen] = useState(false);
   const [notebookOpen, setNotebookOpen] = useState(false);
   const [notebookRequestedPath, setNotebookRequestedPath] = useState<string | null>(null);
-  const [gardenSurfaceOpen, setGardenSurfaceOpen] = useState(false);
+  const [gardenHoldsWindow, setGardenHoldsWindow] = useState(false);
   const [notificationsPanelOpen, setNotificationsPanelOpen] = useState(false);
   const [workspaceContextsLoading, setWorkspaceContextsLoading] = useState(false);
   const [workspaceContextsError, setWorkspaceContextsError] = useState<string | null>(null);
@@ -1689,6 +1688,11 @@ function AppContent({
   const attentionPanelOpen = openDockPanels.attention;
   const automationsPanelOpen = openDockPanels.automations;
   const gardenPanelOpen = openDockPanels.garden;
+  // The garden is one object read in one of two frames. Its dock entry below is
+  // detached: the dock reserves its place and paints nothing, and the frame
+  // flies from exactly the rectangle the dock gave it.
+  const [gardenSlotRef, gardenDockRect] = useDockSlotRect();
+  const gardenMode: GardenMode = gardenHoldsWindow ? 'full' : gardenPanelOpen ? 'dock' : 'closed';
   const blockingOverlayOpen = locationPickerOpen
     || whatsNew.isOpen
     || settingsOpen
@@ -1697,7 +1701,7 @@ function AppContent({
     || actionMenuOpen
     || workspaceContextsOpen
     || notebookOpen
-    || gardenSurfaceOpen
+    || gardenHoldsWindow
     || chiefTransferTarget !== null
     || contextCapPromptSession !== null
     || appViewParamsPrompt !== null
@@ -1782,12 +1786,30 @@ function AppContent({
     [daemonSessions],
   );
 
-  const openGardenSurface = useCallback(() => {
-    setGardenSurfaceOpen(true);
-  }, []);
-  const closeGardenSurface = useCallback(() => {
-    setGardenSurfaceOpen(false);
-  }, []);
+  // The way across. The dock stays open underneath the window frame, so coming
+  // back is a shrink rather than a re-open.
+  const toggleGardenFrame = useCallback(() => {
+    if (gardenHoldsWindow) {
+      setGardenHoldsWindow(false);
+      openDockPanel('garden');
+      return;
+    }
+    setGardenHoldsWindow(true);
+  }, [gardenHoldsWindow, openDockPanel]);
+  // Escape goes down one level, never two: window → dock → gone. It sits at the
+  // bottom of the panel's own ladder, below clearing a query and below climbing
+  // the trail, so it is reached only once there is nothing left to climb.
+  const escapeGardenFrame = useCallback(() => {
+    if (gardenHoldsWindow) {
+      toggleGardenFrame();
+      return;
+    }
+    closeDockPanel('garden');
+  }, [gardenHoldsWindow, toggleGardenFrame, closeDockPanel]);
+  const closeGarden = useCallback(() => {
+    setGardenHoldsWindow(false);
+    closeDockPanel('garden');
+  }, [closeDockPanel]);
   const toggleNotificationsPanel = useCallback(() => {
     setNotificationsPanelOpen((open) => !open);
   }, []);
@@ -1970,13 +1992,13 @@ function AppContent({
       run: () => openDockPanel('attention'),
     },
     {
-      id: 'garden-surface',
-      title: 'Open the garden',
-      description: 'Seeds and plots, grouped by state',
-      keywords: ['garden', 'seed', 'seeds', 'plot', 'board'],
+      id: 'garden-frame',
+      title: gardenHoldsWindow ? 'Return the garden to the dock' : 'Open the garden in the window',
+      description: 'Seeds and plots, the trail beside what you are reading',
+      keywords: ['garden', 'seed', 'seeds', 'plot', 'board', 'expand', 'fullscreen'],
       icon: <BoardActionIcon />,
       shortcut: [shortcutTokens('board.open')],
-      run: () => openGardenSurface(),
+      run: () => toggleGardenFrame(),
     },
     {
       // The switch itself lives in the sidebar's display popover, next to the
@@ -2007,7 +2029,7 @@ function AppContent({
       icon: <KeyboardActionIcon />,
       run: () => setShortcutEditorOpen(true),
     },
-  ], [openDockPanel, openWorkspaceContextNavigator, handleOpenNotebookTile, openGardenSurface, settings, handleToggleQueueMode, sendSetSetting]);
+  ], [openDockPanel, openWorkspaceContextNavigator, handleOpenNotebookTile, toggleGardenFrame, gardenHoldsWindow, settings, handleToggleQueueMode, sendSetSetting]);
 
   const handleToggleActionMenu = useCallback(() => {
     if (actionMenuOpen) {
@@ -2015,7 +2037,7 @@ function AppContent({
       return;
     }
     if (settingsOpen || shortcutsOpen || locationPickerOpen || whatsNew.isOpen
-      || workspaceContextsOpen || notebookOpen || gardenSurfaceOpen
+      || workspaceContextsOpen || notebookOpen || gardenHoldsWindow
       || chiefTransferTarget !== null || contextCapPromptSession !== null
       || appViewParamsPrompt !== null || closedWorktree !== null || pendingSessionClose !== null
       || sessionCreationJob !== null || openPRLauncherJob !== null) {
@@ -2037,7 +2059,7 @@ function AppContent({
     whatsNew.isOpen,
     workspaceContextsOpen,
     notebookOpen,
-    gardenSurfaceOpen,
+    gardenHoldsWindow,
   ]);
   useEffect(() => {
     if (!settingError) {
@@ -3645,13 +3667,6 @@ function AppContent({
       onClick: openNotebookBrowser,
     },
     {
-      id: 'garden',
-      title: 'Open the Garden (⌘⇧T)',
-      icon: <BoardActionIcon />,
-      active: gardenSurfaceOpen,
-      onClick: openGardenSurface,
-    },
-    {
       id: 'notifications',
       title: notificationsPanelOpen ? 'Hide Notifications' : 'Show Notifications',
       icon: <NotificationsBellIcon />,
@@ -3672,9 +3687,12 @@ function AppContent({
     },
     {
       id: 'garden',
+      // One object, one button, and it means the garden, docked. The window
+      // frame covers the rail, so coming back from it is Escape, the shortcut,
+      // or the header control — never this.
       title: gardenPanelOpen ? 'Hide the garden' : 'Show the garden',
       icon: <GardenIcon />,
-      active: gardenPanelOpen,
+      active: gardenPanelOpen || gardenHoldsWindow,
       onClick: () => toggleDockPanel('garden'),
     },
   ]), [
@@ -3688,8 +3706,7 @@ function AppContent({
     toggleDockPanel,
     notebookOpen,
     openNotebookBrowser,
-    gardenSurfaceOpen,
-    openGardenSurface,
+    gardenHoldsWindow,
     notificationsPanelOpen,
     notificationsUnread,
     hasCriticalNotification,
@@ -3752,6 +3769,13 @@ function AppContent({
 
   // Terminal panel handlers for active session
   // Use keyboard shortcuts hook
+  const appShortcutsEnabled = !locationPickerOpen
+    && !whatsNew.isOpen
+    && !actionMenuOpen
+    && !markdownOpenerOpen
+    && !shortcutEditorOpen
+    && !workspaceContextsOpen
+    && !notebookOpen;
   useKeyboardShortcuts({
     onNewSession: () => handleNewSession('vertical'),
     onNewSessionHorizontal: () => handleNewSession('horizontal'),
@@ -3778,16 +3802,13 @@ function AppContent({
     onOpenFile: handleOpenMarkdownFile,
     onOpenNotebookTile: handleOpenNotebookTile,
     onOpenNotebookFullscreen: openNotebookBrowser,
-    onOpenGarden: openGardenSurface,
+    onOpenGarden: toggleGardenFrame,
     onQuit: handleQuitApp,
-    enabled: !locationPickerOpen
-      && !whatsNew.isOpen
-      && !actionMenuOpen
-      && !markdownOpenerOpen
-      && !shortcutEditorOpen
-      && !workspaceContextsOpen
-      && !notebookOpen
-      && !gardenSurfaceOpen,
+    enabled: appShortcutsEnabled && !gardenHoldsWindow,
+    // One gesture, both directions. Every other app shortcut is silenced while
+    // the garden holds the window; its own is not, because the window is the
+    // garden at a different size rather than a modal over it.
+    gardenShortcutEnabled: appShortcutsEnabled,
   });
 
   // The daemon's resolved notebook storage root (settings['notebook.root.effective']).
@@ -4211,22 +4232,12 @@ function AppContent({
             },
             {
               id: 'garden',
-              isOpen: gardenPanelOpen,
               width: 'clamp(380px, 34vw, 560px)',
-              className: 'dock-panel dock-panel--garden',
-              children: (
-                <GardenPanel
-                  isOpen={gardenPanelOpen}
-                  onClose={() => closeDockPanel('garden')}
-                  seeds={seeds}
-                  seedsTotal={seedsTotal}
-                  fetchSeedDocument={sendSeedDocumentGet}
-                  onOpenAsTile={handleOpenSeedTile}
-                  onOpenMarkdownArtifact={handleOpenMarkdownArtifact}
-                  checkArtifactPath={checkArtifactPath}
-                  onResumeSeed={handleResumeSeed}
-                />
-              ),
+              // The place, not the panel: GardenFrame renders the garden into
+              // the rectangle this reserves.
+              isOpen: gardenPanelOpen && !gardenHoldsWindow,
+              detached: gardenSlotRef,
+              children: null,
             },
           ]}
         />
@@ -4355,8 +4366,12 @@ function AppContent({
         changeSignal={notebookRootChangeSignal}
         chiefActive={notebookChiefActive}
       />
-      <GardenSurface
-        isOpen={gardenSurfaceOpen}
+      <GardenFrame
+        mode={gardenMode}
+        dockRect={gardenDockRect}
+        onToggleFrame={toggleGardenFrame}
+        onEscapeFloor={escapeGardenFrame}
+        onClose={closeGarden}
         seeds={seeds}
         seedsTotal={seedsTotal}
         liveSessions={liveGardenSessions}
@@ -4365,13 +4380,12 @@ function AppContent({
         noteSeed={sendSeedNote}
         fetchSeedDocument={sendSeedDocumentGet}
         onOpenAsTile={(seedId) => {
-          closeGardenSurface();
+          closeGarden();
           handleOpenSeedTile(seedId);
         }}
         onOpenMarkdownArtifact={handleOpenMarkdownArtifact}
         checkArtifactPath={checkArtifactPath}
         onResumeSeed={handleResumeSeed}
-        onClose={closeGardenSurface}
       />
       <NotificationsPanel
         open={notificationsPanelOpen}

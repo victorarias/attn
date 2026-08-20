@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import type { ReactNode, RefObject } from 'react';
 import { SidePanel } from './SidePanel';
 
 export type DockPanelTone = 'default' | 'idle' | 'running' | 'awaiting_user' | 'completed' | 'stopped' | 'error';
@@ -9,6 +9,15 @@ export interface DockPanelDefinition {
   width: string;
   tone?: DockPanelTone;
   className?: string;
+  /**
+   * The panel holds a place in the dock but paints somewhere else. The dock
+   * still reserves its width, so the panels beside it sit where they should,
+   * and lays out an empty slot at the rectangle the panel would have filled —
+   * which is how a surface rendered outside the dock finds where to be. The
+   * garden does this: see GardenFrame. The ref is attached to that slot, and
+   * `children` is not rendered.
+   */
+  detached?: RefObject<HTMLDivElement | null>;
   children: ReactNode;
 }
 
@@ -41,6 +50,18 @@ export function RightDock({ panels, panelOrder }: RightDockProps) {
         const panelOffset = offset;
         if (panel.isOpen) {
           offset = addWidthOffset(offset, panel.width);
+        }
+
+        if (panel.detached) {
+          return (
+            <div key={panel.id} className="side-panel-shell side-panel-shell--absolute" aria-hidden="true">
+              <div
+                ref={panel.detached}
+                className="side-panel-slot"
+                style={{ right: panelOffset, width: panel.width }}
+              />
+            </div>
+          );
         }
 
         return (

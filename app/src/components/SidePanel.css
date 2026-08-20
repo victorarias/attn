@@ -61,3 +61,14 @@
 .side-panel--error {
   box-shadow: -24px 0 60px rgba(239, 68, 68, 0.14);
 }
+
+/* The rectangle a detached panel would have filled (see RightDock). It paints
+   nothing and takes no input; it exists so a surface rendered outside the dock
+   can measure where the dock would have put it. */
+.side-panel-slot {
+  bottom: 0;
+  pointer-events: none;
+  position: absolute;
+  top: 0;
+  visibility: hidden;
+}

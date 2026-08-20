@@ -68,11 +68,43 @@ interface GardenPanelProps {
   onResumeSeed?: (seedId: string) => void;
   /** Answers whether an artifact's path is really on disk. */
   checkArtifactPath?: (path: string) => Promise<boolean>;
-  /** How much of the walk to draw. The dock stacks; fullscreen columns. */
-  layout?: 'stack' | 'columns';
-  /** The list/board switch. Owned by the surface: both views show the same one,
+  /** The list/board switch. Owned by the frame: both views show the same one,
    *  in the same place, so switching moves nothing. */
   viewToggle?: React.ReactNode;
+  /** Which frame the garden is being read in, for the header control's direction. */
+  frame?: 'dock' | 'full';
+  /** Promote to the window, or hand it back to the dock. Absent hides the
+   *  control — the panel still renders anywhere it did before. */
+  onToggleFrame?: () => void;
+  /** The bottom of the Escape ladder, below climbing: called when there is no
+   *  place left to climb out of. */
+  onEscapeFloor?: () => void;
+}
+
+// How much of the walk the panel draws is decided by how much room it has, not
+// by who rendered it. Below the first threshold there is no space for a list
+// beside a readable document, so the walk stacks one place at a time; above it
+// the walk sits beside what you are reading, and a second list joins at the
+// next. The panel growing across a threshold IS the promotion from the dock to
+// the window — see GardenFrame.
+const COLUMNS_MIN = 1160;
+const THIRD_COLUMN_MIN = 1460;
+
+// The frame control: two corners pulling apart, or back together.
+function FrameGlyph({ direction }: { direction: 'out' | 'in' }) {
+  return (
+    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+      <path
+        d={direction === 'out'
+          ? 'M4.5 1.5H1.5V4.5M7.5 10.5H10.5V7.5'
+          : 'M1.5 4.5H4.5V1.5M10.5 7.5H7.5V10.5'}
+        stroke="currentColor"
+        strokeWidth="1.25"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
 }
 
 function formatPlantedAt(iso: string): string {
@@ -482,8 +514,10 @@ export function GardenPanel({
   onOpenMarkdownArtifact,
   onResumeSeed,
   checkArtifactPath,
-  layout = 'stack',
   viewToggle,
+  frame,
+  onToggleFrame,
+  onEscapeFloor,
 }: GardenPanelProps) {
   // The places walked into, root last. Empty is the garden itself.
   const trail = useGardenWalk((walk) => walk.trail);
@@ -506,7 +540,8 @@ export function GardenPanel({
   const [documentError, setDocumentError] = useState<string | null>(null);
   const [titlePinned, setTitlePinned] = useState(false);
   const [trailOpen, setTrailOpen] = useState(false);
-  const [columnsWidth, setColumnsWidth] = useState(0);
+  const [panelWidth, setPanelWidth] = useState(0);
+  const panelObserver = useRef<ResizeObserver | null>(null);
   const columnsRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
@@ -516,16 +551,22 @@ export function GardenPanel({
   // different one, so it folds again rather than staying open behind your back.
   useEffect(() => setTrailOpen(false), [trail.length]);
 
-  // The columns renderer sizes itself to its own box, not to the window: the
-  // panel lives inside a surface that is not always the whole screen.
-  useLayoutEffect(() => {
-    const el = columnsRef.current;
-    if (!el) return;
-    setColumnsWidth(el.clientWidth);
-    const observer = new ResizeObserver(([entry]) => setColumnsWidth(entry.contentRect.width));
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [layout]);
+  // The panel sizes itself to its own box, not to the window: it is read in a
+  // dock slot, in the window, and — while the two exchange places — at every
+  // width in between. A callback ref rather than an effect, because the element
+  // it has to observe is replaced when the renderer changes, and because the
+  // measurement has to land in the same commit as the render that caused it or
+  // the first paint is drawn at the wrong width.
+  const measurePanel = useCallback((node: HTMLDivElement | null) => {
+    panelObserver.current?.disconnect();
+    panelObserver.current = null;
+    if (!node) return;
+    setPanelWidth(node.clientWidth);
+    const observer = new ResizeObserver(([entry]) => setPanelWidth(entry.contentRect.width));
+    observer.observe(node);
+    panelObserver.current = observer;
+  }, []);
+  const layout = panelWidth >= COLUMNS_MIN ? 'columns' : 'stack';
 
   // A crown can leave the garden while the reader stands inside its plot. Trim
   // the trail to what still exists rather than stranding them in a place that
@@ -690,9 +731,18 @@ export function GardenPanel({
     focusSearch();
   }, [focusSearch]);
 
-  // Escape climbs one level, and clears the query before it does either. Both
-  // are registered in that order so the query — pushed last — is on top of the
-  // stack while it has something to clear.
+  // Escape goes down exactly one level: it clears the query, else climbs the
+  // trail, else hands the garden down a frame. The stack is LIFO and each rung
+  // pushes when its own condition turns on, so most of the time the ordering
+  // comes for free — you type before you can clear, you walk in before you can
+  // climb. Source order is what decides when two rungs arm in the SAME commit,
+  // which is what reopening the garden onto a trail it already had does: the
+  // floor is registered first so the climb lands above it.
+  //
+  // React runs child effects before parent ones, so the floor has to be
+  // registered HERE rather than in GardenFrame: pushed from the frame it would
+  // land above the climb and swallow it.
+  useEscapeStack(onEscapeFloor ?? (() => {}), isOpen && !!onEscapeFloor);
   useEscapeStack(climbOne, isOpen && livingTrail.length > 0);
   useEscapeStack(() => setQuery(''), isOpen && query !== '');
 
@@ -918,7 +968,7 @@ export function GardenPanel({
   // costs 300 — which is why a five-deep walk looks like a two-deep one at the
   // same window size, and why widening the window shows you more of where you
   // came from instead of rearranging where you are.
-  const maxColumns = columnsWidth === 0 ? 2 : columnsWidth >= 1460 ? 3 : columnsWidth >= 1160 ? 2 : 1;
+  const maxColumns = panelWidth >= THIRD_COLUMN_MIN ? 3 : 2;
   const visibleLevels = levels.slice(Math.max(0, levels.length - maxColumns));
   const firstVisibleLevel = levels.length - visibleLevels.length;
 
@@ -1008,6 +1058,18 @@ export function GardenPanel({
               ? `hide ${closedToggle.count} closed`
               : 'hide closed'
             : `${closedToggle.count} closed`}
+        </button>
+      )}
+      {/* The way between the two frames, quiet, beside the way out. */}
+      {onToggleFrame && (
+        <button
+          type="button"
+          className="garden-chrome__frame"
+          onClick={onToggleFrame}
+          aria-label={frame === 'full' ? 'Return the garden to the dock' : 'Expand the garden'}
+          title={frame === 'full' ? 'Return to the dock (Esc)' : 'Expand (⌘⇧T)'}
+        >
+          <FrameGlyph direction={frame === 'full' ? 'in' : 'out'} />
         </button>
       )}
       <button type="button" className="garden-chrome__close" onClick={onClose} aria-label="Close">×</button>
@@ -1284,7 +1346,7 @@ export function GardenPanel({
   if (layout === 'columns') {
     const panes = searching ? 1 + (here ? 1 : 0) : visibleLevels.length + (here ? 1 : 0);
     return (
-      <div className="garden-panel is-columns" role="region" aria-label="The garden" onKeyDown={onPanelKeyDown}>
+      <div ref={measurePanel} className="garden-panel is-columns" role="region" aria-label="The garden" onKeyDown={onPanelKeyDown}>
         {trailNav}
         {searchLine}
         <div
@@ -1328,7 +1390,7 @@ export function GardenPanel({
 
   // ── Stack. One place at a time, which is all the dock has room for.
   return (
-    <div className="garden-panel" role="region" aria-label="The garden" onKeyDown={onPanelKeyDown}>
+    <div ref={measurePanel} className="garden-panel" role="region" aria-label="The garden" onKeyDown={onPanelKeyDown}>
       {trailNav}
       {searchLine}
       <div

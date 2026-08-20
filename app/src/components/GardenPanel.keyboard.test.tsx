@@ -71,7 +71,7 @@ describe('GardenPanel keyboard', () => {
   // look like, and the column under focus is the one they walk.
   it('walks a column, drills right and climbs left', () => {
     vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(1200);
-    render(<GardenPanel layout="columns" isOpen onClose={vi.fn()} seedsTotal={world.length} seeds={world} />);
+    render(<GardenPanel isOpen onClose={vi.fn()} seedsTotal={world.length} seeds={world} />);
 
     fireEvent.keyDown(panel(), { key: 'ArrowDown' });
     expect(focusedRow()).toBe('s-crown1');
