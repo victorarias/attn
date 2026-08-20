@@ -15,6 +15,9 @@ import { EventBusSettings } from './EventBusSettings';
 import { AutoModeSettings } from './AutoModeSettings';
 import { useAutoModePolicy } from '../hooks/useAutoModePolicy';
 import { SavedMark, useSavedFlash } from './useSavedFlash';
+import { useAgentSettingDrafts, useSettingDraft } from './settingsDrafts';
+import { useEndpointPanel } from './useEndpointPanel';
+import { usePluginPanel } from './usePluginPanel';
 import {
   assertValidSettingsSectionID,
   setSettingsAutomationHandle,
@@ -41,7 +44,6 @@ import {
   orderedAgents,
   resolvePreferredAgent,
 } from '../utils/agentAvailability';
-import { BUILD_PROFILE } from '../utils/buildProfile';
 import {
   defaultKeeperDutyModel,
   keeperDutyModelSelection,
@@ -246,66 +248,16 @@ export function SettingsModal({
   // beside its field: a blur that wrote something has to look different from a
   // blur that did nothing.
   const savedFlash = useSavedFlash();
-  const [projectsDir, setProjectsDir] = useState(settings.projects_directory || '');
-  const [notebookRoot, setNotebookRoot] = useState(settings['notebook.root'] || '');
-  const [agentExecutables, setAgentExecutables] = useState<Record<SessionAgent, string>>({});
-  // Per-agent chief-of-staff model override (chief_model_<agent>), edited locally
-  // and committed on blur like the executable paths. Blank => the agent default.
-  const [chiefModels, setChiefModels] = useState<Record<SessionAgent, string>>({});
-  // Per-agent chief-of-staff reasoning-effort override (chief_effort_<agent>). A
-  // <select>, so it commits immediately on change rather than on blur.
-  const [chiefEfforts, setChiefEfforts] = useState<Record<SessionAgent, string>>({});
-  // Per-agent default model override (default_model_<agent>) applied to EVERY
-  // launch of that agent, chief or not. Same edit semantics as chiefModels.
-  const [defaultModels, setDefaultModels] = useState<Record<SessionAgent, string>>({});
-  // Per-agent default reasoning-effort override (default_effort_<agent>) applied
-  // to EVERY launch of that agent, chief or not. Same edit semantics as chiefEfforts.
-  const [defaultEfforts, setDefaultEfforts] = useState<Record<SessionAgent, string>>({});
-  const [editorExecutable, setEditorExecutable] = useState(settings.editor_executable || '');
   const [defaultAgent, setDefaultAgent] = useState<SessionAgent>('claude');
-  const [reviewerModel, setReviewerModel] = useState(settings.reviewer_model || '');
-  // Context-window caps (tokens): the chief session and headless runs auto-compact
-  // at these thresholds instead of the model's full window. The daemon normalizes
-  // both to concrete effective values, so a blank fallback is only a safety net.
-  const [chiefContextCap, setChiefContextCap] = useState(
-    settings.chief_context_window_cap || String(DEFAULT_CONTEXT_WINDOW_CAP),
-  );
-  const [headlessContextCap, setHeadlessContextCap] = useState(
-    settings.headless_context_window_cap || String(DEFAULT_CONTEXT_WINDOW_CAP),
-  );
-  // Per-agent context-window cap (default_context_window_cap_<agent>) applied to
-  // EVERY session of that agent; a chief launch still takes the chief cap above.
-  // Blank => uncapped (the agent's own compaction behavior), unlike the chief and
-  // headless caps whose blank means the built-in default.
-  const [defaultContextCaps, setDefaultContextCaps] = useState<Record<SessionAgent, string>>({});
-  // Auto-settle windows, in seconds. Edited locally and committed on blur/Enter
-  // like the context caps; the daemon rejects out-of-range values.
-  const [autoSettleArm, setAutoSettleArm] = useState(
-    String(autoSettleSeconds(settings, AUTO_SETTLE_ARM_SETTING)),
-  );
-  const [autoSettleCountdown, setAutoSettleCountdown] = useState(
-    String(autoSettleSeconds(settings, AUTO_SETTLE_COUNTDOWN_SETTING)),
-  );
   // One draft (agent + model) per keeper duty, edited locally and committed per-row.
   const [keeperDrafts, setKeeperDrafts] = useState<Record<KeeperDutyKey, KeeperDraft>>(
     emptyKeeperDrafts,
   );
-  const [newEndpointName, setNewEndpointName] = useState('');
-  const [newEndpointTarget, setNewEndpointTarget] = useState('');
-  const [newEndpointProfile, setNewEndpointProfile] = useState(BUILD_PROFILE);
-  const [editingEndpointID, setEditingEndpointID] = useState<string | null>(null);
-  const [editingEndpointName, setEditingEndpointName] = useState('');
-  const [editingEndpointTarget, setEditingEndpointTarget] = useState('');
-  const [editingEndpointProfile, setEditingEndpointProfile] = useState('');
-  const [endpointError, setEndpointError] = useState<string | null>(null);
-  const [endpointActionID, setEndpointActionID] = useState<string | null>(null);
-  const [pluginSourcePath, setPluginSourcePath] = useState('');
-  const [pluginPriorityDrafts, setPluginPriorityDrafts] = useState<Record<string, string>>({});
-  const [pluginError, setPluginError] = useState<string | null>(null);
-  const [pluginActionName, setPluginActionName] = useState<string | null>(null);
-  const [pluginsLoading, setPluginsLoading] = useState(false);
   const [selectedSection, setSelectedSection] = useState<SettingsSectionID>('connectivity');
   const [settingsSearch, setSettingsSearch] = useState('');
+  // The two list panels keep their own form, error and in-flight row.
+  const endpointPanel = useEndpointPanel();
+  const pluginPanel = usePluginPanel(onListPlugins);
   const agentAvailability = useMemo(() => getAgentAvailability(settings), [settings]);
   const hasAvailableAgents = useMemo(
     () => hasAnyAvailableAgents(agentAvailability),
@@ -484,45 +436,101 @@ export function SettingsModal({
       : ptyBackendMode === 'embedded'
       ? 'Sessions run inside the daemon process and stop if the daemon restarts.'
       : 'Backend mode is not currently reported by the daemon.';
-  const endpointActionInFlight = endpointActionID !== null;
 
+  // Every free-text and per-agent field on this page applies on blur or on
+  // change, so each one owns a draft that seeds from the daemon's value while
+  // the modal is open and writes back once the edit is whole. `draftDeps` is
+  // the three things all of them need.
+  const draftDeps = { active: isOpen, onSetSetting, savedFlash };
+  const projectsDirDraft = useSettingDraft({
+    ...draftDeps, actual: actualProjectsDir, settingKey: 'projects_directory',
+  });
+  // Blank commits as an empty override, which the daemon resolves back to the
+  // per-profile default (~/attn-notebook).
+  const notebookRootDraft = useSettingDraft({
+    ...draftDeps, actual: actualNotebookRoot, settingKey: 'notebook.root',
+  });
+  const editorDraft = useSettingDraft({
+    ...draftDeps, actual: actualEditorExecutable, settingKey: 'editor_executable',
+  });
+  const reviewerModelDraft = useSettingDraft({
+    ...draftDeps, actual: actualReviewerModel, settingKey: 'reviewer_model',
+  });
+  // Context-window caps (tokens): the chief session and headless runs auto-compact
+  // at these thresholds instead of the model's full window. The daemon normalizes
+  // both to concrete effective values, so a blank fallback is only a safety net.
+  const chiefContextCapDraft = useSettingDraft({
+    ...draftDeps, actual: actualChiefContextCap, settingKey: 'chief_context_window_cap', trim: true,
+  });
+  const headlessContextCapDraft = useSettingDraft({
+    ...draftDeps, actual: actualHeadlessContextCap, settingKey: 'headless_context_window_cap', trim: true,
+  });
+  // Auto-settle windows, in seconds. The modal mounts before the daemon's
+  // settings broadcast arrives, so these two start on the built-in defaults;
+  // without the reseed a saved 60/20 policy would still read as 30/15, and the
+  // commit-on-blur would then write those defaults back over it.
+  const autoSettleArmDraft = useSettingDraft({
+    ...draftDeps, actual: actualAutoSettleArm, settingKey: AUTO_SETTLE_ARM_SETTING, trim: true,
+  });
+  const autoSettleCountdownDraft = useSettingDraft({
+    ...draftDeps, actual: actualAutoSettleCountdown, settingKey: AUTO_SETTLE_COUNTDOWN_SETTING, trim: true,
+  });
+  const executableDrafts = useAgentSettingDrafts({
+    ...draftDeps,
+    actual: actualAgentExecutables,
+    settingKey: (agent) => `${agent}_executable`,
+  });
+  // Per-agent chief-of-staff overrides (chief_model_<agent>, chief_effort_<agent>).
+  // Blank model => the agent default. The effort is a <select>, so it applies on
+  // change and borrows the model field's saved mark — they share one row.
+  const chiefModelDrafts = useAgentSettingDrafts({
+    ...draftDeps,
+    actual: actualChiefModels,
+    settingKey: (agent) => `chief_model_${agent}`,
+    trim: true,
+  });
+  const chiefEffortDrafts = useAgentSettingDrafts({
+    ...draftDeps,
+    actual: actualChiefEfforts,
+    settingKey: (agent) => `chief_effort_${agent}`,
+    flashKey: (agent) => `chief_model_${agent}`,
+  });
+  // The same pair applied to EVERY launch of that agent, chief or not.
+  const defaultModelDrafts = useAgentSettingDrafts({
+    ...draftDeps,
+    actual: actualDefaultModels,
+    settingKey: (agent) => `default_model_${agent}`,
+    trim: true,
+  });
+  const defaultEffortDrafts = useAgentSettingDrafts({
+    ...draftDeps,
+    actual: actualDefaultEfforts,
+    settingKey: (agent) => `default_effort_${agent}`,
+    flashKey: (agent) => `default_model_${agent}`,
+  });
+  // Per-agent context-window cap; a chief launch still takes the chief cap above.
+  // Blank => uncapped (the agent's own compaction behavior), unlike the chief and
+  // headless caps whose blank means the built-in default.
+  const defaultContextCapDrafts = useAgentSettingDrafts({
+    ...draftDeps,
+    actual: actualDefaultContextCaps,
+    settingKey: (agent) => `default_context_window_cap_${agent}`,
+    trim: true,
+  });
+
+  const { reopen: reopenEndpointPanel } = endpointPanel;
+  const { setSourcePath: setPluginSourcePath } = pluginPanel;
   useEffect(() => {
     if (!isOpen) return;
-    setProjectsDir(actualProjectsDir);
-    setNotebookRoot(actualNotebookRoot);
-    setAgentExecutables(actualAgentExecutables);
-    setChiefModels(actualChiefModels);
-    setChiefEfforts(actualChiefEfforts);
-    setDefaultModels(actualDefaultModels);
-    setDefaultEfforts(actualDefaultEfforts);
-    setEditorExecutable(actualEditorExecutable);
     setDefaultAgent(resolvedDefaultAgent);
-    setReviewerModel(actualReviewerModel);
-    setChiefContextCap(actualChiefContextCap);
-    setHeadlessContextCap(actualHeadlessContextCap);
-    setDefaultContextCaps(actualDefaultContextCaps);
-    // The modal mounts before the daemon's settings broadcast arrives, so these
-    // two start on the built-in defaults. Without this resync a saved 60/20
-    // policy would still be displayed as 30/15, and the commit-on-blur would
-    // then write those defaults back over it.
-    setAutoSettleArm(actualAutoSettleArm);
-    setAutoSettleCountdown(actualAutoSettleCountdown);
     setKeeperDrafts({
       summarize: initialKeeperDraft(KEEPER_DUTY_BY_KEY.summarize, actualKeeperConfigs.summarize, keeperAgents),
       narrate: initialKeeperDraft(KEEPER_DUTY_BY_KEY.narrate, actualKeeperConfigs.narrate, keeperAgents),
       compact: initialKeeperDraft(KEEPER_DUTY_BY_KEY.compact, actualKeeperConfigs.compact, keeperAgents),
     });
-    setNewEndpointName('');
-    setNewEndpointTarget('');
-    setEditingEndpointID(null);
-    setEditingEndpointName('');
-    setEditingEndpointTarget('');
-    setEndpointError(null);
-    setEndpointActionID(null);
+    reopenEndpointPanel();
     setPluginSourcePath('');
-    setPluginError(null);
-    setPluginActionName(null);
-  }, [isOpen, actualProjectsDir, actualNotebookRoot, actualAgentExecutables, actualChiefModels, actualChiefEfforts, actualDefaultModels, actualDefaultEfforts, actualDefaultContextCaps, actualEditorExecutable, resolvedDefaultAgent, actualReviewerModel, actualChiefContextCap, actualHeadlessContextCap, actualAutoSettleArm, actualAutoSettleCountdown, actualKeeperConfigs, keeperAgents]);
+  }, [isOpen, resolvedDefaultAgent, actualKeeperConfigs, keeperAgents, reopenEndpointPanel, setPluginSourcePath]);
 
   useEscapeStack(onClose, isOpen);
 
@@ -558,6 +566,7 @@ export function SettingsModal({
     return () => setSettingsAutomationHandle(null);
   }, [isOpen, selectedSection, settingsSearch]);
 
+  const { set: setProjectsDir } = projectsDirDraft;
   const handleBrowse = useCallback(async () => {
     const selected = await open({
       directory: true,
@@ -568,11 +577,7 @@ export function SettingsModal({
       setProjectsDir(selected);
       onSetSetting('projects_directory', selected);
     }
-  }, [onSetSetting]);
-
-  const handleInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    setProjectsDir(e.target.value);
-  }, []);
+  }, [onSetSetting, setProjectsDir]);
 
   const handleToggleTailscale = useCallback(() => {
     onSetSetting('tailscale_enabled', tailscaleEnabled ? 'false' : 'true');
@@ -589,22 +594,6 @@ export function SettingsModal({
     onSetSetting(OPEN_SENT_FILES_ENABLED_SETTING, openSentFilesEnabled ? 'false' : 'true');
   }, [onSetSetting, openSentFilesEnabled]);
 
-  const commitAutoSettleArm = useCallback(() => {
-    const next = autoSettleArm.trim();
-    if (next !== actualAutoSettleArm.trim()) {
-      onSetSetting(AUTO_SETTLE_ARM_SETTING, next);
-      savedFlash.flash(AUTO_SETTLE_ARM_SETTING);
-    }
-  }, [autoSettleArm, actualAutoSettleArm, onSetSetting, savedFlash]);
-
-  const commitAutoSettleCountdown = useCallback(() => {
-    const next = autoSettleCountdown.trim();
-    if (next !== actualAutoSettleCountdown.trim()) {
-      onSetSetting(AUTO_SETTLE_COUNTDOWN_SETTING, next);
-      savedFlash.flash(AUTO_SETTLE_COUNTDOWN_SETTING);
-    }
-  }, [autoSettleCountdown, actualAutoSettleCountdown, onSetSetting, savedFlash]);
-
   const handleToggleWorkflows = useCallback(() => {
     onSetSetting('workflows_enabled', workflowsEnabled ? 'false' : 'true');
   }, [onSetSetting, workflowsEnabled]);
@@ -613,19 +602,7 @@ export function SettingsModal({
     onSetSetting('model_capture.enabled', modelCaptureEnabled ? 'false' : 'true');
   }, [modelCaptureEnabled, onSetSetting]);
 
-  const handleInputBlur = useCallback(() => {
-    if (projectsDir !== actualProjectsDir) {
-      onSetSetting('projects_directory', projectsDir);
-      savedFlash.flash('projects_directory');
-    }
-  }, [projectsDir, actualProjectsDir, onSetSetting, savedFlash]);
-
-  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') {
-      handleInputBlur();
-    }
-  }, [handleInputBlur]);
-
+  const { set: setNotebookRoot } = notebookRootDraft;
   const handleBrowseNotebookRoot = useCallback(async () => {
     const selected = await open({
       directory: true,
@@ -636,100 +613,11 @@ export function SettingsModal({
       setNotebookRoot(selected);
       onSetSetting('notebook.root', selected);
     }
-  }, [onSetSetting]);
-
-  const handleNotebookRootChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    setNotebookRoot(e.target.value);
-  }, []);
-
-  // Blank commits as an empty override, which the daemon resolves back to the
-  // per-profile default (~/attn-notebook).
-  const commitNotebookRoot = useCallback(() => {
-    if (notebookRoot !== actualNotebookRoot) {
-      onSetSetting('notebook.root', notebookRoot);
-      savedFlash.flash('notebook.root');
-    }
-  }, [notebookRoot, actualNotebookRoot, onSetSetting, savedFlash]);
-
-  const handleNotebookRootKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') {
-      commitNotebookRoot();
-    }
-  }, [commitNotebookRoot]);
-
-  const handleExecutableChange = useCallback((agent: SessionAgent, value: string) => {
-    setAgentExecutables((prev) => ({ ...prev, [agent]: value }));
-  }, []);
-
-  const commitExecutable = useCallback((agent: SessionAgent) => {
-    const nextValue = agentExecutables[agent] || '';
-    const currentValue = actualAgentExecutables[agent] || '';
-    if (nextValue !== currentValue) {
-      onSetSetting(`${agent}_executable`, nextValue);
-      savedFlash.flash(`${agent}_executable`);
-    }
-  }, [actualAgentExecutables, agentExecutables, onSetSetting, savedFlash]);
-
-  const handleChiefModelChange = useCallback((agent: SessionAgent, value: string) => {
-    setChiefModels((prev) => ({ ...prev, [agent]: value }));
-  }, []);
-
-  const commitChiefModel = useCallback((agent: SessionAgent) => {
-    const nextValue = (chiefModels[agent] || '').trim();
-    const currentValue = (actualChiefModels[agent] || '').trim();
-    if (nextValue !== currentValue) {
-      onSetSetting(`chief_model_${agent}`, nextValue);
-      savedFlash.flash(`chief_model_${agent}`);
-    }
-  }, [actualChiefModels, chiefModels, onSetSetting, savedFlash]);
-
-  // A <select>, so change commits immediately rather than waiting for blur.
-  const handleChiefEffortChange = useCallback((agent: SessionAgent, value: string) => {
-    setChiefEfforts((prev) => ({ ...prev, [agent]: value }));
-    onSetSetting(`chief_effort_${agent}`, value);
-    savedFlash.flash(`chief_model_${agent}`);
-  }, [onSetSetting, savedFlash]);
-
-  const handleDefaultModelChange = useCallback((agent: SessionAgent, value: string) => {
-    setDefaultModels((prev) => ({ ...prev, [agent]: value }));
-  }, []);
-
-  const commitDefaultModel = useCallback((agent: SessionAgent) => {
-    const nextValue = (defaultModels[agent] || '').trim();
-    const currentValue = (actualDefaultModels[agent] || '').trim();
-    if (nextValue !== currentValue) {
-      onSetSetting(`default_model_${agent}`, nextValue);
-      savedFlash.flash(`default_model_${agent}`);
-    }
-  }, [actualDefaultModels, defaultModels, onSetSetting, savedFlash]);
-
-  // A <select>, so change commits immediately rather than waiting for blur.
-  const handleDefaultEffortChange = useCallback((agent: SessionAgent, value: string) => {
-    setDefaultEfforts((prev) => ({ ...prev, [agent]: value }));
-    onSetSetting(`default_effort_${agent}`, value);
-    savedFlash.flash(`default_model_${agent}`);
-  }, [onSetSetting, savedFlash]);
+  }, [onSetSetting, setNotebookRoot]);
 
   const handleToggleAutoApprove = useCallback(() => {
     onSetSetting('auto_approve_enabled', autoApproveEnabled ? 'false' : 'true');
   }, [autoApproveEnabled, onSetSetting]);
-
-  const handleEditorChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    setEditorExecutable(e.target.value);
-  }, []);
-
-  const handleEditorBlur = useCallback(() => {
-    if (editorExecutable !== actualEditorExecutable) {
-      onSetSetting('editor_executable', editorExecutable);
-      savedFlash.flash('editor_executable');
-    }
-  }, [editorExecutable, actualEditorExecutable, onSetSetting, savedFlash]);
-
-  const handleEditorKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') {
-      handleEditorBlur();
-    }
-  }, [handleEditorBlur]);
 
   const handleDefaultAgentChange = useCallback((agent: SessionAgent) => {
     if (!isAgentAvailable(agentAvailability, agent)) return;
@@ -808,169 +696,63 @@ export function SettingsModal({
     }));
   }, [keeperAgents, onSetSetting]);
 
-  const commitReviewerModel = useCallback(() => {
-    if (reviewerModel !== actualReviewerModel) {
-      onSetSetting('reviewer_model', reviewerModel);
-      savedFlash.flash('reviewer_model');
-    }
-  }, [actualReviewerModel, onSetSetting, reviewerModel, savedFlash]);
-
-  const commitChiefContextCap = useCallback(() => {
-    const next = chiefContextCap.trim();
-    if (next !== actualChiefContextCap.trim()) {
-      onSetSetting('chief_context_window_cap', next);
-      savedFlash.flash('chief_context_window_cap');
-    }
-  }, [chiefContextCap, actualChiefContextCap, onSetSetting, savedFlash]);
-
-  const commitHeadlessContextCap = useCallback(() => {
-    const next = headlessContextCap.trim();
-    if (next !== actualHeadlessContextCap.trim()) {
-      onSetSetting('headless_context_window_cap', next);
-      savedFlash.flash('headless_context_window_cap');
-    }
-  }, [headlessContextCap, actualHeadlessContextCap, onSetSetting, savedFlash]);
-
-  const handleDefaultContextCapChange = useCallback((agent: SessionAgent, value: string) => {
-    setDefaultContextCaps((prev) => ({ ...prev, [agent]: value }));
-  }, []);
-
-  const commitDefaultContextCap = useCallback((agent: SessionAgent) => {
-    const nextValue = (defaultContextCaps[agent] || '').trim();
-    const currentValue = (actualDefaultContextCaps[agent] || '').trim();
-    if (nextValue !== currentValue) {
-      onSetSetting(`default_context_window_cap_${agent}`, nextValue);
-      savedFlash.flash(`default_context_window_cap_${agent}`);
-    }
-  }, [actualDefaultContextCaps, defaultContextCaps, onSetSetting, savedFlash]);
-
   const handleAddEndpoint = useCallback(async () => {
-    const name = newEndpointName.trim();
-    const sshTarget = newEndpointTarget.trim();
-    const profile = newEndpointProfile.trim();
+    const name = endpointPanel.draft.name.trim();
+    const sshTarget = endpointPanel.draft.target.trim();
+    const profile = endpointPanel.draft.profile.trim();
     if (!name || !sshTarget) {
-      setEndpointError('Endpoint name and SSH target are required.');
+      endpointPanel.fail('Endpoint name and SSH target are required.');
       return;
     }
-    setEndpointError(null);
-    setEndpointActionID('new');
-    try {
+    await endpointPanel.run('new', 'Failed to add endpoint', async () => {
       await onAddEndpoint(name, sshTarget, profile);
-      setNewEndpointName('');
-      setNewEndpointTarget('');
-      setNewEndpointProfile(BUILD_PROFILE);
-    } catch (error) {
-      setEndpointError(error instanceof Error ? error.message : 'Failed to add endpoint');
-    } finally {
-      setEndpointActionID(null);
-    }
-  }, [newEndpointName, newEndpointProfile, newEndpointTarget, onAddEndpoint]);
-
-  const beginEditEndpoint = useCallback((endpoint: DaemonEndpoint) => {
-    setEndpointError(null);
-    setEditingEndpointID(endpoint.id);
-    setEditingEndpointName(endpoint.name);
-    setEditingEndpointTarget(endpoint.ssh_target);
-    setEditingEndpointProfile(endpoint.profile || '');
-  }, []);
-
-  const cancelEditEndpoint = useCallback(() => {
-    setEditingEndpointID(null);
-    setEditingEndpointName('');
-    setEditingEndpointTarget('');
-    setEditingEndpointProfile('');
-  }, []);
+      endpointPanel.clearDraft();
+    });
+  }, [endpointPanel, onAddEndpoint]);
 
   const handleSaveEndpoint = useCallback(async (endpointId: string) => {
-    const name = editingEndpointName.trim();
-    const sshTarget = editingEndpointTarget.trim();
-    const profile = editingEndpointProfile.trim();
+    const editing = endpointPanel.editing;
+    if (!editing) return;
+    const name = editing.name.trim();
+    const sshTarget = editing.target.trim();
+    const profile = editing.profile.trim();
     if (!name || !sshTarget) {
-      setEndpointError('Endpoint name and SSH target are required.');
+      endpointPanel.fail('Endpoint name and SSH target are required.');
       return;
     }
-    setEndpointError(null);
-    setEndpointActionID(endpointId);
-    try {
+    await endpointPanel.run(endpointId, 'Failed to update endpoint', async () => {
       await onUpdateEndpoint(endpointId, { name, ssh_target: sshTarget, profile });
-      cancelEditEndpoint();
-    } catch (error) {
-      setEndpointError(error instanceof Error ? error.message : 'Failed to update endpoint');
-    } finally {
-      setEndpointActionID(null);
-    }
-  }, [cancelEditEndpoint, editingEndpointName, editingEndpointProfile, editingEndpointTarget, onUpdateEndpoint]);
+      endpointPanel.cancelEdit();
+    });
+  }, [endpointPanel, onUpdateEndpoint]);
 
   const handleToggleEndpoint = useCallback(async (endpoint: DaemonEndpoint) => {
-    setEndpointError(null);
-    setEndpointActionID(endpoint.id);
-    try {
-      await onUpdateEndpoint(endpoint.id, { enabled: endpoint.enabled === false });
-    } catch (error) {
-      setEndpointError(error instanceof Error ? error.message : 'Failed to update endpoint');
-    } finally {
-      setEndpointActionID(null);
-    }
-  }, [onUpdateEndpoint]);
+    await endpointPanel.run(endpoint.id, 'Failed to update endpoint', () =>
+      onUpdateEndpoint(endpoint.id, { enabled: endpoint.enabled === false }).then(() => undefined));
+  }, [endpointPanel, onUpdateEndpoint]);
 
+  // Off then on: the daemon re-bootstraps the remote on the way back up.
   const handleRebootstrapEndpoint = useCallback(async (endpoint: DaemonEndpoint) => {
-    if (endpoint.enabled === false) {
-      return;
-    }
-    setEndpointError(null);
-    setEndpointActionID(endpoint.id);
-    try {
+    if (endpoint.enabled === false) return;
+    await endpointPanel.run(endpoint.id, 'Failed to re-bootstrap endpoint', async () => {
       await onUpdateEndpoint(endpoint.id, { enabled: false });
       await onUpdateEndpoint(endpoint.id, { enabled: true });
-    } catch (error) {
-      setEndpointError(error instanceof Error ? error.message : 'Failed to re-bootstrap endpoint');
-    } finally {
-      setEndpointActionID(null);
-    }
-  }, [onUpdateEndpoint]);
+    });
+  }, [endpointPanel, onUpdateEndpoint]);
 
   const handleRemoveEndpoint = useCallback(async (endpointId: string) => {
-    setEndpointError(null);
-    setEndpointActionID(endpointId);
-    try {
+    await endpointPanel.run(endpointId, 'Failed to remove endpoint', async () => {
       await onRemoveEndpoint(endpointId);
-      if (editingEndpointID === endpointId) {
-        cancelEditEndpoint();
-      }
-    } catch (error) {
-      setEndpointError(error instanceof Error ? error.message : 'Failed to remove endpoint');
-    } finally {
-      setEndpointActionID(null);
-    }
-  }, [cancelEditEndpoint, editingEndpointID, onRemoveEndpoint]);
+      if (endpointPanel.editing?.id === endpointId) endpointPanel.cancelEdit();
+    });
+  }, [endpointPanel, onRemoveEndpoint]);
 
   const handleSetEndpointRemoteWeb = useCallback(async (endpointId: string, enabled: boolean) => {
-    setEndpointError(null);
-    setEndpointActionID(endpointId);
-    try {
-      await onSetEndpointRemoteWeb(endpointId, enabled);
-    } catch (error) {
-      setEndpointError(error instanceof Error ? error.message : 'Failed to update remote web access');
-    } finally {
-      setEndpointActionID(null);
-    }
-  }, [onSetEndpointRemoteWeb]);
+    await endpointPanel.run(endpointId, 'Failed to update remote web access', () =>
+      onSetEndpointRemoteWeb(endpointId, enabled).then(() => undefined));
+  }, [endpointPanel, onSetEndpointRemoteWeb]);
 
-  const refreshPlugins = useCallback(async () => {
-    setPluginsLoading(true);
-    setPluginError(null);
-    try {
-      const result = await onListPlugins();
-      setPluginPriorityDrafts(
-        Object.fromEntries(result.plugins.map((plugin) => [plugin.name, String(plugin.priority)])),
-      );
-    } catch (error) {
-      setPluginError(error instanceof Error ? error.message : 'Failed to load plugins');
-    } finally {
-      setPluginsLoading(false);
-    }
-  }, [onListPlugins]);
-
+  const { refresh: refreshPlugins } = pluginPanel;
   useEffect(() => {
     if (!isOpen) return;
     void refreshPlugins();
@@ -985,103 +767,69 @@ export function SettingsModal({
     if (selected && typeof selected === 'string') {
       setPluginSourcePath(selected);
     }
-  }, []);
+  }, [setPluginSourcePath]);
 
   const handleInstallPlugin = useCallback(async () => {
-    const source = pluginSourcePath.trim();
+    const source = pluginPanel.sourcePath.trim();
     if (source === '') {
-      setPluginError('Plugin source is required');
+      pluginPanel.fail('Plugin source is required');
       return;
     }
-    setPluginError(null);
-    setPluginActionName('install');
-    try {
+    await pluginPanel.run('install', 'Failed to install plugin', async () => {
       await onInstallPlugin(source);
       setPluginSourcePath('');
       await refreshPlugins();
-    } catch (error) {
-      setPluginError(error instanceof Error ? error.message : 'Failed to install plugin');
-    } finally {
-      setPluginActionName(null);
-    }
-  }, [onInstallPlugin, pluginSourcePath, refreshPlugins]);
+    });
+  }, [onInstallPlugin, pluginPanel, refreshPlugins, setPluginSourcePath]);
 
   const handleRemovePlugin = useCallback(async (name: string) => {
-    setPluginError(null);
-    setPluginActionName(name);
-    try {
+    await pluginPanel.run(name, 'Failed to remove plugin', async () => {
       await onRemovePlugin(name);
       await refreshPlugins();
-    } catch (error) {
-      setPluginError(error instanceof Error ? error.message : 'Failed to remove plugin');
-    } finally {
-      setPluginActionName(null);
-    }
-  }, [onRemovePlugin, refreshPlugins]);
+    });
+  }, [onRemovePlugin, pluginPanel, refreshPlugins]);
 
   const handleInstallBundledPlugin = useCallback(async (name: string) => {
-    setPluginError(null);
-    setPluginActionName(name);
-    try {
+    await pluginPanel.run(name, 'Failed to install bundled plugin', async () => {
       if (!onInstallBundledPlugin) throw new Error('Bundled plugin installation is unavailable');
       await onInstallBundledPlugin(name);
       await refreshPlugins();
-    } catch (error) {
-      setPluginError(error instanceof Error ? error.message : 'Failed to install bundled plugin');
-    } finally {
-      setPluginActionName(null);
-    }
-  }, [onInstallBundledPlugin, refreshPlugins]);
+    });
+  }, [onInstallBundledPlugin, pluginPanel, refreshPlugins]);
 
   const handleUninstallPlugin = useCallback(async (name: string) => {
-    setPluginError(null);
-    setPluginActionName(name);
-    try {
+    await pluginPanel.run(name, 'Failed to uninstall plugin', async () => {
       if (!onUninstallPlugin) throw new Error('Plugin uninstall is unavailable');
       await onUninstallPlugin(name);
       await refreshPlugins();
-    } catch (error) {
-      setPluginError(error instanceof Error ? error.message : 'Failed to uninstall plugin');
-    } finally {
-      setPluginActionName(null);
-    }
-  }, [onUninstallPlugin, refreshPlugins]);
-
-  const handlePluginPriorityChange = useCallback((name: string, value: string) => {
-    setPluginPriorityDrafts((prev) => ({ ...prev, [name]: value }));
-  }, []);
+    });
+  }, [onUninstallPlugin, pluginPanel, refreshPlugins]);
 
   // Commits on blur rather than behind a Save button. Priority is a dispatch
   // order, so a half-typed one applies nothing worse than a different order,
   // and a blur is the first moment the number is whole.
   const commitPluginPriority = useCallback(async (name: string, current: number) => {
-    const raw = (pluginPriorityDrafts[name] ?? '').trim();
+    const raw = pluginPanel.priorityDraft(name).trim();
     if (raw === String(current)) return;
     const priority = Number(raw);
     if (!Number.isInteger(priority)) {
-      setPluginError('Plugin priority must be an integer');
+      pluginPanel.fail('Plugin priority must be an integer');
       return;
     }
-    setPluginError(null);
-    setPluginActionName(name);
-    try {
+    await pluginPanel.run(name, 'Failed to update plugin priority', async () => {
       await onSetPluginPriority(name, priority);
       await refreshPlugins();
       savedFlash.flash(`plugin_priority_${name}`);
-    } catch (error) {
-      setPluginError(error instanceof Error ? error.message : 'Failed to update plugin priority');
-    } finally {
-      setPluginActionName(null);
-    }
-  }, [onSetPluginPriority, pluginPriorityDrafts, refreshPlugins, savedFlash]);
+    });
+  }, [onSetPluginPriority, pluginPanel, refreshPlugins, savedFlash]);
 
   const connectedEndpointCount = endpoints.filter((endpoint) => endpoint.status === 'connected').length;
   const activePluginCount = plugins.filter((plugin) => plugin.connected || plugin.running).length;
   const availableAgentCount = orderedAgentList.filter((agent) => isAgentAvailable(agentAvailability, agent)).length;
   const mutedItemCount = mutedRepos.length + mutedAuthors.length;
   const pluginProblemCount = pluginIssues.length + plugins.filter((plugin) => plugin.health_status === 'unhealthy').length;
-  const hasProjectsDirChange = projectsDir !== actualProjectsDir;
-  const hasReviewModelChange = reviewerModel !== actualReviewerModel;
+  const hasProjectsDirChange = projectsDirDraft.value !== actualProjectsDir;
+  const hasReviewModelChange = reviewerModelDraft.value !== actualReviewerModel;
 
   // Grouped by what the user is trying to do, not by the subsystem the code
   // talks to. Auto mode used to sit under Background Tasks because both landed
@@ -1479,10 +1227,10 @@ export function SettingsModal({
             <input
               data-testid="settings-projects-directory-input"
               type="text"
-              value={projectsDir}
-              onChange={handleInputChange}
-              onBlur={handleInputBlur}
-              onKeyDown={handleKeyDown}
+              value={projectsDirDraft.value}
+              onChange={projectsDirDraft.onChange}
+              onBlur={projectsDirDraft.commit}
+              onKeyDown={projectsDirDraft.onKeyDown}
               placeholder="/Users/you/projects"
               className="settings-input"
               autoCapitalize="none"
@@ -1516,10 +1264,10 @@ export function SettingsModal({
             <input
               data-testid="settings-notebook-root-input"
               type="text"
-              value={notebookRoot}
-              onChange={handleNotebookRootChange}
-              onBlur={commitNotebookRoot}
-              onKeyDown={handleNotebookRootKeyDown}
+              value={notebookRootDraft.value}
+              onChange={notebookRootDraft.onChange}
+              onBlur={notebookRootDraft.commit}
+              onKeyDown={notebookRootDraft.onKeyDown}
               placeholder={effectiveNotebookRoot || '~/attn-notebook'}
               className="settings-input"
               autoCapitalize="none"
@@ -1664,37 +1412,37 @@ export function SettingsModal({
           <div className="settings-form-grid endpoint-form">
             <input
               type="text"
-              value={newEndpointName}
-              onChange={(e) => setNewEndpointName(e.target.value)}
+              value={endpointPanel.draft.name}
+              onChange={(e) => endpointPanel.setDraft('name', e.target.value)}
               placeholder="gpu-box"
               className="settings-input"
               aria-label="Endpoint name"
-              disabled={endpointActionInFlight}
+              disabled={endpointPanel.busy}
               autoCapitalize="none"
               autoCorrect="off"
               spellCheck={false}
             />
             <input
               type="text"
-              value={newEndpointTarget}
-              onChange={(e) => setNewEndpointTarget(e.target.value)}
+              value={endpointPanel.draft.target}
+              onChange={(e) => endpointPanel.setDraft('target', e.target.value)}
               placeholder="user@gpu-box"
               className="settings-input"
               aria-label="SSH target"
-              disabled={endpointActionInFlight}
+              disabled={endpointPanel.busy}
               autoCapitalize="none"
               autoCorrect="off"
               spellCheck={false}
             />
             <input
               type="text"
-              value={newEndpointProfile}
-              onChange={(e) => setNewEndpointProfile(e.target.value)}
+              value={endpointPanel.draft.profile}
+              onChange={(e) => endpointPanel.setDraft('profile', e.target.value)}
               placeholder="default"
               pattern="[a-z0-9][a-z0-9-]{0,15}"
               className="settings-input"
               aria-label="Profile"
-              disabled={endpointActionInFlight}
+              disabled={endpointPanel.busy}
               autoCapitalize="none"
               autoCorrect="off"
               spellCheck={false}
@@ -1702,27 +1450,27 @@ export function SettingsModal({
             <button
               className="settings-action"
               onClick={() => void handleAddEndpoint()}
-              disabled={endpointActionInFlight}
+              disabled={endpointPanel.busy}
             >
               Add Endpoint
             </button>
           </div>
-          {endpointError && <div className="settings-warning">{endpointError}</div>}
+          {endpointPanel.error && <div className="settings-warning">{endpointPanel.error}</div>}
           {endpoints.length === 0 ? (
             <p className="settings-empty">No remote endpoints configured.</p>
           ) : (
             <div className="endpoint-list">
               {endpoints.map((endpoint) => {
-                const isEditing = editingEndpointID === endpoint.id;
-                const isBusy = endpointActionID === endpoint.id;
+                const isEditing = endpointPanel.editing?.id === endpoint.id;
+                const isBusy = endpointPanel.busyKey === endpoint.id;
                 const availableAgents = endpoint.capabilities?.agents_available || [];
                 const remoteWebEnabled = endpoint.capabilities?.tailscale_enabled === true;
                 const remoteWebStatus = endpoint.capabilities?.tailscale_status || (remoteWebEnabled ? 'starting' : 'disabled');
                 const remoteWebURL = endpoint.capabilities?.tailscale_url;
                 const remoteWebAuthURL = endpoint.capabilities?.tailscale_auth_url;
                 const remoteWebError = endpoint.capabilities?.tailscale_error;
-                const canToggleRemoteWeb = endpoint.status === 'connected' && !endpointActionInFlight;
-                const canRebootstrap = endpoint.enabled !== false && !endpointActionInFlight;
+                const canToggleRemoteWeb = endpoint.status === 'connected' && !endpointPanel.busy;
+                const canRebootstrap = endpoint.enabled !== false && !endpointPanel.busy;
                 return (
                   <div key={endpoint.id} className={`endpoint-card status-${endpoint.status}`}>
                     <div className="endpoint-card-header">
@@ -1739,16 +1487,16 @@ export function SettingsModal({
                             <button className="settings-action" onClick={() => void handleSaveEndpoint(endpoint.id)} disabled={isBusy}>
                               Save
                             </button>
-                            <button className="settings-action" onClick={cancelEditEndpoint} disabled={endpointActionInFlight}>
+                            <button className="settings-action" onClick={endpointPanel.cancelEdit} disabled={endpointPanel.busy}>
                               Cancel
                             </button>
                           </>
                         ) : (
-                          <button className="settings-action" onClick={() => beginEditEndpoint(endpoint)} disabled={endpointActionInFlight}>
+                          <button className="settings-action" onClick={() => endpointPanel.beginEdit(endpoint)} disabled={endpointPanel.busy}>
                             Edit
                           </button>
                         )}
-                        <button className="settings-action" onClick={() => void handleToggleEndpoint(endpoint)} disabled={endpointActionInFlight}>
+                        <button className="settings-action" onClick={() => void handleToggleEndpoint(endpoint)} disabled={endpointPanel.busy}>
                           {endpoint.enabled === false ? 'Enable' : 'Disable'}
                         </button>
                         <button
@@ -1765,7 +1513,7 @@ export function SettingsModal({
                         >
                           {remoteWebEnabled ? 'Disable Web' : 'Enable Web'}
                         </button>
-                        <button className="settings-action danger" onClick={() => void handleRemoveEndpoint(endpoint.id)} disabled={endpointActionInFlight}>
+                        <button className="settings-action danger" onClick={() => void handleRemoveEndpoint(endpoint.id)} disabled={endpointPanel.busy}>
                           Remove
                         </button>
                       </div>
@@ -1774,35 +1522,35 @@ export function SettingsModal({
                       <div className="settings-form-grid endpoint-form-inline">
                         <input
                           type="text"
-                          value={editingEndpointName}
-                          onChange={(e) => setEditingEndpointName(e.target.value)}
+                          value={endpointPanel.editing?.name ?? ''}
+                          onChange={(e) => endpointPanel.setEdit('name', e.target.value)}
                           className="settings-input"
                           aria-label="Edit endpoint name"
-                          disabled={endpointActionInFlight}
+                          disabled={endpointPanel.busy}
                           autoCapitalize="none"
                           autoCorrect="off"
                           spellCheck={false}
                         />
                         <input
                           type="text"
-                          value={editingEndpointTarget}
-                          onChange={(e) => setEditingEndpointTarget(e.target.value)}
+                          value={endpointPanel.editing?.target ?? ''}
+                          onChange={(e) => endpointPanel.setEdit('target', e.target.value)}
                           className="settings-input"
                           aria-label="Edit SSH target"
-                          disabled={endpointActionInFlight}
+                          disabled={endpointPanel.busy}
                           autoCapitalize="none"
                           autoCorrect="off"
                           spellCheck={false}
                         />
                         <input
                           type="text"
-                          value={editingEndpointProfile}
-                          onChange={(e) => setEditingEndpointProfile(e.target.value)}
+                          value={endpointPanel.editing?.profile ?? ''}
+                          onChange={(e) => endpointPanel.setEdit('profile', e.target.value)}
                           className="settings-input"
                           aria-label="Edit profile"
                           placeholder="default"
                           pattern="[a-z0-9][a-z0-9-]{0,15}"
-                          disabled={endpointActionInFlight}
+                          disabled={endpointPanel.busy}
                           autoCapitalize="none"
                           autoCorrect="off"
                           spellCheck={false}
@@ -1903,38 +1651,38 @@ export function SettingsModal({
         <div className="settings-inline-form plugin-form">
           <input
             type="text"
-            value={pluginSourcePath}
+            value={pluginPanel.sourcePath}
             onChange={(e) => setPluginSourcePath(e.target.value)}
             placeholder="git@host:team/my-attn-plugin.git or /Users/you/src/my-attn-plugin"
             className="settings-input"
             aria-label="Plugin source"
-            disabled={pluginActionName !== null}
+            disabled={pluginPanel.busy}
             autoCapitalize="none"
             autoCorrect="off"
             spellCheck={false}
           />
-          <button className="settings-action" onClick={() => void handleBrowsePluginPath()} disabled={pluginActionName !== null}>
+          <button className="settings-action" onClick={() => void handleBrowsePluginPath()} disabled={pluginPanel.busy}>
             Browse
           </button>
-          <button className="settings-action" onClick={() => void handleInstallPlugin()} disabled={pluginActionName !== null}>
+          <button className="settings-action" onClick={() => void handleInstallPlugin()} disabled={pluginPanel.busy}>
             Install Plugin
           </button>
         </div>
-        {pluginError && <div className="settings-warning">{pluginError}</div>}
+        {pluginPanel.error && <div className="settings-warning">{pluginPanel.error}</div>}
         {pluginIssues.map((issue) => (
           <div key={issue.path} className="settings-warning">
             {issue.path}: {issue.error}
           </div>
         ))}
-        {pluginsLoading ? (
+        {pluginPanel.loading ? (
           <p className="settings-empty">Loading plugins...</p>
         ) : plugins.length === 0 ? (
           <p className="settings-empty">No plugins available or installed.</p>
         ) : (
           <div className="plugin-list">
             {plugins.map((plugin) => {
-              const busy = pluginActionName === plugin.name;
-              const draftPriority = pluginPriorityDrafts[plugin.name] ?? String(plugin.priority);
+              const busy = pluginPanel.busyKey === plugin.name;
+              const draftPriority = pluginPanel.priorityDraft(plugin.name, String(plugin.priority));
               const healthStatus = plugin.health_status || 'unknown';
               const installed = plugin.installation_state === 'installed';
               const runtimePhase = plugin.runtime_state || plugin.runtime_phase || (plugin.connected ? 'connected' : plugin.running ? 'starting' : 'stopped');
@@ -1956,15 +1704,15 @@ export function SettingsModal({
                       )}
                     </div>
                     {plugin.availability === 'bundled' && !installed ? (
-                      <button className="settings-action" onClick={() => void handleInstallBundledPlugin(plugin.name)} disabled={pluginActionName !== null || !plugin.can_install}>
+                      <button className="settings-action" onClick={() => void handleInstallBundledPlugin(plugin.name)} disabled={pluginPanel.busy || !plugin.can_install}>
                         Install
                       </button>
                     ) : plugin.availability === 'bundled' ? (
-                      <button className="settings-action danger" onClick={() => void handleUninstallPlugin(plugin.name)} disabled={pluginActionName !== null || !plugin.can_uninstall}>
+                      <button className="settings-action danger" onClick={() => void handleUninstallPlugin(plugin.name)} disabled={pluginPanel.busy || !plugin.can_uninstall}>
                         Uninstall
                       </button>
                     ) : (
-                      <button className="settings-action danger" onClick={() => void handleRemovePlugin(plugin.name)} disabled={pluginActionName !== null || !plugin.can_uninstall}>
+                      <button className="settings-action danger" onClick={() => void handleRemovePlugin(plugin.name)} disabled={pluginPanel.busy || !plugin.can_uninstall}>
                         Remove
                       </button>
                     )}
@@ -2002,7 +1750,7 @@ export function SettingsModal({
                       <input
                         type="number"
                         value={draftPriority}
-                        onChange={(e) => handlePluginPriorityChange(plugin.name, e.target.value)}
+                        onChange={(e) => pluginPanel.setPriorityDraft(plugin.name, e.target.value)}
                         onBlur={() => void commitPluginPriority(plugin.name, plugin.priority)}
                         onKeyDown={(e) => {
                           if (e.key === 'Enter') {
@@ -2011,7 +1759,7 @@ export function SettingsModal({
                         }}
                         className="settings-input plugin-priority-input"
                         aria-label={`${plugin.name} priority`}
-                        disabled={pluginActionName !== null}
+                        disabled={pluginPanel.busy}
                       />
                       <SavedMark
                         shown={savedFlash.saved(`plugin_priority_${plugin.name}`)}
@@ -2044,7 +1792,7 @@ export function SettingsModal({
             {executableAgentList.map((agent) => {
               const available = isAgentAvailable(agentAvailability, agent);
               const inputId = `settings-${agent}-exec`;
-              const value = agentExecutables[agent] || '';
+              const value = executableDrafts.value(agent);
               return (
                 <div className="settings-field" key={agent}>
                   <label className="settings-label" htmlFor={inputId}>{agentLabel(agent)}</label>
@@ -2055,11 +1803,11 @@ export function SettingsModal({
                     id={inputId}
                     type="text"
                     value={value}
-                    onChange={(e) => handleExecutableChange(agent, e.target.value)}
-                    onBlur={() => commitExecutable(agent)}
+                    onChange={(e) => executableDrafts.set(agent, e.target.value)}
+                    onBlur={() => executableDrafts.commit(agent)}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') {
-                        commitExecutable(agent);
+                        executableDrafts.commit(agent);
                       }
                     }}
                     placeholder={agent}
@@ -2078,10 +1826,10 @@ export function SettingsModal({
               <input
                 id="settings-editor-exec"
                 type="text"
-                value={editorExecutable}
-                onChange={handleEditorChange}
-                onBlur={handleEditorBlur}
-                onKeyDown={handleEditorKeyDown}
+                value={editorDraft.value}
+                onChange={editorDraft.onChange}
+                onBlur={editorDraft.commit}
+                onKeyDown={editorDraft.onKeyDown}
                 placeholder="$EDITOR"
                 className="settings-input"
                 autoCapitalize="none"
@@ -2214,8 +1962,8 @@ export function SettingsModal({
               {chiefOverrideAgentList.map((agent) => {
                 const inputId = `settings-chief-model-${agent}`;
                 const effortId = `settings-chief-effort-${agent}`;
-                const value = chiefModels[agent] || '';
-                const effortValue = chiefEfforts[agent] || '';
+                const value = chiefModelDrafts.value(agent);
+                const effortValue = chiefEffortDrafts.value(agent);
                 const effortLevels = CHIEF_EFFORT_LEVELS[agent] || [];
                 return (
                   <Fragment key={agent}>
@@ -2226,11 +1974,11 @@ export function SettingsModal({
                         data-testid={inputId}
                         type="text"
                         value={value}
-                        onChange={(e) => handleChiefModelChange(agent, e.target.value)}
-                        onBlur={() => commitChiefModel(agent)}
+                        onChange={(e) => chiefModelDrafts.set(agent, e.target.value)}
+                        onBlur={() => chiefModelDrafts.commit(agent)}
                         onKeyDown={(e) => {
                           if (e.key === 'Enter') {
-                            commitChiefModel(agent);
+                            chiefModelDrafts.commit(agent);
                           }
                         }}
                         placeholder={agent === 'claude' ? 'opus — blank for default' : 'gpt-5.4 — blank for default'}
@@ -2248,7 +1996,7 @@ export function SettingsModal({
                         data-testid={effortId}
                         className="settings-input"
                         value={effortValue}
-                        onChange={(e) => handleChiefEffortChange(agent, e.target.value)}
+                        onChange={(e) => chiefEffortDrafts.apply(agent, e.target.value)}
                       >
                         <option value="">Agent default</option>
                         {effortLevels.map((level) => (
@@ -2283,8 +2031,8 @@ export function SettingsModal({
               {defaultOverrideAgentList.map((agent) => {
                 const inputId = `settings-default-model-${agent}`;
                 const effortId = `settings-default-effort-${agent}`;
-                const value = defaultModels[agent] || '';
-                const effortValue = defaultEfforts[agent] || '';
+                const value = defaultModelDrafts.value(agent);
+                const effortValue = defaultEffortDrafts.value(agent);
                 const effortLevels = CHIEF_EFFORT_LEVELS[agent] || [];
                 return (
                   <Fragment key={agent}>
@@ -2295,11 +2043,11 @@ export function SettingsModal({
                         data-testid={inputId}
                         type="text"
                         value={value}
-                        onChange={(e) => handleDefaultModelChange(agent, e.target.value)}
-                        onBlur={() => commitDefaultModel(agent)}
+                        onChange={(e) => defaultModelDrafts.set(agent, e.target.value)}
+                        onBlur={() => defaultModelDrafts.commit(agent)}
                         onKeyDown={(e) => {
                           if (e.key === 'Enter') {
-                            commitDefaultModel(agent);
+                            defaultModelDrafts.commit(agent);
                           }
                         }}
                         placeholder={agent === 'claude' ? 'opus — blank for default' : 'gpt-5.4 — blank for default'}
@@ -2317,7 +2065,7 @@ export function SettingsModal({
                         data-testid={effortId}
                         className="settings-input"
                         value={effortValue}
-                        onChange={(e) => handleDefaultEffortChange(agent, e.target.value)}
+                        onChange={(e) => defaultEffortDrafts.apply(agent, e.target.value)}
                       >
                         <option value="">Agent default</option>
                         {effortLevels.map((level) => (
@@ -2360,12 +2108,12 @@ export function SettingsModal({
                 min={10000}
                 max={2000000}
                 step={1000}
-                value={chiefContextCap}
-                onChange={(e) => setChiefContextCap(e.target.value)}
-                onBlur={commitChiefContextCap}
+                value={chiefContextCapDraft.value}
+                onChange={chiefContextCapDraft.onChange}
+                onBlur={chiefContextCapDraft.commit}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') {
-                    commitChiefContextCap();
+                    chiefContextCapDraft.commit();
                   }
                 }}
                 className="settings-input"
@@ -2381,12 +2129,12 @@ export function SettingsModal({
                 min={10000}
                 max={2000000}
                 step={1000}
-                value={headlessContextCap}
-                onChange={(e) => setHeadlessContextCap(e.target.value)}
-                onBlur={commitHeadlessContextCap}
+                value={headlessContextCapDraft.value}
+                onChange={headlessContextCapDraft.onChange}
+                onBlur={headlessContextCapDraft.commit}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') {
-                    commitHeadlessContextCap();
+                    headlessContextCapDraft.commit();
                   }
                 }}
                 className="settings-input"
@@ -2405,12 +2153,12 @@ export function SettingsModal({
                     min={10000}
                     max={2000000}
                     step={1000}
-                    value={defaultContextCaps[agent] || ''}
-                    onChange={(e) => handleDefaultContextCapChange(agent, e.target.value)}
-                    onBlur={() => commitDefaultContextCap(agent)}
+                    value={defaultContextCapDrafts.value(agent)}
+                    onChange={(e) => defaultContextCapDrafts.set(agent, e.target.value)}
+                    onBlur={() => defaultContextCapDrafts.commit(agent)}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') {
-                        commitDefaultContextCap(agent);
+                        defaultContextCapDrafts.commit(agent);
                       }
                     }}
                     placeholder="blank — agent default"
@@ -2502,12 +2250,12 @@ export function SettingsModal({
               <input
                 id="settings-reviewer-model"
                 type="text"
-                value={reviewerModel}
-                onChange={(e) => setReviewerModel(e.target.value)}
-                onBlur={commitReviewerModel}
+                value={reviewerModelDraft.value}
+                onChange={reviewerModelDraft.onChange}
+                onBlur={reviewerModelDraft.commit}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') {
-                    commitReviewerModel();
+                    reviewerModelDraft.commit();
                   }
                 }}
                 placeholder="claude-opus-4-6"
@@ -2817,12 +2565,12 @@ export function SettingsModal({
                 min={5}
                 max={3600}
                 step={5}
-                value={autoSettleArm}
-                onChange={(e) => setAutoSettleArm(e.target.value)}
-                onBlur={commitAutoSettleArm}
+                value={autoSettleArmDraft.value}
+                onChange={autoSettleArmDraft.onChange}
+                onBlur={autoSettleArmDraft.commit}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') {
-                    commitAutoSettleArm();
+                    autoSettleArmDraft.commit();
                   }
                 }}
                 className="settings-input"
@@ -2844,12 +2592,12 @@ export function SettingsModal({
                 min={3}
                 max={600}
                 step={1}
-                value={autoSettleCountdown}
-                onChange={(e) => setAutoSettleCountdown(e.target.value)}
-                onBlur={commitAutoSettleCountdown}
+                value={autoSettleCountdownDraft.value}
+                onChange={autoSettleCountdownDraft.onChange}
+                onBlur={autoSettleCountdownDraft.commit}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') {
-                    commitAutoSettleCountdown();
+                    autoSettleCountdownDraft.commit();
                   }
                 }}
                 className="settings-input"
