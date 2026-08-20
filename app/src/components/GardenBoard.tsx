@@ -23,7 +23,15 @@
 // the harness walks.
 //
 // Prototype. See docs/plans/2026-08-20-garden-kanban-board-prototype.md.
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react';
 import type { Seed } from '../hooks/useDaemonSocket';
 import { useEscapeStack } from '../hooks/useEscapeStack';
@@ -503,7 +511,9 @@ export function GardenBoard({
   // board is a whole surface: it reads keys from the document while it is up,
   // and steps aside for anything being typed into.
   const keys = useRef(onKeyDown);
-  keys.current = onKeyDown;
+  useLayoutEffect(() => {
+    keys.current = onKeyDown;
+  });
   useEffect(() => {
     const listener = (event: KeyboardEvent) => keys.current(event);
     document.addEventListener('keydown', listener);
