@@ -439,6 +439,16 @@ func TestParseSeedReaderMessages(t *testing.T) {
 			t.Fatalf("parsed (%q, %T, %+v)", cmd, data, msg)
 		}
 	})
+	t.Run("set seed resume identity", func(t *testing.T) {
+		cmd, data, err := ParseMessage([]byte(`{"cmd":"seed_set_resume","seed_id":"s-abc123","resume_session_id":"native-1","resume_cwd":"/tmp/work","resume_agent":"copilot"}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		msg, ok := data.(*SeedSetResumeMessage)
+		if cmd != CmdSeedSetResume || !ok || msg.SeedID != "s-abc123" || Deref(msg.ResumeSessionID) != "native-1" || Deref(msg.ResumeCwd) != "/tmp/work" || Deref(msg.ResumeAgent) != "copilot" {
+			t.Fatalf("parsed (%q, %T, %+v)", cmd, data, msg)
+		}
+	})
 }
 
 func TestParseBrowserMessages(t *testing.T) {

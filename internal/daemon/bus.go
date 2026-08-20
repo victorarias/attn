@@ -214,6 +214,9 @@ const (
 	// garden snapshot carries the new body and revision so open readers can
 	// re-anchor immediately without waiting on a detail refetch.
 	FactGardenBodyEdited = "garden.body_edited"
+	// FactGardenResumeIdentityChanged: the seed-owned fallback launch identity
+	// was set or cleared. Subject is the seed id.
+	FactGardenResumeIdentityChanged = "garden.resume_identity_changed"
 	// One fact per lifecycle move, rather than one `garden.changed`: the subject
 	// says which seed and the name says what happened to it, which is what a
 	// change feed and a future nudge both read. All of them project the same way

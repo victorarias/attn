@@ -291,6 +291,11 @@ func seedToProtocol(seed garden.Seed, doc docstore.Document, ready bool) protoco
 	if seed.Reason != "" {
 		out.Reason = protocol.Ptr(seed.Reason)
 	}
+	if seed.ResumeSessionID != "" {
+		out.ResumeSessionID = protocol.Ptr(seed.ResumeSessionID)
+		out.ResumeCwd = protocol.Ptr(seed.ResumeCwd)
+		out.ResumeAgent = protocol.Ptr(seed.ResumeAgent)
+	}
 	for _, e := range seed.Edges {
 		out.Edges = append(out.Edges, protocol.SeedEdge{Kind: e.Kind, To: e.To})
 	}
@@ -419,6 +424,14 @@ func (d *Daemon) handleSeedPlant(conn net.Conn, msg *protocol.SeedPlantMessage) 
 		Edges:          []garden.Edge{},
 		Vars:           []garden.Var{},
 	}
+	resumeID, resumeCwd, resumeAgent, err := normalizeSeedResumeIdentity(
+		protocol.Deref(msg.ResumeSessionID), protocol.Deref(msg.ResumeCwd), protocol.Deref(msg.ResumeAgent),
+	)
+	if err != nil {
+		d.sendGardenError(conn, "plant", err)
+		return
+	}
+	seed.ResumeSessionID, seed.ResumeCwd, seed.ResumeAgent = resumeID, resumeCwd, resumeAgent
 	// Planting under a crown: the seed is born part of that plot. The crown must
 	// be planted — an edge to nothing is a plot nobody can find — but its state
 	// does not matter: planting into a closed plot is the planter's call.
@@ -749,6 +762,79 @@ func (d *Daemon) handleSeedEdit(conn net.Conn, msg *protocol.SeedEditMessage) {
 		Ok:             true,
 		SeedEditResult: &protocol.SeedEditResult{Seed: seedToProtocol(seed, doc, d.gardenReady()[seed.ID])},
 	})
+}
+
+func normalizeSeedResumeIdentity(sessionID, cwd, agent string) (string, string, string, error) {
+	sessionID, cwd, agent = strings.TrimSpace(sessionID), strings.TrimSpace(cwd), strings.TrimSpace(agent)
+	present := 0
+	for _, value := range []string{sessionID, cwd, agent} {
+		if value != "" {
+			present++
+		}
+	}
+	if present != 0 && present != 3 {
+		return "", "", "", fmt.Errorf("resume identity needs --resume-session-id, --cwd, and --agent together")
+	}
+	return sessionID, cwd, agent, nil
+}
+
+func (d *Daemon) handleSeedSetResume(conn net.Conn, msg *protocol.SeedSetResumeMessage) {
+	if err := d.requireHome(garden.Surface); err != nil {
+		d.sendGardenError(conn, "set-resume", err)
+		return
+	}
+	clear := protocol.Deref(msg.Clear)
+	resumeID, cwd, agent, err := normalizeSeedResumeIdentity(
+		protocol.Deref(msg.ResumeSessionID), protocol.Deref(msg.ResumeCwd), protocol.Deref(msg.ResumeAgent),
+	)
+	if err != nil {
+		d.sendGardenError(conn, "set-resume", err)
+		return
+	}
+	if clear {
+		if resumeID != "" || cwd != "" || agent != "" {
+			d.sendGardenError(conn, "set-resume", fmt.Errorf("--clear cannot be combined with resume identity fields"))
+			return
+		}
+	} else if resumeID == "" {
+		d.sendGardenError(conn, "set-resume", fmt.Errorf("nothing to set — pass --resume-session-id, --cwd, and --agent together, or --clear"))
+		return
+	}
+	seed, doc, err := d.applySeedResumeIdentity(msg.SeedID, resumeID, cwd, agent)
+	if err != nil {
+		d.sendGardenError(conn, "set-resume", err)
+		return
+	}
+	d.sendGardenResponse(conn, protocol.Response{
+		Ok: true, SeedSetResumeResult: &protocol.SeedSetResumeResult{
+			Seed: seedToProtocol(seed, doc, d.gardenReady()[seed.ID]),
+		},
+	})
+}
+
+func (d *Daemon) applySeedResumeIdentity(id, resumeID, cwd, agent string) (garden.Seed, docstore.Document, error) {
+	schema, err := d.seedsCollection()
+	if err != nil {
+		return garden.Seed{}, docstore.Document{}, err
+	}
+	const attempts = 3
+	for range attempts {
+		seed, doc, err := d.readSeed(id)
+		if err != nil {
+			return garden.Seed{}, docstore.Document{}, err
+		}
+		seed.ResumeSessionID, seed.ResumeCwd, seed.ResumeAgent = resumeID, cwd, agent
+		written, err := d.writeSeed(*schema, seed, doc.Rev, FactGardenResumeIdentityChanged)
+		if err == nil {
+			return seed, written, nil
+		}
+		if !docstore.IsConflict(err) {
+			return garden.Seed{}, docstore.Document{}, err
+		}
+	}
+	return garden.Seed{}, docstore.Document{}, fmt.Errorf(
+		"%s was rewritten under all %d attempts to set its resume identity; read it again with `attn seed show %s` and retry",
+		id, attempts, id)
 }
 
 // applySeedBodyEdit changes only the living markdown body. Re-reading on a

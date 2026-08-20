@@ -178,6 +178,11 @@ func (d *Daemon) normalizeSpawnRequest(req *spawnRequest) *spawnRejection {
 
 func (d *Daemon) resolveSpawnIntent(req *spawnRequest) (*spawnPlan, *spawnRejection) {
 	msg := req.msg
+	if !req.hasPluginDriver && protocol.Deref(msg.ResumePicker) && req.resumeSessionID != "" &&
+		!agentdriver.ResumeAvailable(req.driver, req.resumeSessionID) {
+		d.logf("spawn: explicit resume target %s for session %s is not resumable; using resume picker", req.resumeSessionID, msg.ID)
+		req.resumeSessionID = ""
+	}
 	if req.existingSession != nil && !req.hasPluginDriver {
 		req.resumeSessionID = agentdriver.ResolveSpawnResumeSessionID(req.driver, req.existingSession.ID, req.resumeSessionID, d.store.GetResumeSessionID(msg.ID))
 		// Downgrade to a fresh launch when the resume target is the session's own

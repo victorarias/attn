@@ -62,4 +62,29 @@ describe('GardenPanel reopen', () => {
 
     expect(screen.queryByTestId('seed-reopen-s-idle11')).not.toBeInTheDocument();
   });
+
+  it('reopens an untended seed carrying resume identity', () => {
+    const onResumeSeed = vi.fn();
+    render(
+      <GardenPanel
+        isOpen
+        onClose={vi.fn()}
+        seedsTotal={1}
+        seeds={[
+          seed({
+            id: 's-resume11',
+            title: 'external work',
+            status: 'planted',
+            resume_session_id: 'native-session',
+          }),
+        ]}
+        onResumeSeed={onResumeSeed}
+      />,
+    );
+
+    fireEvent.click(screen.getByText('external work'));
+    fireEvent.click(screen.getByTestId('seed-reopen-s-resume11'));
+
+    expect(onResumeSeed).toHaveBeenCalledWith('s-resume11');
+  });
 });

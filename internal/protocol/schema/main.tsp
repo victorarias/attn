@@ -4323,6 +4323,11 @@ model Seed {
   "template": boolean;
   "gate": boolean;
   "vars": SeedVar[];
+  // Optional fallback for reopening a conversation that has no garden dispatch
+  // record. These three fields are written and cleared as one identity.
+  "resume_session_id"?: string;
+  "resume_cwd"?: string;
+  "resume_agent"?: string;
   // Whether this seed can be tended right now: nothing open blocks it, it holds
   // no live tender, nothing is part of it, and it is neither a packet nor a
   // gate. Computed by the daemon on every read and every push — readiness is
@@ -4387,6 +4392,9 @@ model SeedPlantMessage {
   "part_of"?: string;
   // The crew member planting, free-string until the crew primitive lands.
   "member"?: string;
+  "resume_session_id"?: string;
+  "resume_cwd"?: string;
+  "resume_agent"?: string;
 }
 
 model SeedPlantResult {
@@ -4480,6 +4488,21 @@ model SeedEditMessage {
 }
 
 model SeedEditResult {
+  "seed": Seed;
+}
+
+// Set or clear the seed-owned fallback identity used when no dispatch record
+// survives. The identity is atomic: all three values, or clear=true.
+model SeedSetResumeMessage {
+  "cmd": "seed_set_resume";
+  "seed_id": string;
+  "resume_session_id"?: string;
+  "resume_cwd"?: string;
+  "resume_agent"?: string;
+  "clear"?: boolean;
+}
+
+model SeedSetResumeResult {
   "seed": Seed;
 }
 
@@ -5438,6 +5461,7 @@ model Response {
   seed_list_result?: SeedListResult;
   seed_show_result?: SeedShowResult;
   seed_edit_result?: SeedEditResult;
+  seed_set_resume_result?: SeedSetResumeResult;
   seed_transition_result?: SeedTransitionResult;
   seed_note_result?: SeedNoteResult;
   seed_notes_result?: SeedNotesResult;

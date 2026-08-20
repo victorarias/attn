@@ -6185,6 +6185,10 @@ type Response struct {
 	// SeedReadyResult corresponds to the JSON schema field "seed_ready_result".
 	SeedReadyResult *SeedReadyResult `json:"seed_ready_result,omitempty,omitzero"`
 
+	// SeedSetResumeResult corresponds to the JSON schema field
+	// "seed_set_resume_result".
+	SeedSetResumeResult *SeedSetResumeResult `json:"seed_set_resume_result,omitempty,omitzero"`
+
 	// SeedShowResult corresponds to the JSON schema field "seed_show_result".
 	SeedShowResult *SeedShowResult `json:"seed_show_result,omitempty,omitzero"`
 
@@ -6327,6 +6331,15 @@ type Seed struct {
 
 	// Reason corresponds to the JSON schema field "reason".
 	Reason *string `json:"reason,omitempty,omitzero"`
+
+	// ResumeAgent corresponds to the JSON schema field "resume_agent".
+	ResumeAgent *string `json:"resume_agent,omitempty,omitzero"`
+
+	// ResumeCwd corresponds to the JSON schema field "resume_cwd".
+	ResumeCwd *string `json:"resume_cwd,omitempty,omitzero"`
+
+	// ResumeSessionID corresponds to the JSON schema field "resume_session_id".
+	ResumeSessionID *string `json:"resume_session_id,omitempty,omitzero"`
 
 	// Rev corresponds to the JSON schema field "rev".
 	Rev int `json:"rev"`
@@ -6581,6 +6594,15 @@ type SeedPlantMessage struct {
 	// PartOf corresponds to the JSON schema field "part_of".
 	PartOf *string `json:"part_of,omitempty,omitzero"`
 
+	// ResumeAgent corresponds to the JSON schema field "resume_agent".
+	ResumeAgent *string `json:"resume_agent,omitempty,omitzero"`
+
+	// ResumeCwd corresponds to the JSON schema field "resume_cwd".
+	ResumeCwd *string `json:"resume_cwd,omitempty,omitzero"`
+
+	// ResumeSessionID corresponds to the JSON schema field "resume_session_id".
+	ResumeSessionID *string `json:"resume_session_id,omitempty,omitzero"`
+
 	// SourceSessionID corresponds to the JSON schema field "source_session_id".
 	SourceSessionID *string `json:"source_session_id,omitempty,omitzero"`
 
@@ -6732,6 +6754,31 @@ type SeedResumeResultMessage struct {
 
 	// WorkspaceID corresponds to the JSON schema field "workspace_id".
 	WorkspaceID *string `json:"workspace_id,omitempty,omitzero"`
+}
+
+type SeedSetResumeMessage struct {
+	// Clear corresponds to the JSON schema field "clear".
+	Clear *bool `json:"clear,omitempty,omitzero"`
+
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// ResumeAgent corresponds to the JSON schema field "resume_agent".
+	ResumeAgent *string `json:"resume_agent,omitempty,omitzero"`
+
+	// ResumeCwd corresponds to the JSON schema field "resume_cwd".
+	ResumeCwd *string `json:"resume_cwd,omitempty,omitzero"`
+
+	// ResumeSessionID corresponds to the JSON schema field "resume_session_id".
+	ResumeSessionID *string `json:"resume_session_id,omitempty,omitzero"`
+
+	// SeedID corresponds to the JSON schema field "seed_id".
+	SeedID string `json:"seed_id"`
+}
+
+type SeedSetResumeResult struct {
+	// Seed corresponds to the JSON schema field "seed".
+	Seed Seed `json:"seed"`
 }
 
 type SeedShowMessage struct {

@@ -12,7 +12,7 @@ import (
 
 // SeedPlant plants one seed. partOf, when set, plants it under that crown —
 // born part of the plot.
-func (c *Client) SeedPlant(sessionID, title, body, partOf, member string) (*protocol.SeedPlantResult, error) {
+func (c *Client) SeedPlant(sessionID, title, body, partOf, member, resumeID, resumeCwd, resumeAgent string) (*protocol.SeedPlantResult, error) {
 	msg := protocol.SeedPlantMessage{Cmd: protocol.CmdSeedPlant, Title: title}
 	if sessionID != "" {
 		msg.SourceSessionID = protocol.Ptr(sessionID)
@@ -26,6 +26,11 @@ func (c *Client) SeedPlant(sessionID, title, body, partOf, member string) (*prot
 	if partOf != "" {
 		msg.PartOf = protocol.Ptr(partOf)
 	}
+	if resumeID != "" || resumeCwd != "" || resumeAgent != "" {
+		msg.ResumeSessionID = protocol.Ptr(resumeID)
+		msg.ResumeCwd = protocol.Ptr(resumeCwd)
+		msg.ResumeAgent = protocol.Ptr(resumeAgent)
+	}
 	resp, err := c.send(msg)
 	if err != nil {
 		return nil, err
@@ -34,6 +39,27 @@ func (c *Client) SeedPlant(sessionID, title, body, partOf, member string) (*prot
 		return nil, fmt.Errorf("the daemon accepted the planting but returned no seed")
 	}
 	return resp.SeedPlantResult, nil
+}
+
+// SeedSetResume atomically sets or clears the fallback identity used when a
+// seed has no dispatch record.
+func (c *Client) SeedSetResume(seedID, resumeID, cwd, agent string, clear bool) (*protocol.SeedSetResumeResult, error) {
+	msg := protocol.SeedSetResumeMessage{Cmd: protocol.CmdSeedSetResume, SeedID: seedID}
+	if clear {
+		msg.Clear = protocol.Ptr(true)
+	} else {
+		msg.ResumeSessionID = protocol.Ptr(resumeID)
+		msg.ResumeCwd = protocol.Ptr(cwd)
+		msg.ResumeAgent = protocol.Ptr(agent)
+	}
+	resp, err := c.send(msg)
+	if err != nil {
+		return nil, err
+	}
+	if resp.SeedSetResumeResult == nil {
+		return nil, fmt.Errorf("the daemon accepted the resume identity but returned no seed")
+	}
+	return resp.SeedSetResumeResult, nil
 }
 
 // SeedList reads the garden, newest first. stale narrows to the open seeds
