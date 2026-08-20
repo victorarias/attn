@@ -144,6 +144,8 @@ claim. Distinct heads accepted between those boundaries remain visible evidence.
 - [x] Extend GitHub review observations/candidates with the refreshed head SHA.
 - [x] Reconcile the active cycle against its latest occurrence payload, including
       legacy cycle-only keys; make new occurrence keys SHA-specific.
+- [x] Preserve activation baselining: demand already present when a definition
+      is enabled stays ignored, while a later request starts cycle one normally.
 - [x] Keep claim transactional and idempotent for `(definition, subject, cycle, SHA)`.
 - [x] Permit changed-head continuity while retaining definition-contract, ticket,
       repository identity, transcript-resume, and unattended-launch checks.
@@ -189,7 +191,8 @@ fetch the new commit but never move an agent-owned checkout automatically.
 - The changed daemon/store/git packages compile for Linux amd64 with CGO disabled.
 - Packaged scenario `AUTOMATION-PR-CONTINUITY` passes after the main-branch rebase
   in isolated profile `reviewpush2` (run
-  `automation-pr-continuity-2026-08-20T10-29-50-929Z`). It
+  `automation-pr-continuity-2026-08-20T11-12-57-639Z`). It began with no review
+  request, activated both definitions, then requested review and
   exercised independent GPT Sol and solstice-alpha definitions, continued both
   on the new head without replacement reviewers, preserved dirty evidence,
   replanted and retended a harvested reviewer seed, resumed after restart, and

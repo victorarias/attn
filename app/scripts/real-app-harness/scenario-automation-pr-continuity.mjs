@@ -266,7 +266,11 @@ async function main() {
   let secondaryTicketID = '';
   let secondaryWorktree = '';
   try {
-    mock = await runner.step('start_local_mock_github', () => startMock(fixture.sha));
+    mock = await runner.step('start_local_mock_github', async () => {
+      const started = await startMock(fixture.sha);
+      await setRequested(started.url, false);
+      return started;
+    });
     daemonEnv = profileEnv(profile, {
       ATTN_MOCK_GH_URL: mock.url,
       ATTN_MOCK_GH_HOST: mock.host,
@@ -292,8 +296,10 @@ async function main() {
     await runner.step('apply_definitions', async () => {
       runJSON(binary, ['automation', 'apply', '--file', definitionFile], daemonEnv);
       runJSON(binary, ['automation', 'apply', '--file', secondaryDefinitionFile], daemonEnv);
+      await wsRequest(options.wsUrl, { cmd: 'refresh_prs' }, 'refresh_prs_result');
     });
     await runner.step('deliver_initial_review', async () => {
+      await setRequested(mock.url, true);
       await wsRequest(options.wsUrl, { cmd: 'refresh_prs' }, 'refresh_prs_result');
       const runRow = await poll(() => {
         const rows = runJSON(binary, ['automation', 'runs', definitionID], daemonEnv) || [];
