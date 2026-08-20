@@ -1,0 +1,10 @@
+kind: changed
+area: garden
+change: >
+  The garden guidance an agent launches with is now a short rule sheet: plant
+  the work you discover, fix it inline only when it is small and right where
+  you already are, wither generously, and leave the garden true before
+  reporting a session done. The craft behind those rules — writing a seed
+  body, what "done" means per deliverable type, where a seed belongs, edit
+  versus replant, how to pick up further work — moved to a new
+  `attn seed guide`, read when it is needed instead of riding in every prompt.

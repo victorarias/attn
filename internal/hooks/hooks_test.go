@@ -295,6 +295,27 @@ func TestAgentInstructionsComposition(t *testing.T) {
 	}
 }
 
+// The always-on garden block is the rule sheet: it must carry the moves an
+// agent makes without being asked, and point at the verb holding the craft.
+func TestGardenAwarenessGuidanceCarriesTheRules(t *testing.T) {
+	garden := GardenAwarenessGuidance()
+	for _, phrase := range []string{
+		"attn seed plant",
+		"attn seed plot",
+		"attn seed ls",
+		"attn seed note",
+		"attn seed wither",
+		"what it fell out of",
+		"Planting is not a detour",
+		"leave the garden true",
+		"attn seed guide",
+	} {
+		if !strings.Contains(garden, phrase) {
+			t.Fatalf("garden rules do not carry %q:\n%s", phrase, garden)
+		}
+	}
+}
+
 func TestGenerateCodexConfigOverrides_InjectsWorkflowGuidanceWhenEnabled(t *testing.T) {
 	off := strings.Join(GenerateCodexConfigOverrides("s", "/sock", "/attn", Launch{WorkspaceContextPath: "/tmp/context.md"}), "\n")
 	if strings.Contains(off, "hypercode") {
@@ -370,8 +391,9 @@ func TestGardenPrimer(t *testing.T) {
 			t.Fatalf("primer for %d does not say %q:\n%s", count, want, primer)
 		}
 		// The loop, and where the live answer is: the count is a starting
-		// position, composed once at launch.
-		for _, phrase := range []string{"attn seed ready", "attn seed tend", "attn seed harvest", "live answer"} {
+		// position, composed once at launch. Closing verbs live in the
+		// always-on rules block, which every launch carries beside this one.
+		for _, phrase := range []string{"attn seed ready", "attn seed tend", "ready → tend → harvest", "live answer"} {
 			if !strings.Contains(primer, phrase) {
 				t.Fatalf("primer does not name %q:\n%s", phrase, primer)
 			}
