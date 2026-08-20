@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Seed } from '../hooks/useDaemonSocket';
-import { heldByOther, legalVerbs } from './GardenBoard';
+import { heldByOther, legalVerbs } from './gardenBoardModel';
 
 function seed(status: string, tender: { session?: string; member?: string } = {}): Seed {
   return {
