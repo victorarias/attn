@@ -1364,19 +1364,46 @@ function clickTestId(testid: string) {
 }
 
 // The garden panel, as a scenario reads it: where you are in the garden, and
-// what is in front of you. The trail and the rows are the two things a
-// navigation scenario asserts on, so both come back whole.
-// the garden panel is a stack of places now — one list of rows per
-// place, and a seed's own page instead of an expanded row. The state this
+// what is in front of you. It is a stack of places — one list of rows per
+// place, and a seed's own page instead of an expanded row — so the state this
 // reports is what a scenario needs to say where the reader is standing and
 // whether climbing put them back: the trail, the rows, and the scroll offset.
-// The panel the reader is looking at. With the fullscreen surface up, the dock's
-// panel is still mounted behind it and inert, so the first match in the document
-// is the wrong one to drive.
+//
+// There is exactly one panel in the document. Docked and holding the window are
+// the same panel in a frame of a different size (see GardenFrame), which is why
+// `frame` is reported beside `layout` rather than a scenario having to guess
+// which of two surfaces it is driving.
 function frontGardenPanel(): HTMLElement | null {
-  const panels = Array.from(document.querySelectorAll('.garden-panel'));
-  const front = panels.find((p) => p.classList.contains('is-columns')) ?? panels[0];
-  return front instanceof HTMLElement ? front : null;
+  const panel = document.querySelector('.garden-panel');
+  return panel instanceof HTMLElement ? panel : null;
+}
+
+// The frame flies between the two rectangles, so the state a scenario reads
+// right after pressing the control would be a box mid-travel — and what a
+// scenario asserts on (the layout, the columns, the widths) is derived from
+// that box. Wait for the rectangle itself to stop moving. That is the real
+// signal in every case, including prefers-reduced-motion, where it has already
+// stopped on the first frame.
+const FRAME_FLIGHT_FRAME_BUDGET = 90;
+async function gardenFrameAtRest() {
+  let last = -1;
+  let still = 0;
+  for (let frames = 0; frames < FRAME_FLIGHT_FRAME_BUDGET; frames += 1) {
+    await nextAnimationFrame();
+    const frame = document.querySelector('.garden-frame');
+    const width = frame instanceof HTMLElement ? Math.round(frame.getBoundingClientRect().width) : -1;
+    still = width === last ? still + 1 : 0;
+    last = width;
+    // Three frames unchanged: an eased transition never repeats a width, so one
+    // repeat already means it has landed.
+    if (still >= 3) return;
+  }
+  // The flight is 180ms — about 11 frames at 60Hz, fewer on a faster display.
+  // Reaching this means the box never settled, which is a defect worth naming
+  // rather than a scenario reading a rectangle in motion.
+  throw new Error(
+    `the garden frame was still moving after ${FRAME_FLIGHT_FRAME_BUDGET} frames (last width ${last})`,
+  );
 }
 
 /**
@@ -1429,19 +1456,11 @@ function collectGardenBoardUiState() {
 }
 
 function collectGardenUiState() {
-  // Two panels can be mounted at once — the dock behind the fullscreen surface —
-  // and they draw one shared walk. Report the one in front, and summarise both,
-  // so a scenario can tell a handoff from a coincidence.
-  const panels = Array.from(document.querySelectorAll('.garden-panel'));
-  const panel = panels.find((p) => p.classList.contains('is-columns')) ?? panels[0];
-  if (!(panel instanceof HTMLElement)) {
+  const panel = frontGardenPanel();
+  if (!panel) {
     return { present: false };
   }
-  const surfaces = panels.map((p) => ({
-    layout: p.classList.contains('is-columns') ? 'columns' : 'stack',
-    here: p.querySelector('.garden-head__title')?.textContent?.trim() ?? '',
-    steps: Array.from(p.querySelectorAll('.garden-trail__step')).map((s) => s.textContent?.trim() ?? ''),
-  }));
+  const frameBox = panel.closest('.garden-frame');
   const trail = Array.from(panel.querySelectorAll('.garden-trail__step')).map((step) => ({
     label: step.textContent?.trim() ?? '',
     depth: Number.parseInt(step.getAttribute('data-trail-depth') ?? '-1', 10),
@@ -1479,7 +1498,11 @@ function collectGardenUiState() {
   const activeDescendant = field instanceof HTMLInputElement ? field.getAttribute('aria-activedescendant') : null;
   return {
     present: true,
-    surfaces,
+    // Which frame the garden is being read in, and how wide that frame made it.
+    // Layout follows width, so these three move together: the promotion is what
+    // takes the panel across the threshold.
+    frame: frameBox?.classList.contains('is-full') ? 'full' : frameBox ? 'dock' : 'none',
+    frameWidth: frameBox instanceof HTMLElement ? Math.round(frameBox.clientWidth) : -1,
     layout: columnsBox ? 'columns' : 'stack',
     panes: columnsBox instanceof HTMLElement ? Number(columnsBox.dataset.panes ?? 0) : 0,
     boxWidth: columnsBox instanceof HTMLElement ? Math.round(columnsBox.clientWidth) : -1,
@@ -3358,6 +3381,18 @@ export function useUiAutomationBridge({
         return collectGardenUiState();
       case 'garden_board_get_state':
         return collectGardenBoardUiState();
+      // The way across the two frames, through the control the reader presses.
+      // It toggles: from the dock it promotes, from the window it returns.
+      case 'garden_toggle_frame': {
+        const control = frontGardenPanel()?.querySelector('.garden-chrome__frame');
+        if (!(control instanceof HTMLElement)) {
+          throw new Error('the garden is not open, so there is no frame to change');
+        }
+        control.click();
+        await settleUi(2);
+        await gardenFrameAtRest();
+        return collectGardenUiState();
+      }
       // Opening a seed IS the drill — one target per row, whether the seed has
       // a plot under it or not.
       case 'garden_open_plot':

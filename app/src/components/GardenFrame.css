@@ -1,0 +1,104 @@
+/* GardenFrame.css — the garden's one frame, at two sizes.
+
+   Nothing here is invented: the background, border, easing and 18px slide are
+   the dock's, from SidePanel.css; the 12px gutter, 8px radius and
+   app-background scrim are the fullscreen surfaces', from
+   NotebookBrowser.css. The promotion is the travel between the two. */
+
+.garden-frame {
+  position: fixed;
+  z-index: 40;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.01)),
+    var(--color-bg-panel);
+  border: 1px solid transparent;
+  border-left-color: var(--color-border);
+  border-radius: 0;
+  box-shadow: -24px 0 60px rgba(0, 0, 0, 0.4);
+  /* The flight. Expand is the reveal and gets the longer beat; collapse is a
+     dismissal, so .is-dock shortens it. */
+  --gf-flight: 180ms;
+  transition:
+    top var(--gf-flight) cubic-bezier(0.22, 1, 0.36, 1),
+    left var(--gf-flight) cubic-bezier(0.22, 1, 0.36, 1),
+    width var(--gf-flight) cubic-bezier(0.22, 1, 0.36, 1),
+    height var(--gf-flight) cubic-bezier(0.22, 1, 0.36, 1),
+    border-color var(--gf-flight) ease,
+    border-radius var(--gf-flight) ease,
+    box-shadow var(--gf-flight) ease,
+    transform 240ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 180ms ease;
+}
+
+/* Closed sits where the dock would put it and slides out to the right edge,
+   the same 18px overshoot every dock panel uses. */
+.garden-frame.is-closed {
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(calc(100% + 18px));
+}
+
+.garden-frame.is-dock {
+  --gf-flight: 150ms;
+}
+
+.garden-frame.is-full {
+  z-index: 400;
+  border-color: var(--color-border);
+  border-radius: 8px;
+  /* The dock panel floats above the workspace, so it casts a shadow. The window
+     frame IS the window — there is nothing behind it to float above — so the
+     shadow fades out as it arrives rather than being restyled. */
+  box-shadow: 0 0 0 rgba(0, 0, 0, 0);
+}
+
+/* While the frame is in flight it is already the window's object, so it must
+   sit above the dock it is leaving. */
+.garden-frame.is-flying {
+  z-index: 400;
+}
+
+.garden-frame__body {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  outline: none;
+}
+
+.garden-frame__body > .garden-panel,
+.garden-frame__body > .garden-board {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* The workspace recedes as the garden takes the window — the same opaque app
+   background the fullscreen surface always painted, arriving with the frame
+   instead of on top of it. */
+.garden-frame-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 399;
+  background: var(--color-bg-app);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 150ms ease;
+}
+
+.garden-frame-backdrop.is-visible {
+  opacity: 1;
+  pointer-events: auto;
+  transition-duration: 180ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .garden-frame,
+  .garden-frame-backdrop {
+    transition: none;
+  }
+}

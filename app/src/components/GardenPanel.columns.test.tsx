@@ -68,7 +68,7 @@ describe('GardenPanel columns', () => {
 
   it('draws as many trailing levels as the width holds, and no more', () => {
     atWidth(1200);
-    render(<GardenPanel layout="columns" isOpen onClose={vi.fn()} seedsTotal={7} seeds={world} />);
+    render(<GardenPanel isOpen onClose={vi.fn()} seedsTotal={7} seeds={world} />);
 
     // At the root there is nothing to put beside the list.
     expect(columns()).toHaveLength(1);
@@ -84,7 +84,7 @@ describe('GardenPanel columns', () => {
 
   it('shows a third level once there is room for it', () => {
     atWidth(1780);
-    render(<GardenPanel layout="columns" isOpen onClose={vi.fn()} seedsTotal={7} seeds={world} />);
+    render(<GardenPanel isOpen onClose={vi.fn()} seedsTotal={7} seeds={world} />);
 
     open(/the migration/);
     open(/one panel/);
@@ -96,7 +96,7 @@ describe('GardenPanel columns', () => {
   // column and stops before the place you are in.
   it('names only the ancestors no column is showing', () => {
     atWidth(1780);
-    render(<GardenPanel layout="columns" isOpen onClose={vi.fn()} seedsTotal={7} seeds={world} />);
+    render(<GardenPanel isOpen onClose={vi.fn()} seedsTotal={7} seeds={world} />);
 
     open(/the migration/);
     open(/one panel/);
@@ -111,7 +111,7 @@ describe('GardenPanel columns', () => {
 
   it('folds the trail once it outruns three steps, and opens it again', () => {
     atWidth(1200);
-    render(<GardenPanel layout="columns" isOpen onClose={vi.fn()} seedsTotal={7} seeds={world} />);
+    render(<GardenPanel isOpen onClose={vi.fn()} seedsTotal={7} seeds={world} />);
 
     open(/the migration/);
     open(/one panel/);
@@ -132,7 +132,7 @@ describe('GardenPanel columns', () => {
     atWidth(1780);
     const sibling = plot('s-mid222', 'another panel', 's-crown1');
     render(
-      <GardenPanel layout="columns" isOpen onClose={vi.fn()} seedsTotal={8} seeds={[...world, sibling]} />,
+      <GardenPanel isOpen onClose={vi.fn()} seedsTotal={8} seeds={[...world, sibling]} />,
     );
 
     open(/the migration/);
@@ -150,7 +150,7 @@ describe('GardenPanel columns', () => {
 
   it('climbs one level on escape, wherever the walk is', () => {
     atWidth(1200);
-    render(<GardenPanel layout="columns" isOpen onClose={vi.fn()} seedsTotal={7} seeds={world} />);
+    render(<GardenPanel isOpen onClose={vi.fn()} seedsTotal={7} seeds={world} />);
 
     open(/the migration/);
     open(/one panel/);

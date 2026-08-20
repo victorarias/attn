@@ -107,6 +107,24 @@
   outline-offset: 2px;
 }
 
+/* The frame control. Same weight as the close beside it: the way between the
+   two sizes is not louder than the way out. */
+.garden-chrome__frame {
+  background: transparent;
+  border: none;
+  border-radius: 5px;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  flex: none;
+  padding: 3px;
+}
+
+.garden-chrome__frame:hover {
+  color: var(--color-text-primary);
+}
+
 .garden-chrome__close {
   background: transparent;
   border: none;

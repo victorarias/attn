@@ -31,6 +31,10 @@ interface KeyboardShortcutsConfig {
   onOpenNotebookTile?: () => void;
   onOpenNotebookFullscreen?: () => void;
   onOpenGarden?: () => void;
+  /** The garden's own gate. Its window frame is the garden at a different
+   *  size, not a modal over it, so the key that promotes it must also bring it
+   *  back — and `enabled` goes false in there, like every other app shortcut. */
+  gardenShortcutEnabled?: boolean;
   onQuit?: () => void;
   enabled: boolean;
 }
@@ -62,6 +66,7 @@ export function useKeyboardShortcuts({
   onOpenNotebookTile,
   onOpenNotebookFullscreen,
   onOpenGarden,
+  gardenShortcutEnabled,
   onQuit,
   enabled,
 }: KeyboardShortcutsConfig) {
@@ -124,8 +129,8 @@ export function useKeyboardShortcuts({
   useShortcut('notebook.openTile', onOpenNotebookTile ?? (() => {}), enabled && !!onOpenNotebookTile);
   useShortcut('notebook.openFullscreen', onOpenNotebookFullscreen ?? (() => {}), enabled && !!onOpenNotebookFullscreen);
 
-  // The garden: open the fullscreen surface (Esc / the close button dismiss it).
-  useShortcut('board.open', onOpenGarden ?? (() => {}), enabled && !!onOpenGarden);
+  // The garden: promote it into the window, or hand it back to the dock.
+  useShortcut('board.open', onOpenGarden ?? (() => {}), (gardenShortcutEnabled ?? enabled) && !!onOpenGarden);
 
   useEffect(() => {
     const preventWindowCloseShortcut = (e: KeyboardEvent) => {
