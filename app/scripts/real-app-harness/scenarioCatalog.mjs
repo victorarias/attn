@@ -338,6 +338,15 @@ export const scenarioCatalog = [
     timeoutMs: 600_000,
   },
   {
+    id: 'nisse-markdown-stream',
+    label: 'Conversation session: a recorded reply replayed into the pane renders as markdown while it streams',
+    command: ['pnpm', 'run', 'real-app:scenario-nisse-markdown-stream'],
+    // Needs attn-pi installed in the target profile, like the other nisse
+    // scenarios, but calls no model: the reply is a recording replayed into the
+    // pane at the pacing it was captured at, so the run is deterministic and free.
+    timeoutMs: 300_000,
+  },
+  {
     id: 'app-reconcile',
     label: 'App reconcile: version move rebuilds, a real trim gap disables loudly, an interrupted rebuild repairs',
     command: ['pnpm', 'run', 'real-app:scenario-app-reconcile'],
