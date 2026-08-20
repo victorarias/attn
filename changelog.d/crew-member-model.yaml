@@ -1,0 +1,8 @@
+kind: fixed
+area: daemon
+change: >
+  Crew members now wake on the model chosen for them with `attn crew set
+  <name> --model <model>`. When a member has no model, its launch harness's
+  configured default applies; Claude keeps the existing Fable fallback when
+  neither is configured. `attn crew list` and `--json` show the per-member
+  choice, and passing an empty `--model` clears it.

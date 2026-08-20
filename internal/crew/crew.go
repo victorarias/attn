@@ -73,6 +73,9 @@ type Member struct {
 	// a member is plain markdown, so any harness can live in one, and the field
 	// is what says which. A wake's own `--agent` still wins for one day.
 	Agent string `json:"agent"`
+	// Model is the model this member's days run on. Empty takes the configured
+	// default for the launch harness, then the crew fallback when none is set.
+	Model string `json:"model"`
 	// AwarenessDirs are the places the member's charter is about.
 	AwarenessDirs []string `json:"awareness_dirs"`
 	// BindingSession is the session living this member's current day, or empty.

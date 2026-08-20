@@ -38,22 +38,28 @@ import (
 // set <member> --agent <name>` picks the one the member lives on.
 const crewWakeAgent = crew.DefaultAgent
 
-// crewWakeModel is what a member wakes on, hardcoded on purpose. A member's
-// session is one Victor drives himself and those run Fable; a per-member model
-// knob is a quiet way to end up with a member subtly wrong in a way only a
-// spirit-read of its prose catches. It names a Claude model, so it is pinned
-// only for the default harness — `--agent codex` still picks that harness's own
-// default.
-const crewWakeModel = "claude-fable-5"
+// crewWakeFallbackModel preserves the model crew used before model selection
+// became configurable. It applies only to Claude; other harnesses keep their
+// own default when neither the member nor daemon settings name a model.
+const crewWakeFallbackModel = "claude-fable-5"
 
-// crewWakeModelPin is the pin as a spawn field: set for the default harness,
-// nil for any other, so it can be applied by every path that starts a member's
-// day without each one restating the rule.
-func crewWakeModelPin(agent string) *string {
-	if strings.TrimSpace(strings.ToLower(agent)) != crewWakeAgent {
-		return nil
+// crewWakeModel resolves a member's model: its own choice, the configured
+// default for the launch harness, then the historical Claude fallback.
+func (d *Daemon) crewWakeModel(member crew.Member, agent string) *string {
+	// A one-day harness override must not receive a model chosen for the
+	// member's usual harness (for example, a Claude id passed to Codex).
+	if strings.EqualFold(strings.TrimSpace(agent), member.LaunchAgent()) {
+		if model := strings.TrimSpace(member.Model); model != "" {
+			return protocol.Ptr(model)
+		}
 	}
-	return protocol.Ptr(crewWakeModel)
+	if model := d.defaultLaunchModel(agent); model != "" {
+		return protocol.Ptr(model)
+	}
+	if strings.TrimSpace(strings.ToLower(agent)) == crewWakeAgent {
+		return protocol.Ptr(crewWakeFallbackModel)
+	}
+	return nil
 }
 
 // crewAgentAvailable reports whether a harness this daemon can launch answers
@@ -353,7 +359,7 @@ func (d *Daemon) crewWakeWithDelivery(name, agent string, autonomous bool, deliv
 		Cwd:           directory,
 		WorkspaceID:   workspaceID,
 		Agent:         agent,
-		Model:         crewWakeModelPin(agent),
+		Model:         d.crewWakeModel(member, agent),
 		Cols:          80,
 		Rows:          24,
 		Label:         protocol.Ptr(crew.DisplayName(member.ID)),
@@ -493,6 +499,9 @@ func (d *Daemon) handleCrewSet(conn net.Conn, msg *protocol.CrewSetMessage) {
 			return
 		}
 		member.Agent = agent
+	}
+	if msg.Model != nil {
+		member.Model = strings.TrimSpace(*msg.Model)
 	}
 	// The way out arrives as its own flag: an empty list marshals away, so an
 	// empty AwarenessDirs is indistinguishable from "leave it alone" on the wire.

@@ -95,11 +95,14 @@ func TestCrewWake_StartsADayBoundInTheMembersOwnDirectory(t *testing.T) {
 	}
 }
 
-// A member runs on the pinned model, and nothing in the registry can change
-// that: a member on another model is wrong in a way only reading its prose
-// catches, so the wake decides it rather than a per-member setting.
-func TestCrewWake_AMemberWakesOnThePinnedModel(t *testing.T) {
+// A member's own model is the most specific choice. This is the regression:
+// the old package constant silently overruled both member and daemon config.
+func TestCrewWake_AMemberWakesOnItsConfiguredModel(t *testing.T) {
 	d, backend, _ := newWakeableDaemon(t)
+	d.store.SetSetting(SettingDefaultModelPrefix+"claude", "claude-sonnet-4-5")
+	if resp := crewSet(t, d, protocol.CrewSetMessage{Member: "trellis", Model: protocol.Ptr("claude-haiku-4-5")}); !resp.Ok {
+		t.Fatalf("crew set: %v", protocol.Deref(resp.Error))
+	}
 	if _, err := d.crewWake("trellis", ""); err != nil {
 		t.Fatalf("wake: %v", err)
 	}
@@ -107,19 +110,47 @@ func TestCrewWake_AMemberWakesOnThePinnedModel(t *testing.T) {
 	backend.mu.Lock()
 	model := backend.spawnOpts[0].Model
 	backend.mu.Unlock()
-	if model != crewWakeModel {
-		t.Fatalf("member woke on model %q, want %q", model, crewWakeModel)
+	if model != "claude-haiku-4-5" {
+		t.Fatalf("member woke on model %q, want its configured model", model)
+	}
+	if got := protocol.Deref(memberByID(t, crewList(t, d), "trellis").Model); got != "claude-haiku-4-5" {
+		t.Fatalf("roster model = %q, want the configured model", got)
 	}
 }
 
-// The pin names a Claude model, so a wake onto another harness takes that
-// harness's own default rather than a model it cannot run.
-func TestCrewWake_AnotherHarnessIsNotGivenTheClaudeModel(t *testing.T) {
-	if pin := crewWakeModelPin("codex"); pin != nil {
-		t.Fatalf("a codex wake was pinned to %q", *pin)
+func TestCrewWake_ModelFallsBackThroughDaemonConfigAndHistoricalDefault(t *testing.T) {
+	d, backend, _ := newWakeableDaemon(t)
+	d.store.SetSetting(SettingDefaultModelPrefix+"claude", "claude-opus-4-1")
+	if _, err := d.crewWake("trellis", ""); err != nil {
+		t.Fatalf("wake with configured default: %v", err)
 	}
-	if pin := crewWakeModelPin("CLAUDE"); pin == nil || *pin != crewWakeModel {
-		t.Fatalf("the default harness was not pinned: %v", pin)
+	if got := spawnedSessions(t, backend)[0].Model; got != "claude-opus-4-1" {
+		t.Fatalf("configured default launched as %q", got)
+	}
+
+	fallbackDaemon, fallbackBackend, _ := newWakeableDaemon(t)
+	if _, err := fallbackDaemon.crewWake("trellis", ""); err != nil {
+		t.Fatalf("wake with historical fallback: %v", err)
+	}
+	if got := spawnedSessions(t, fallbackBackend)[0].Model; got != crewWakeFallbackModel {
+		t.Fatalf("unconfigured Claude launched as %q, want %q", got, crewWakeFallbackModel)
+	}
+
+	codexDaemon, codexBackend, _ := newWakeableDaemon(t)
+	if _, err := codexDaemon.crewWake("trellis", "codex"); err != nil {
+		t.Fatalf("wake on Codex: %v", err)
+	}
+	if got := spawnedSessions(t, codexBackend)[0].Model; got != "" {
+		t.Fatalf("unconfigured Codex wake was pinned to %q", got)
+	}
+}
+
+func TestCrewWake_OneDayHarnessOverrideDoesNotTakeTheMembersUsualModel(t *testing.T) {
+	d, _, _ := newWakeableDaemon(t)
+	d.store.SetSetting(SettingDefaultModelPrefix+"codex", "gpt-5.6-sol")
+	member := crew.Member{Agent: "claude", Model: "claude-haiku-4-5"}
+	if got := protocol.Deref(d.crewWakeModel(member, "codex")); got != "gpt-5.6-sol" {
+		t.Fatalf("one-day Codex override resolved to %q, want its configured default", got)
 	}
 }
 
@@ -521,6 +552,31 @@ func TestCrewSet_RecordsAndClearsWhereAMemberWorks(t *testing.T) {
 	// Clearing one field leaves the other alone.
 	if got := protocol.Deref(memberByID(t, crewList(t, d), "keel").Cwd); got != launchDir {
 		t.Errorf("cwd = %q after clearing awareness dirs, want %q", got, launchDir)
+	}
+}
+
+func TestCrewSet_RecordsReadsAndClearsAMembersModel(t *testing.T) {
+	d, _, _ := newWakeableDaemon(t)
+	resp := crewSet(t, d, protocol.CrewSetMessage{Member: "keel", Model: protocol.Ptr("gpt-5.6-sol")})
+	if !resp.Ok {
+		t.Fatalf("crew set model: %v", protocol.Deref(resp.Error))
+	}
+	if got := protocol.Deref(resp.CrewSetResult.Member.Model); got != "gpt-5.6-sol" {
+		t.Fatalf("set result model = %q", got)
+	}
+	if got := protocol.Deref(memberByID(t, crewList(t, d), "keel").Model); got != "gpt-5.6-sol" {
+		t.Fatalf("roster model = %q", got)
+	}
+
+	resp = crewSet(t, d, protocol.CrewSetMessage{Member: "keel", Model: protocol.Ptr("")})
+	if !resp.Ok {
+		t.Fatalf("clear model: %v", protocol.Deref(resp.Error))
+	}
+	if resp.CrewSetResult.Member.Model != nil {
+		t.Fatalf("cleared model remains on set result: %q", *resp.CrewSetResult.Member.Model)
+	}
+	if got := memberByID(t, crewList(t, d), "keel").Model; got != nil {
+		t.Fatalf("cleared model remains on roster: %q", *got)
 	}
 }
 

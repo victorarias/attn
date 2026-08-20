@@ -5642,6 +5642,11 @@ model CrewMember {
   // The harness this member's days run on. Absent means the crew default
   // (claude); a wake's own `agent` still wins for that one day.
   agent?: string;
+  // The model this member's days run on with its recorded harness. Absent takes
+  // the configured default for the launch harness, then the crew fallback when
+  // none is configured. A one-day agent override does not carry this model to
+  // another harness.
+  `model`?: string;
   // The places the member's charter is about.
   awareness_dirs: string[];
   // The session living this member's current day. Present only while that
@@ -5742,6 +5747,9 @@ model CrewSetMessage {
   // The harness the member's days run on. An empty string clears it back to
   // the crew default — the way out, said the way `cwd` says it.
   agent?: string;
+  // The model the member's days run on. An empty string clears it back to the
+  // configured harness default, then the crew fallback.
+  `model`?: string;
   awareness_dirs?: string[];
 
   // The way out. An empty awareness_dirs cannot say "clear it": the field is
