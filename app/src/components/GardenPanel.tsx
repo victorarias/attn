@@ -227,9 +227,16 @@ export function GardenPanel({
   const [query, setQuery] = useState('');
   // Where the search looks, when that is no longer where the reader stands.
   // Widening out of a plot is a property of the query, not a move — the trail
-  // stays, so you can widen, look, and go back to what you were doing.
-  const [wide, setWide] = useState(false);
-  const [activeIndex, setActiveIndex] = useState(0);
+  // stays, so you can widen, look, and go back to what you were doing. It is
+  // stored as the plot it was asked for rather than a bare flag, so walking
+  // somewhere else drops it by construction instead of by an effect that fires
+  // a frame late.
+  const [wideIn, setWideIn] = useState<string | null>(null);
+  // Where the arrows are, and which question they are walking. A new question
+  // starts at its own best answer; keeping the answer's identity beside the
+  // index is what stops one frame of the new results being drawn with the old
+  // row highlighted.
+  const [walk, setWalk] = useState<{ of: string; index: number }>({ of: '', index: 0 });
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [seedDocument, setSeedDocument] = useState<SeedDocument | null>(null);
   const [documentLoading, setDocumentLoading] = useState(false);
@@ -277,6 +284,14 @@ export function GardenPanel({
   // question nobody asked.
   const filtering = parsed.active;
   const searching = parsed.searches;
+  // Widening holds only while a search is running, and only in the plot it was
+  // asked for: clearing the query or walking somewhere else puts the scope back
+  // where the reader is, without anything having to notice and undo it.
+  const wide = searching && wideIn !== null && wideIn === plotId;
+  // What the arrows are walking. Two queries in two plots are two questions
+  // even when the text is the same.
+  const question = `${plotId ?? ''}\u0000${query}`;
+  const activeIndex = walk.of === question ? walk.index : 0;
   // The searchable garden, lowercased once per snapshot. Doing this per
   // keystroke is what makes client-side search feel slow; see the receipts in
   // gardenSearch.bench.test.ts.
@@ -364,14 +379,6 @@ export function GardenPanel({
     return map;
   }, [results]);
 
-  // A new query answers a new question; the walk starts at its best answer.
-  useEffect(() => setActiveIndex(0), [query, plotId]);
-  // Widening belongs to one query in one place. Clearing the search, or
-  // walking to a different plot, puts the scope back where the reader is.
-  useEffect(() => {
-    if (!searching) setWide(false);
-  }, [searching]);
-  useEffect(() => setWide(false), [plotId]);
   const activeSeed = rows[Math.min(activeIndex, rows.length - 1)];
 
   // Escape clears the query before it closes the panel. Registering only while
@@ -435,9 +442,9 @@ export function GardenPanel({
     input.select();
   }, []);
   const toggleWide = useCallback(() => {
-    setWide((cur) => !cur);
+    setWideIn((cur) => (cur === null ? plotId : null));
     focusSearch();
-  }, [focusSearch]);
+  }, [focusSearch, plotId]);
   // The closed lens is a token in the query, so the way in and the way out are
   // one call.
   const toggleClosed = useCallback(() => {
@@ -464,7 +471,7 @@ export function GardenPanel({
       if (rows.length === 0) return;
       event.preventDefault();
       const step = event.key === 'ArrowDown' ? 1 : -1;
-      setActiveIndex((cur) => Math.min(rows.length - 1, Math.max(0, cur + step)));
+      setWalk({ of: question, index: Math.min(rows.length - 1, Math.max(0, activeIndex + step)) });
       return;
     }
     if (event.key === 'Enter' && event.altKey) {
@@ -728,7 +735,7 @@ export function GardenPanel({
                     type="button"
                     className="garden-seed__head"
                     onClick={() => {
-                      setActiveIndex(rowIndex);
+                      setWalk({ of: question, index: rowIndex });
                       setExpandedId((cur) => (cur === seed.id ? null : seed.id));
                     }}
                   >
