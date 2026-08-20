@@ -1382,7 +1382,8 @@ function frontGardenPanel(): HTMLElement | null {
 /**
  * The board prototype's reader. The list has its own above; this one answers
  * for the columns, so a scenario can drive drill, drag and the verb menu
- * without a screenshot. Prototype surface — see DESIGN-NOTE.md.
+ * without a screenshot. Prototype surface — see
+ * docs/plans/2026-08-20-garden-kanban-board-prototype.md.
  */
 function collectGardenBoardUiState() {
   const board = document.querySelector('.garden-board');

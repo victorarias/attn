@@ -22,7 +22,7 @@
 // both — the carried chip is ours, and the same path a person walks is the one
 // the harness walks.
 //
-// Prototype. See DESIGN-NOTE.md at the worktree root.
+// Prototype. See docs/plans/2026-08-20-garden-kanban-board-prototype.md.
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react';
 import type { Seed } from '../hooks/useDaemonSocket';

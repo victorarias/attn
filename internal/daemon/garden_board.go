@@ -17,7 +17,7 @@ import (
 // than merely tolerated. `tend` is not reachable from here, which is why the
 // board's Growing column dispatches an agent instead of claiming a seed.
 //
-// Prototype: docs/plans/2026-08-20-garden-board-prototype (DESIGN-NOTE.md).
+// Prototype: docs/plans/2026-08-20-garden-kanban-board-prototype.md.
 
 func (d *Daemon) handleSeedTransitionWS(client *wsClient, msg *protocol.SeedTransitionMessage) {
 	result := protocol.SeedTransitionResultMessage{

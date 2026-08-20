@@ -38,7 +38,8 @@ export interface GardenSurfaceProps {
  *
  * Two views over one garden: the list answers what is here, the board answers
  * how it is moving. The switch lives here rather than in either view, so
- * neither owns the other. Prototype placement — see DESIGN-NOTE.md.
+ * neither owns the other. Prototype placement — see
+ * docs/plans/2026-08-20-garden-kanban-board-prototype.md.
  */
 export function GardenSurface({
   isOpen,

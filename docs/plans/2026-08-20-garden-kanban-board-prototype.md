@@ -1,9 +1,9 @@
 # A kanban board for the garden — design note
 
-Prototype, on branch `delegate/proto-kanban-7ebfbf30`, seed `s-xp0zwj`.
-Installed for clicking as profile `kanban`
-(`/Users/victor/Applications/attn-kanban.app`, port 22696). Nothing here is
-merge-ready and none of it is tested; it exists to be judged.
+Prototype, on branch `delegate/proto-kanban-7ebfbf30`, seed `s-xp0zwj`. Built
+to be clicked and judged, not to be relied on: none of it is tested, and the
+question it exists to answer is whether a board earns a place in the garden at
+all.
 
 ## What it is
 

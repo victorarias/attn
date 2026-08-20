@@ -15,7 +15,7 @@ change: >
 notes: >
   Design prototype, behind a list/board switch in the garden surface and not
   covered by tests. Where the two views finally live — one surface with a
-  switch, or two destinations sharing the trail — is deliberately left open;
-  DESIGN-NOTE.md on the branch has the reasoning, plus what building the drag
-  zones turned up about the garden itself (there is no verb out of Parked back
-  to Ready, and nothing releases a claim).
+  switch, or two destinations sharing the trail — is deliberately left open.
+  docs/plans/2026-08-20-garden-kanban-board-prototype.md has the reasoning,
+  plus what building the drag zones turned up about the garden itself: there is
+  no verb out of Parked back to Ready, and nothing releases a claim.
