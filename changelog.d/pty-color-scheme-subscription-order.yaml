@@ -1,0 +1,7 @@
+kind: fixed
+area: terminal
+change: >
+  A terminal theme change immediately after a child enabled color-scheme
+  reports is no longer missed. The worker could answer the child's next query
+  before recording the subscription bytes that preceded it, letting the theme
+  change race through that gap without sending the report the child requested.

@@ -1,10 +1,10 @@
 package pty
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"sync"
-	"syscall"
 	"testing"
 	"time"
 )
@@ -17,13 +17,7 @@ func newOSCTestSession(t *testing.T) (s *Session, peer *os.File) {
 	t.Helper()
 	const cols, rows = 80, 24
 
-	fds, err := syscall.Socketpair(syscall.AF_UNIX, syscall.SOCK_STREAM, 0)
-	if err != nil {
-		t.Fatalf("socketpair: %v", err)
-	}
-	ptmx := os.NewFile(uintptr(fds[0]), "ptmx")
-	peer = os.NewFile(uintptr(fds[1]), "peer")
-	t.Cleanup(func() { _ = ptmx.Close(); _ = peer.Close() })
+	ptmx, peer := newPollableSocketpair(t)
 
 	s = &Session{
 		id:          "osc-theme",
@@ -81,13 +75,7 @@ func TestOSCColorQuerySetThemeAffectsReply(t *testing.T) {
 
 func TestOSCColorQuerySeededAtSpawnAnswersWithoutSetTheme(t *testing.T) {
 	const cols, rows = 80, 24
-	fds, err := syscall.Socketpair(syscall.AF_UNIX, syscall.SOCK_STREAM, 0)
-	if err != nil {
-		t.Fatalf("socketpair: %v", err)
-	}
-	ptmx := os.NewFile(uintptr(fds[0]), "ptmx")
-	peer := os.NewFile(uintptr(fds[1]), "peer")
-	t.Cleanup(func() { _ = ptmx.Close(); _ = peer.Close() })
+	ptmx, peer := newPollableSocketpair(t)
 
 	// Mirrors what Manager.Spawn does with SpawnOptions.Theme: seed
 	// session.theme before the read loop ever starts, with no SetTheme call.
@@ -171,7 +159,7 @@ func TestOSCColorQuerySplitAcrossChunksAnswersOnce(t *testing.T) {
 
 	// Confirm there is nothing further queued (a double-answer bug would
 	// leave a second reply sitting on the pipe).
-	if got, ok := readAvailable(peer, 150*time.Millisecond); ok {
+	if got, ok := readAvailable(t, peer, 150*time.Millisecond); ok {
 		t.Fatalf("unexpected extra bytes after the single reply: %q", got)
 	}
 }
@@ -203,7 +191,7 @@ func TestOSCColorSetIsNeverAnswered(t *testing.T) {
 		t.Fatalf("peer write: %v", err)
 	}
 
-	if got, ok := readAvailable(peer, 200*time.Millisecond); ok {
+	if got, ok := readAvailable(t, peer, 200*time.Millisecond); ok {
 		t.Fatalf("OSC color SET must not be answered; got %q", got)
 	}
 }
@@ -286,29 +274,25 @@ func TestOSCColorReplyWaitsForInFlightInput(t *testing.T) {
 	t.Fatalf("reply after lock release = %q, want %q", snapshot(), want)
 }
 
-// readAvailable waits up to timeout for at least one byte to arrive on f. It
-// exists because SetReadDeadline does not reliably fire on the socketpair
-// fds these tests use (a blocking Read on a raw syscall.Socketpair-derived
-// os.File can ignore the deadline in this environment), so a bounded "assert
-// nothing arrives" check cannot use it. The read goroutine may outlive the
-// timeout case; it is unblocked when the test's t.Cleanup closes f.
-func readAvailable(f *os.File, timeout time.Duration) (data []byte, ok bool) {
-	ch := make(chan []byte, 1)
-	go func() {
-		buf := make([]byte, 256)
-		n, err := f.Read(buf)
-		if n > 0 {
-			ch <- buf[:n]
-			return
-		}
-		_ = err
-	}()
-	select {
-	case got := <-ch:
-		return got, true
-	case <-time.After(timeout):
+// readAvailable waits up to timeout for at least one byte to arrive on f.
+func readAvailable(t *testing.T, f *os.File, timeout time.Duration) (data []byte, ok bool) {
+	t.Helper()
+	if err := f.SetReadDeadline(time.Now().Add(timeout)); err != nil {
+		t.Fatalf("set read deadline: %v", err)
+	}
+	defer func() { _ = f.SetReadDeadline(time.Time{}) }()
+	buf := make([]byte, 256)
+	n, err := f.Read(buf)
+	if n > 0 {
+		return buf[:n], true
+	}
+	if errors.Is(err, os.ErrDeadlineExceeded) {
 		return nil, false
 	}
+	if err != nil {
+		t.Fatalf("peer read: %v", err)
+	}
+	return nil, false
 }
 
 // TestColorSchemeQueryAnswersFromTheme covers pi's `CSI ? 996 n`: the query it
@@ -373,35 +357,33 @@ func TestColorSchemeReportFollowsMode2031(t *testing.T) {
 		if err := s.SetTheme(TerminalTheme{Background: "#ffffff"}); err != nil {
 			t.Fatalf("SetTheme: %v", err)
 		}
-		if got, ok := readAvailable(peer, 150*time.Millisecond); ok {
+		if got, ok := readAvailable(t, peer, 150*time.Millisecond); ok {
 			t.Fatalf("theme change wrote %q to a child that never enabled mode 2031", got)
 		}
 	})
 
 	t.Run("subscribed child hears the change once", func(t *testing.T) {
 		s, peer := newOSCTestSession(t)
-		if _, err := peer.Write([]byte("\x1b[?2031h")); err != nil {
-			t.Fatalf("peer write: %v", err)
-		}
-		// The mode must be tracked before the theme moves; the read loop is
-		// what tracks it, so answer a query to know it consumed the chunk.
-		if _, err := peer.Write([]byte("\x1b[?996n")); err != nil {
-			t.Fatalf("peer write: %v", err)
-		}
-		if reply := readReplyUntil(t, peer, 2*time.Second, func(buf []byte) bool {
-			return len(buf) >= len("\x1b[?997;1n")
-		}); reply != "\x1b[?997;1n" {
-			t.Fatalf("query reply = %q", reply)
+		defer func() { colorSchemeReplyHook = nil }()
+		themeChanged := make(chan error, 1)
+		colorSchemeReplyHook = func() {
+			colorSchemeReplyHook = nil
+			themeChanged <- s.SetTheme(TerminalTheme{Background: "#ffffff"})
 		}
 
-		if err := s.SetTheme(TerminalTheme{Background: "#ffffff"}); err != nil {
-			t.Fatalf("SetTheme: %v", err)
+		// The reply makes all preceding bytes observable to the child. DECSET
+		// 2031 must therefore be tracked before the DSR 996 reply is written.
+		if _, err := peer.Write([]byte("\x1b[?2031h\x1b[?996n")); err != nil {
+			t.Fatalf("peer write: %v", err)
 		}
-		want := "\x1b[?997;2n"
+		want := "\x1b[?997;1n\x1b[?997;2n"
 		if reply := readReplyUntil(t, peer, 2*time.Second, func(buf []byte) bool {
 			return len(buf) >= len(want)
 		}); reply != want {
-			t.Fatalf("report after SetTheme = %q, want %q", reply, want)
+			t.Fatalf("query reply and report after SetTheme = %q, want %q", reply, want)
+		}
+		if err := <-themeChanged; err != nil {
+			t.Fatalf("SetTheme: %v", err)
 		}
 
 		// A theme change that does not move the scheme says nothing: the
@@ -409,7 +391,7 @@ func TestColorSchemeReportFollowsMode2031(t *testing.T) {
 		if err := s.SetTheme(TerminalTheme{Background: "#fefefe"}); err != nil {
 			t.Fatalf("SetTheme: %v", err)
 		}
-		if got, ok := readAvailable(peer, 150*time.Millisecond); ok {
+		if got, ok := readAvailable(t, peer, 150*time.Millisecond); ok {
 			t.Fatalf("a scheme that did not change still reported %q", got)
 		}
 	})
