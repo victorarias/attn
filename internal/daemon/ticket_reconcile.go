@@ -310,7 +310,7 @@ func (d *Daemon) resolveReconcileTranscript(agentID, sessionID, cwd string, anch
 // reconcileJobHandler runs the headless classifier from enqueue-time inputs.
 // Returns nil whenever a conclusion was reached — a classifier error becomes a
 // posted failure note. The only retryable error is failing to post the comment.
-func (d *Daemon) reconcileJobHandler(ctx context.Context, job *jobs.Job) (any, error) {
+func (d *Daemon) reconcileJobHandler(ctx context.Context, job *jobs.Job) (_ any, retErr error) {
 	if d.ticketReconcileDone != nil {
 		// Test hook: fires on any terminal outcome.
 		defer d.ticketReconcileDone(jobSubject(job))
@@ -321,6 +321,15 @@ func (d *Daemon) reconcileJobHandler(ctx context.Context, job *jobs.Job) (any, e
 		d.logf("ticket reconcile %s: %v", jobSubject(job), err)
 		return nil, nil
 	}
+	// The reconciler is the last writer on a dead session's ticket, so the
+	// replant into the garden waits for it — a replant mid-classification would
+	// move the status and make the verdict drop itself. Skipped on a retryable
+	// error, which leaves the ticket where the retry expects it.
+	defer func() {
+		if retErr == nil {
+			d.replantStrandedTicketByID(in.TicketID)
+		}
+	}()
 	execFn := d.ticketReconcileExec
 	if execFn == nil {
 		// Test daemons without a wired classifier; production always wires it in New().
