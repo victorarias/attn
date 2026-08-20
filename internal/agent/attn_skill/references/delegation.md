@@ -60,7 +60,7 @@ short paragraphs, sketches where they say more ([showing.md](showing.md)).
 
 Use `--brief <text>` only for short, simple tasks.
 
-> The same brief is the seed's body. To capture work *without* delegating, plant a seed — `attn seed plant "<title>" -m "<brief>"` (see [garden.md](garden.md)).
+> The same brief is the seed's body. To capture work *without* delegating, plant a seed with `attn seed plant "<title>" -m "<brief>"` (see [garden.md](garden.md)).
 
 ## Dispatch at an Existing Seed
 

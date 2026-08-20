@@ -25,11 +25,11 @@ and when you finish the requested work.
       "Implemented the parser and tests pass. Next: review the error wording."
 
 Keep a note concrete: outcome, evidence, and next action. A note is a small
-payload — put large durable reasoning in an artifact and attach it rather than
+payload. Put large durable reasoning in an artifact and attach it rather than
 inlining it. Leave your successor a `--handoff` note whenever you park or stop
 mid-thread. Noting does not stop or transfer your session: continue working
-unless the task is blocked or complete. Untracked delegation — no seed in your
-prompt — has nowhere to report and needs none of this.
+unless the task is blocked or complete. Untracked delegation (no seed in your
+prompt) has nowhere to report and needs none of this.
 
 Close it yourself when the outcome is settled:
 
@@ -42,7 +42,7 @@ Dispatched at a plot, the plot is the assignment: run `attn seed ready` and take
 the next seed until nothing in the plot is ready. Dispatched at a single seed,
 that seed is the assignment: report on it and stop.
 
-`attn seed guide` has the rest of the craft — when the evidence is strong enough
+`attn seed guide` has the rest of the craft: when the evidence is strong enough
 to harvest, where a discovered seed belongs, edit versus replant, and how to
 attach the documents your work produced. Run it rather than guessing; it is the
 single source of truth for that judgment.

@@ -8,8 +8,8 @@ edges sequence them.
 
 Two commands hold everything else:
 
-- **`attn seed --help`** — the whole surface and the authority on syntax.
-- **`attn seed guide`** — the craft: writing a body, the deliverable types and
+- **`attn seed --help`**: the whole surface and the authority on syntax.
+- **`attn seed guide`**: the craft: writing a body, the deliverable types and
   what "done" is for each, where a seed belongs, edit versus replant, a seed
   whose tender is gone, artifacts, handoffs, and how to pick up further work.
 
@@ -40,7 +40,7 @@ Plant the work you discover, without being asked. Fix what you found when it is
 small and sits right where you already are; otherwise plant it, say in the body
 what it fell out of, and stay on the work you were asked to do. Read
 `attn seed ls` first so an existing thread gets a note rather than a duplicate,
-and wither generously — a garden of stale seeds costs more than a lost one.
+and wither generously. A garden of stale seeds costs more than a lost one.
 
 Before a session reports done, leave the garden true: note what was learned,
 harvest what is finished, park or hand off what is not.

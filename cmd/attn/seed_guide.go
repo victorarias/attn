@@ -42,19 +42,19 @@ WRITING A BODY
   an attachment. This is what makes "ready for review" mean something.
 
   Scope and autonomy bounds: what is deferred or out of scope, and where the
-  tender's authority ends — when to stop and ask versus when to make the call
+  tender's authority ends: when to stop and ask versus when to make the call
   and keep going. A body that says nothing here defaults to checking in.
 
   A body may say "ship till done": that is an instruction to work end to end
   on your own, following the stop conditions and requirements until they are
-  met — not to stop and check in along the way.
+  met, without stopping to check in along the way.
 
-  When you plant something you discovered, say what it fell out of — the work
-  you were doing and how you hit it. A discovered seed with no origin reads as
-  noise to whoever finds it next.
+  When you plant something you discovered, say what it fell out of: the work
+  you were doing and how you hit it. Provenance is useful context, so name it
+  in the body and link the backing document when there is one.
 
   The body is the stable contract; the log is the live thread. Don't script the
-  whole job in the body — that belongs in notes and steering.
+  whole job in the body; that belongs in notes and steering.
 
 DELIVERABLE TYPES BEND THE SHAPE
 
@@ -65,14 +65,14 @@ DELIVERABLE TYPES BEND THE SHAPE
                     while it is active. Prescribe outcome and constraints, not
                     the implementation.
   bug fix           done: root cause found, then fixed, with a regression test.
-                    Give symptom and repro only — prescribing the fix invites
+                    Give symptom and repro only; prescribing the fix invites
                     symptom-patching.
   research          done: a sourced answer feeding a decision. Frame the
                     question, not a task. The answer is the deliverable.
   docs / prose      done: the durable point made, the old superseded. Say the
                     audience, what it replaces, and the one idea.
   refactor          done: transform complete, behavior preserved. Here you do
-                    prescribe — list the behaviors that must survive.
+                    prescribe: list the behaviors that must survive.
   prototype         done: a decision or a feel. Name the question being
                     de-risked; it is throwaway and tests are optional.
 
@@ -89,7 +89,7 @@ WHERE A SEED BELONGS
   Freestanding, when it is real work that simply is not this plan. Say what it
   fell out of and leave it in the garden.
 
-  Not a seed at all, when it is one fact about work already planted — that goes
+  Not a seed at all, when it is one fact about work already planted. That goes
   on the log of the seed it belongs to.
 
 EDIT, REPLANT, OR PLANT AGAIN
@@ -108,8 +108,8 @@ A SEED WHOSE TENDER IS GONE
 
   A claim held by a session that is no longer running does not hold the seed:
   it comes back as ready and tending it succeeds. Read the log and the freshest
-  handoff before you touch the work — the previous tender may have left the
-  branch, the PR, or the failure half-done.
+  handoff before you touch the work, since the previous tender may have left
+  the branch, the PR, or the failure half-done.
 
 PICKING UP FURTHER WORK
 
