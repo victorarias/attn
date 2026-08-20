@@ -7046,6 +7046,7 @@ export interface SeedShowResult {
 
 export interface SeedTransitionMessage {
     cmd:                SeedTransitionMessageCmd;
+    confirm?:           boolean;
     member?:            string;
     reason?:            string;
     request_id?:        string;
@@ -17809,6 +17810,7 @@ const typeMap: any = {
     ], "any"),
     "SeedTransitionMessage": o([
         { json: "cmd", js: "cmd", typ: r("SeedTransitionMessageCmd") },
+        { json: "confirm", js: "confirm", typ: u(undefined, true) },
         { json: "member", js: "member", typ: u(undefined, "") },
         { json: "reason", js: "reason", typ: u(undefined, "") },
         { json: "request_id", js: "request_id", typ: u(undefined, "") },

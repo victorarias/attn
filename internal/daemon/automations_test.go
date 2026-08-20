@@ -891,7 +891,7 @@ func TestSuccessfulContinuationReopensBoundSeed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := d.applySeedTransition(seedID, garden.VerbHarvest, garden.Tender{Session: sessionID}, "first review complete"); err != nil {
+	if _, _, err := d.applySeedTransition(seedID, garden.VerbHarvest, garden.Ask{Actor: garden.Tender{Session: sessionID}, Reason: "first review complete"}); err != nil {
 		t.Fatal(err)
 	}
 	req := automation.WorkRequest{

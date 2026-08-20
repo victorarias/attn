@@ -699,6 +699,15 @@
   font-size: var(--font-size-sm);
 }
 
+/* The one line that says this seed is somebody else's live work. It carries the
+   same warning colour a card uses for a tender that walked away, because both
+   say the same thing: read this before you act. */
+.garden-compose__taking {
+  color: var(--color-warning);
+  flex: none;
+  font-size: var(--font-size-sm);
+}
+
 /* -------------------------------------------------------------------- sheet */
 
 .garden-sheet {

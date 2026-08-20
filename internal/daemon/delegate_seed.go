@@ -117,7 +117,7 @@ func (d *Daemon) plantDelegatedSeed(sessionID, plannerSessionID, brief, name str
 	tender := garden.Tender{Session: sessionID}
 	// Nothing holds an unwritten seed, so the claim cannot be contested and the
 	// liveness predicate is never consulted.
-	seed, err = garden.Transition(seed, garden.VerbTend, tender, "", func(string) bool { return false })
+	seed, err = garden.Transition(seed, garden.VerbTend, garden.Ask{Actor: tender}, func(string) bool { return false })
 	if err != nil {
 		return garden.Seed{}, err
 	}
@@ -144,7 +144,7 @@ func delegationSeedUnavailable(err error) bool {
 // case before anything was created, and this is the race backstop behind it.
 func (d *Daemon) tendDispatchedSeed(sessionID, plannerSessionID, seedID string) error {
 	actor := garden.Tender{Session: sessionID, Member: d.resolveTenderMember("", sessionID)}
-	if _, _, err := d.applySeedTransitionAs(seedID, garden.VerbTend, actor, "", d.dispatchSessionLive(plannerSessionID)); err != nil {
+	if _, _, err := d.applySeedTransitionAs(seedID, garden.VerbTend, garden.Ask{Actor: actor}, d.dispatchSessionLive(plannerSessionID)); err != nil {
 		return fmt.Errorf("tend %s as session %s: %w", seedID, sessionID, err)
 	}
 	return nil

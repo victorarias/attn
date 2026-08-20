@@ -42,33 +42,51 @@ func TestTransitionMatrix(t *testing.T) {
 		// refusal must carry. Exactly one of them is set.
 		want   string
 		refuse string
+		// confirm is the caller saying yes to taking a seed somebody else
+		// holds. Only the contested rows set it.
+		confirm bool
 	}{
 		{name: "planted/tend", seed: seedIn(StatusPlanted, Tender{}), verb: VerbTend, want: StatusGrowing},
 		{name: "planted/park", seed: seedIn(StatusPlanted, Tender{}), verb: VerbPark, want: StatusDormant},
 		{name: "planted/harvest", seed: seedIn(StatusPlanted, Tender{}), verb: VerbHarvest, want: StatusHarvested},
 		{name: "planted/wither", seed: seedIn(StatusPlanted, Tender{}), verb: VerbWither, want: StatusWithered},
-		{name: "planted/replant", seed: seedIn(StatusPlanted, Tender{}), verb: VerbReplant, refuse: "not closed"},
+		{name: "planted/replant", seed: seedIn(StatusPlanted, Tender{}), verb: VerbReplant, refuse: "already planted"},
 
 		{name: "growing by me/tend", seed: seedIn(StatusGrowing, mine), verb: VerbTend, want: StatusGrowing},
 		{name: "growing by me/park", seed: seedIn(StatusGrowing, mine), verb: VerbPark, want: StatusDormant},
 		{name: "growing by me/harvest", seed: seedIn(StatusGrowing, mine), verb: VerbHarvest, want: StatusHarvested},
 		{name: "growing by me/wither", seed: seedIn(StatusGrowing, mine), verb: VerbWither, want: StatusWithered},
-		{name: "growing by me/replant", seed: seedIn(StatusGrowing, mine), verb: VerbReplant, refuse: "not closed"},
+		{name: "growing by me/replant", seed: seedIn(StatusGrowing, mine), verb: VerbReplant, want: StatusPlanted},
 
-		// The showpiece: a second session cannot take a live claim. The other
-		// four are fate calls and stay open to anybody, so a tender that walked
-		// away never locks a seed shut.
-		{name: "growing by another/tend", seed: seedIn(StatusGrowing, held), verb: VerbTend, refuse: "one tender at a time"},
-		{name: "growing by another/park", seed: seedIn(StatusGrowing, held), verb: VerbPark, want: StatusDormant},
-		{name: "growing by another/harvest", seed: seedIn(StatusGrowing, held), verb: VerbHarvest, want: StatusHarvested},
-		{name: "growing by another/wither", seed: seedIn(StatusGrowing, held), verb: VerbWither, want: StatusWithered},
-		{name: "growing by another/replant", seed: seedIn(StatusGrowing, held), verb: VerbReplant, refuse: "not closed"},
+		// The showpiece: a seed somebody else still holds is taken, not moved,
+		// so every verb refuses it — and every verb goes through once the
+		// caller says yes. Both halves are here because a guard nobody can pass
+		// and a guard nobody meets are the same bug from opposite sides.
+		{name: "growing by another/tend", seed: seedIn(StatusGrowing, held), verb: VerbTend, refuse: "takes it from them"},
+		{name: "growing by another/park", seed: seedIn(StatusGrowing, held), verb: VerbPark, refuse: "takes it from them"},
+		{name: "growing by another/harvest", seed: seedIn(StatusGrowing, held), verb: VerbHarvest, refuse: "takes it from them"},
+		{name: "growing by another/wither", seed: seedIn(StatusGrowing, held), verb: VerbWither, refuse: "takes it from them"},
+		{name: "growing by another/replant", seed: seedIn(StatusGrowing, held), verb: VerbReplant, refuse: "takes it from them"},
+
+		// Every refusal above names the holder, so the caller knows whose work
+		// it is about to take before it decides.
+		{name: "growing by another/tend names them", seed: seedIn(StatusGrowing, held), verb: VerbTend, refuse: "tended by Alder"},
+
+		{name: "confirmed/tend", seed: seedIn(StatusGrowing, held), verb: VerbTend, confirm: true, want: StatusGrowing},
+		{name: "confirmed/park", seed: seedIn(StatusGrowing, held), verb: VerbPark, confirm: true, want: StatusDormant},
+		{name: "confirmed/harvest", seed: seedIn(StatusGrowing, held), verb: VerbHarvest, confirm: true, want: StatusHarvested},
+		{name: "confirmed/wither", seed: seedIn(StatusGrowing, held), verb: VerbWither, confirm: true, want: StatusWithered},
+		{name: "confirmed/replant", seed: seedIn(StatusGrowing, held), verb: VerbReplant, confirm: true, want: StatusPlanted},
+
+		// A confirm nobody needed is not an error. The flag is read only when
+		// somebody else holds the seed, so passing it anyway changes nothing.
+		{name: "confirm with nobody to take from", seed: seedIn(StatusPlanted, Tender{}), verb: VerbPark, confirm: true, want: StatusDormant},
 
 		{name: "dormant/tend", seed: seedIn(StatusDormant, Tender{}), verb: VerbTend, want: StatusGrowing},
 		{name: "dormant/park", seed: seedIn(StatusDormant, Tender{}), verb: VerbPark, refuse: "already dormant"},
 		{name: "dormant/harvest", seed: seedIn(StatusDormant, Tender{}), verb: VerbHarvest, want: StatusHarvested},
 		{name: "dormant/wither", seed: seedIn(StatusDormant, Tender{}), verb: VerbWither, want: StatusWithered},
-		{name: "dormant/replant", seed: seedIn(StatusDormant, Tender{}), verb: VerbReplant, refuse: "not closed"},
+		{name: "dormant/replant", seed: seedIn(StatusDormant, Tender{}), verb: VerbReplant, want: StatusPlanted},
 
 		{name: "harvested/tend", seed: seedIn(StatusHarvested, Tender{}), verb: VerbTend, refuse: "reopens before it moves"},
 		{name: "harvested/park", seed: seedIn(StatusHarvested, Tender{}), verb: VerbPark, refuse: "reopens before it moves"},
@@ -92,7 +110,7 @@ func TestTransitionMatrix(t *testing.T) {
 			if tc.verb == VerbHarvest || tc.verb == VerbWither {
 				reason = "because"
 			}
-			next, err := Transition(tc.seed, tc.verb, mine, reason, alive)
+			next, err := Transition(tc.seed, tc.verb, Ask{Actor: mine, Reason: reason, Confirmed: tc.confirm}, alive)
 			// A move never edits the seed it was handed: the daemon writes the
 			// result against the revision it read, and a mutated input would make
 			// a refused move leave a changed seed behind.
@@ -134,7 +152,7 @@ func TestTransitionMatrix(t *testing.T) {
 func TestTransitionMovesTheTender(t *testing.T) {
 	actor := Tender{Session: me, Member: "trellis"}
 
-	claimed, err := Transition(seedIn(StatusPlanted, Tender{}), VerbTend, actor, "", alive)
+	claimed, err := Transition(seedIn(StatusPlanted, Tender{}), VerbTend, Ask{Actor: actor}, alive)
 	if err != nil {
 		t.Fatalf("tend: %v", err)
 	}
@@ -146,7 +164,7 @@ func TestTransitionMovesTheTender(t *testing.T) {
 		verb   Verb
 		reason string
 	}{{VerbPark, ""}, {VerbHarvest, "done"}, {VerbWither, "done"}} {
-		released, err := Transition(claimed, tc.verb, actor, tc.reason, alive)
+		released, err := Transition(claimed, tc.verb, Ask{Actor: actor, Reason: tc.reason}, alive)
 		if err != nil {
 			t.Fatalf("%s: %v", tc.verb, err)
 		}
@@ -166,7 +184,7 @@ func TestTransitionRefusesAReasonTheMoveWouldDrop(t *testing.T) {
 		if verb == VerbReplant {
 			from = StatusHarvested
 		}
-		_, err := Transition(seedIn(from, Tender{}), verb, actor, "some words", alive)
+		_, err := Transition(seedIn(from, Tender{}), verb, Ask{Actor: actor, Reason: "some words"}, alive)
 		if err == nil {
 			t.Fatalf("%s swallowed a reason instead of refusing it", verb)
 		}
@@ -183,14 +201,14 @@ func TestTransitionRefusesAReasonTheMoveWouldDrop(t *testing.T) {
 // seed is open.
 func TestReplantClearsTheClosingReason(t *testing.T) {
 	actor := Tender{Session: me}
-	harvested, err := Transition(seedIn(StatusPlanted, Tender{}), VerbHarvest, actor, "shipped it", alive)
+	harvested, err := Transition(seedIn(StatusPlanted, Tender{}), VerbHarvest, Ask{Actor: actor, Reason: "shipped it"}, alive)
 	if err != nil {
 		t.Fatalf("harvest: %v", err)
 	}
 	if harvested.Reason != "shipped it" {
 		t.Fatalf("harvest did not record the reason: %+v", harvested)
 	}
-	replanted, err := Transition(harvested, VerbReplant, actor, "", alive)
+	replanted, err := Transition(harvested, VerbReplant, Ask{Actor: actor}, alive)
 	if err != nil {
 		t.Fatalf("replant: %v", err)
 	}
@@ -203,7 +221,7 @@ func TestReplantClearsTheClosingReason(t *testing.T) {
 // which seed, who holds it, and what to do instead.
 func TestTendRefusalNamesTheTenderAndTheWayForward(t *testing.T) {
 	held := seedIn(StatusGrowing, Tender{Session: other, Member: "alder"})
-	_, err := Transition(held, VerbTend, Tender{Session: me, Member: "trellis"}, "", alive)
+	_, err := Transition(held, VerbTend, Ask{Actor: Tender{Session: me, Member: "trellis"}}, alive)
 	if err == nil {
 		t.Fatal("a second session was allowed to take a live claim")
 	}
@@ -245,14 +263,14 @@ func TestTenderDisplayName_WritesAMemberAsANameAndLeavesASessionAlone(t *testing
 func TestTendRefusesAnotherMemberWhenNeitherCarriesASession(t *testing.T) {
 	held := Seed{ID: "s-abc123", Status: StatusGrowing, TenderMember: "trellis"}
 
-	if _, err := Transition(held, VerbTend, Tender{Member: "alder"}, "", alive); err == nil {
+	if _, err := Transition(held, VerbTend, Ask{Actor: Tender{Member: "alder"}}, alive); err == nil {
 		t.Fatal("a different member took a live claim; the seed has one tender at a time")
 	} else if !strings.Contains(err.Error(), "Trellis") {
 		t.Fatalf("refusal does not name who holds it: %v", err)
 	}
 
 	// The same name is the same person picking their own work back up.
-	if _, err := Transition(held, VerbTend, Tender{Member: "trellis"}, "", alive); err != nil {
+	if _, err := Transition(held, VerbTend, Ask{Actor: Tender{Member: "trellis"}}, alive); err != nil {
 		t.Fatalf("trellis was refused their own claim: %v", err)
 	}
 }
@@ -262,13 +280,13 @@ func TestTendRefusesAnotherMemberWhenNeitherCarriesASession(t *testing.T) {
 func TestTendIdentifiesASessionByItsIDNotItsLabel(t *testing.T) {
 	held := Seed{ID: "s-abc123", Status: StatusGrowing, TenderSession: "sess-a", TenderMember: "trellis"}
 
-	if _, err := Transition(held, VerbTend, Tender{Session: "sess-a", Member: "keel"}, "", alive); err != nil {
+	if _, err := Transition(held, VerbTend, Ask{Actor: Tender{Session: "sess-a", Member: "keel"}}, alive); err != nil {
 		t.Fatalf("the holding session was refused its own claim: %v", err)
 	}
 	// And a session arriving at a claim nobody attached a session to is somebody
 	// else, whatever it calls itself.
 	memberOnly := Seed{ID: "s-abc123", Status: StatusGrowing, TenderMember: "trellis"}
-	if _, err := Transition(memberOnly, VerbTend, Tender{Session: "sess-a", Member: "trellis"}, "", alive); err == nil {
+	if _, err := Transition(memberOnly, VerbTend, Ask{Actor: Tender{Session: "sess-a", Member: "trellis"}}, alive); err == nil {
 		t.Fatal("a session took a claim held with no session id")
 	}
 }
@@ -285,7 +303,7 @@ func TestTendReleasesASeedWhoseTenderSessionIsGone(t *testing.T) {
 	if got := held.Tender().Holds(gone); got {
 		t.Fatal("a tender whose session the daemon no longer knows still holds its seed")
 	}
-	claimed, err := Transition(held, VerbTend, Tender{Session: me, Member: "trellis"}, "", gone)
+	claimed, err := Transition(held, VerbTend, Ask{Actor: Tender{Session: me, Member: "trellis"}}, gone)
 	if err != nil {
 		t.Fatalf("a successor was refused a seed whose tender's session ended: %v", err)
 	}
@@ -300,34 +318,34 @@ func TestTendReleasesASeedWhoseTenderSessionIsGone(t *testing.T) {
 	if !pane.Tender().Holds(gone) {
 		t.Fatal("a member-only tender was released by a session rule that cannot see them")
 	}
-	if _, err := Transition(pane, VerbTend, Tender{Member: "alder"}, "", gone); err == nil {
+	if _, err := Transition(pane, VerbTend, Ask{Actor: Tender{Member: "alder"}}, gone); err == nil {
 		t.Fatal("a member-only claim was taken because no session was alive")
 	}
 }
 
 func TestTendRefusalFallsBackToTheSessionID(t *testing.T) {
 	held := seedIn(StatusGrowing, Tender{Session: other})
-	_, err := Transition(held, VerbTend, Tender{Session: me}, "", alive)
+	_, err := Transition(held, VerbTend, Ask{Actor: Tender{Session: me}}, alive)
 	if err == nil || !strings.Contains(err.Error(), other) {
 		t.Fatalf("a member-less tender did not hold the claim by name: %v", err)
 	}
 }
 
 func TestTendNeedsSomebodyToRecord(t *testing.T) {
-	_, err := Transition(seedIn(StatusPlanted, Tender{}), VerbTend, Tender{}, "", alive)
+	_, err := Transition(seedIn(StatusPlanted, Tender{}), VerbTend, Ask{Actor: Tender{}}, alive)
 	if err == nil || !strings.Contains(err.Error(), "--member") {
 		t.Fatalf("a tend that names nobody was accepted or refused unhelpfully: %v", err)
 	}
 }
 
 func TestHarvestNeedsAReason(t *testing.T) {
-	_, err := Transition(seedIn(StatusPlanted, Tender{}), VerbHarvest, Tender{Session: me}, "  ", alive)
+	_, err := Transition(seedIn(StatusPlanted, Tender{}), VerbHarvest, Ask{Actor: Tender{Session: me}, Reason: "  "}, alive)
 	if err == nil || !strings.Contains(err.Error(), "-m") {
 		t.Fatalf("a wordless harvest was accepted or refused unhelpfully: %v", err)
 	}
 	// Withering may be wordless: often there is nothing to say beyond "nobody
 	// will pick this up".
-	withered, err := Transition(seedIn(StatusPlanted, Tender{}), VerbWither, Tender{Session: me}, "", alive)
+	withered, err := Transition(seedIn(StatusPlanted, Tender{}), VerbWither, Ask{Actor: Tender{Session: me}}, alive)
 	if err != nil {
 		t.Fatalf("a wordless wither was refused: %v", err)
 	}
@@ -337,7 +355,7 @@ func TestHarvestNeedsAReason(t *testing.T) {
 }
 
 func TestReasonLimitNamesItselfAndPointsAtTheLog(t *testing.T) {
-	_, err := Transition(seedIn(StatusPlanted, Tender{}), VerbHarvest, Tender{Session: me}, strings.Repeat("x", MaxReasonChars+1), alive)
+	_, err := Transition(seedIn(StatusPlanted, Tender{}), VerbHarvest, Ask{Actor: Tender{Session: me}, Reason: strings.Repeat("x", MaxReasonChars+1)}, alive)
 	if err == nil {
 		t.Fatal("an oversized reason was accepted")
 	}

@@ -256,7 +256,7 @@ func TestDelegationAtAClosedSeedRefuses(t *testing.T) {
 	d, backend, sourceSessionID := newGardenDelegationDaemon(t)
 	consumeDelegatedPrompt(t, backend)
 	seed := plantForDelegation(t, d, sourceSessionID, "Already done")
-	if _, _, err := d.applySeedTransition(seed.ID, garden.VerbHarvest, garden.Tender{Session: sourceSessionID}, "done"); err != nil {
+	if _, _, err := d.applySeedTransition(seed.ID, garden.VerbHarvest, garden.Ask{Actor: garden.Tender{Session: sourceSessionID}, Reason: "done"}); err != nil {
 		t.Fatalf("harvest: %v", err)
 	}
 
@@ -275,7 +275,7 @@ func TestDelegationAtAClosedSeedRefuses(t *testing.T) {
 // tendAs claims a seed for an arbitrary session id, through the real move.
 func tendAs(t *testing.T, d *Daemon, seedID, sessionID string) {
 	t.Helper()
-	if _, _, err := d.applySeedTransition(seedID, garden.VerbTend, garden.Tender{Session: sessionID}, ""); err != nil {
+	if _, _, err := d.applySeedTransition(seedID, garden.VerbTend, garden.Ask{Actor: garden.Tender{Session: sessionID}}); err != nil {
 		t.Fatalf("tend %s as %s: %v", seedID, sessionID, err)
 	}
 }

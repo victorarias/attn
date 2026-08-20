@@ -1466,7 +1466,11 @@ func (d *Daemon) handleSeedTransition(conn net.Conn, msg *protocol.SeedTransitio
 		// and keeps tending exactly as before.
 		Member: d.resolveTenderMember(protocol.Deref(msg.Member), sessionID),
 	}
-	seed, doc, err := d.applySeedTransition(msg.SeedID, verb, actor, protocol.Deref(msg.Reason))
+	seed, doc, err := d.applySeedTransition(msg.SeedID, verb, garden.Ask{
+		Actor:     actor,
+		Reason:    protocol.Deref(msg.Reason),
+		Confirmed: protocol.Deref(msg.Confirm),
+	})
 	if err != nil {
 		d.sendGardenError(conn, string(verb), err)
 		return
@@ -1505,8 +1509,8 @@ func (d *Daemon) handleSeedTransition(conn net.Conn, msg *protocol.SeedTransitio
 // session to tend finds a tender there and gets told whose it is. Three
 // attempts is a tripwire — two agents contending is one retry, and a seed
 // rewritten three times inside one call is something else entirely.
-func (d *Daemon) applySeedTransition(id string, verb garden.Verb, actor garden.Tender, reason string) (garden.Seed, docstore.Document, error) {
-	return d.applySeedTransitionAs(id, verb, actor, reason, d.sessionExists)
+func (d *Daemon) applySeedTransition(id string, verb garden.Verb, ask garden.Ask) (garden.Seed, docstore.Document, error) {
+	return d.applySeedTransitionAs(id, verb, ask, d.sessionExists)
 }
 
 // applySeedTransitionAs is applySeedTransition with the liveness predicate
@@ -1514,7 +1518,7 @@ func (d *Daemon) applySeedTransition(id string, verb garden.Verb, actor garden.T
 // dispatching at the seed it holds is giving that seed away, so its own claim
 // must not refuse the delegate — every other caller reads live sessions.
 func (d *Daemon) applySeedTransitionAs(
-	id string, verb garden.Verb, actor garden.Tender, reason string, sessionLive func(string) bool,
+	id string, verb garden.Verb, ask garden.Ask, sessionLive func(string) bool,
 ) (garden.Seed, docstore.Document, error) {
 	schema, err := d.seedsCollection()
 	if err != nil {
@@ -1530,7 +1534,7 @@ func (d *Daemon) applySeedTransitionAs(
 		if err != nil {
 			return garden.Seed{}, docstore.Document{}, err
 		}
-		next, err := garden.Transition(seed, verb, actor, reason, sessionLive)
+		next, err := garden.Transition(seed, verb, ask, sessionLive)
 		if err != nil {
 			return garden.Seed{}, docstore.Document{}, err
 		}

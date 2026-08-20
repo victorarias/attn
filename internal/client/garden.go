@@ -118,7 +118,7 @@ func (c *Client) SeedEdit(seedID, body string) (*protocol.SeedEditResult, error)
 // SeedTransition moves a seed through its life. The daemon decides whether the
 // move is legal from the state the seed is in and refuses by name; nothing here
 // pre-judges it, so the CLI and the app cannot disagree about the rules.
-func (c *Client) SeedTransition(sessionID, seedID, verb, reason, member string) (*protocol.SeedTransitionResult, error) {
+func (c *Client) SeedTransition(sessionID, seedID, verb, reason, member string, confirm bool) (*protocol.SeedTransitionResult, error) {
 	msg := protocol.SeedTransitionMessage{Cmd: protocol.CmdSeedTransition, SeedID: seedID, Verb: verb}
 	if sessionID != "" {
 		msg.SourceSessionID = protocol.Ptr(sessionID)
@@ -128,6 +128,9 @@ func (c *Client) SeedTransition(sessionID, seedID, verb, reason, member string) 
 	}
 	if member != "" {
 		msg.Member = protocol.Ptr(member)
+	}
+	if confirm {
+		msg.Confirm = protocol.Ptr(true)
 	}
 	resp, err := c.send(msg)
 	if err != nil {

@@ -134,8 +134,9 @@ commands:
 
   tend <id> [--member <name>]
         claim the seed and start growing it. One tender at a time: tending a
-        seed somebody else holds is refused, naming them. The freshest handoff
-        prints on the claim, so picking a seed up primes you.
+        seed somebody else still holds is refused, naming them, and takes
+        --confirm to go through anyway. The freshest handoff prints on the
+        claim, so picking a seed up primes you.
 
   park <id>
         pause the seed deliberately — it goes dormant and lets go of its
@@ -148,8 +149,9 @@ commands:
         close the seed as abandoned. Nobody is picking this up.
 
   replant <id>
-        reopen a harvested or withered seed. A closed seed reopens before it
-        moves again.
+        put the seed back in the pool — planted, unclaimed, ready for whoever
+        is free. Reopens a closed seed, un-parks a dormant one, and hands back
+        one being grown.
 
   note <id> -m "<what happened>" [--handoff] [--ring]
         append to the seed's log — what happened and what you learned, for
@@ -193,6 +195,8 @@ flags:
   --repo <name>      the repository that path lives in (attach, detach)
   --notebook <id>    a Notebook document (attach, detach)
   --url <url>        anything reachable by URL (attach, detach)
+  --confirm          go through with a move that takes a seed from whoever
+                     still holds it (tend, park, harvest, wither, replant)
   --member <name>    the crew member asking, recorded as planter, tender or
                      note author
   --session <id>     the session asking (defaults to ATTN_SESSION_ID)
@@ -265,6 +269,7 @@ type seedFlags struct {
 	cwd      *string
 	agent    *string
 	clear    *bool
+	confirm  *bool
 }
 
 func newSeedFlags(verb string) *seedFlags {
@@ -295,6 +300,7 @@ func newSeedFlags(verb string) *seedFlags {
 		cwd:      fs.String("cwd", "", "directory to reopen in"),
 		agent:    fs.String("agent", "", "agent driver to reopen with"),
 		clear:    fs.Bool("clear", false, "remove the seed-owned resume identity"),
+		confirm:  fs.Bool("confirm", false, "move a seed somebody else still holds, taking it from them"),
 	}
 }
 
@@ -866,7 +872,7 @@ func runSeedTransition(verb string, args []string) {
 		seedFail(verb, fmt.Errorf("needs exactly one seed id, got %d: attn seed %s s-7k3f9m", len(positionals), verb))
 	}
 	result, err := seedClient().SeedTransition(
-		f.sessionID(), positionals[0], verb, f.text(verb), strings.TrimSpace(*f.member))
+		f.sessionID(), positionals[0], verb, f.text(verb), strings.TrimSpace(*f.member), *f.confirm)
 	if err != nil {
 		seedFail(verb, err)
 	}

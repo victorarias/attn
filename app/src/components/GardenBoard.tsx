@@ -48,7 +48,7 @@ export interface GardenBoardProps {
   /** False until the first daemon push lands — an empty board is not an empty garden. */
   loaded: boolean;
   /** Perform one real lifecycle move. Rejects with the daemon's own sentence. */
-  onTransition: (seedId: string, verb: Verb, reason?: string) => Promise<unknown>;
+  onTransition: (seedId: string, verb: Verb, reason?: string, confirm?: boolean) => Promise<unknown>;
   /** Write on a seed's log — where park and replant put their sentence. */
   onNote: (seedId: string, body: string) => Promise<unknown>;
   /** The list/board switch, owned by the surface so both views show the same one. */
@@ -94,6 +94,19 @@ function tenderOf(seed: Seed): string {
   return crewHolderName(seed.tender_member, seed.tender_session);
 }
 
+// heldByOther names who still holds this seed, or '' when nobody does. It is
+// garden.Tender.Holds read from the board's side: a claim signed by a session
+// holds while that session is alive, and a crew member with no session always
+// does, because attn has no signal that a person walked away.
+//
+// The board's own actor is unnamed, so anybody it names here is somebody else,
+// and the move is a takeover the daemon refuses until the composer confirms it.
+export function heldByOther(seed: Seed, liveSessions: Set<string>): string {
+  if (!seed.tender_session && !seed.tender_member) return '';
+  if (seed.tender_session && !liveSessions.has(seed.tender_session)) return '';
+  return tenderOf(seed);
+}
+
 // columnOf reads a card's column off the seed. Four states, and every open seed
 // lands somewhere: what is neither growing, parked nor closed is waiting to be
 // picked up, whether or not anything is holding it back.
@@ -108,10 +121,10 @@ export function columnOf(seed: Seed): ColumnKey {
 // read from the board's side: which verbs the target column owns, and which of
 // them the seed's current state would accept.
 //
-// Two absences are the model working rather than gaps in this file. Nothing
-// moves a dormant seed back to the queue — `replant` reopens only a closed one
-// — so Parked → Ready grows no zone. And nothing releases a live claim, so
-// Growing → Ready grows none either.
+// `replant` is the one move that lands on `planted`, so it is the only way back
+// to Ready — from Closed, from Parked, and from Growing, which is how a seat is
+// handed back without closing the work. The single absence left is Ready →
+// Ready: a seed already in the pool has nowhere to be put back to.
 export function legalVerbs(seed: Seed, target: ColumnKey): Verb[] {
   const status = seed.status;
   const open = status === 'planted' || status === 'growing' || status === 'dormant';
@@ -121,7 +134,7 @@ export function legalVerbs(seed: Seed, target: ColumnKey): Verb[] {
     case 'parked':
       return status === 'planted' || status === 'growing' ? ['park'] : [];
     case 'ready':
-      return CLOSED.has(status) ? ['replant'] : [];
+      return status === 'planted' ? [] : ['replant'];
     case 'growing':
       // Dispatching is an intent, not a state: the agent claims the seed when it
       // starts. A seed already being worked has nobody to dispatch to.
@@ -435,7 +448,15 @@ export function GardenBoard({
       // park and replant refuse a reason — the daemon says so itself — so their
       // sentence is written on the log, and the move carries none.
       if (!spec.reasonOnSeed && text) await onNote(compose.seed.id, text);
-      await onTransition(compose.seed.id, compose.verb, spec.reasonOnSeed ? text : undefined);
+      // A card somebody else still holds is taken, not moved, and the daemon
+      // refuses it until the caller says so. The composer already said whose
+      // work this is, so pressing commit is that answer.
+      await onTransition(
+        compose.seed.id,
+        compose.verb,
+        spec.reasonOnSeed ? text : undefined,
+        heldByOther(compose.seed, liveSessions) !== '',
+      );
       setCompose(null);
       setSelected(compose.seed.id);
       setError(null);
@@ -444,7 +465,7 @@ export function GardenBoard({
     } finally {
       setBusy(false);
     }
-  }, [compose, busy, onNote, onTransition]);
+  }, [compose, busy, liveSessions, onNote, onTransition]);
 
   const onKeyDown = (event: KeyboardEvent) => {
     if (compose || dispatchFor) return;
@@ -611,6 +632,7 @@ export function GardenBoard({
                   {composing && (
                     <Composer
                       compose={composing}
+                      takenFrom={heldByOther(composing.seed, liveSessions)}
                       busy={busy}
                       inputRef={composeInput}
                       onCommit={commit}
@@ -900,9 +922,12 @@ function CardMeta({
 }
 
 function Composer({
-  compose, busy, inputRef, onCommit, onCancel,
+  compose, takenFrom, busy, inputRef, onCommit, onCancel,
 }: {
   compose: { seed: Seed; verb: Verb; column: ColumnKey };
+  // Who still holds this seed, when that is somebody. The line it draws is the
+  // board's --confirm: there is no way to commit without having read it.
+  takenFrom: string;
   busy: boolean;
   inputRef: React.RefObject<HTMLInputElement | null>;
   onCommit: () => void;
@@ -942,6 +967,9 @@ function Composer({
           reason, so theirs lands on the log — which is what the daemon's own
           refusal tells a caller to do. */}
       {!spec.reasonOnSeed && <span className="garden-compose__where">goes on the log</span>}
+      {takenFrom !== '' && (
+        <span className="garden-compose__taking">takes it from {takenFrom}</span>
+      )}
     </div>
   );
 }

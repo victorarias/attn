@@ -498,9 +498,16 @@ A seed's life runs `planted` → `growing` → `harvested` or `withered`, with
 growing in one move, and a seed has one tender at a time. **Parking** pauses a
 seed deliberately (`dormant`) and lets go of the claim; tending it again picks
 it back up. **Harvesting** closes it as done, with a reason, and **withering**
-closes it as abandoned. **Replanting** reopens a closed seed — a closed seed
-reopens before it moves again, which is why replant is the only verb a
-harvested seed answers.
+closes it as abandoned. **Replanting** puts a seed back in the pool: it is the
+one move that lands on `planted`, so it reopens a closed seed — which is why
+replant is the only verb a harvested seed answers — un-parks a dormant one, and
+hands back one being grown without closing it.
+
+A seed somebody else still holds is **taken**, not merely moved, so every verb
+refuses it unless the caller confirms (`--confirm`). The refusal names the
+holder. A tender moving its own seed never meets that guard, and neither does
+anyone moving a seed whose holder's session has ended — a seat somebody walked
+away from stays reachable with no flag.
 
 An **edge** is one typed relation between two seeds, stored on the seed it
 points from. Two kinds carry meaning today: **blocks** (`a blocks b` — b waits

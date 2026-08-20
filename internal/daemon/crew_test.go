@@ -422,15 +422,15 @@ func TestCrew_UnboundSessionsBehaveExactlyAsBefore(t *testing.T) {
 	if tended.TenderSession != "sess-a" {
 		t.Fatalf("tender session = %q, want sess-a", tended.TenderSession)
 	}
-	// The claim still holds against another session: one tender at a time is
-	// unchanged for tenders the registry knows nothing about.
+	// The claim still holds against another session: an unconfirmed take is
+	// refused by name, unchanged for tenders the registry knows nothing about.
 	addGardenSession(t, d, "sess-b")
 	resp := transition(t, d, "sess-b", seed.ID, garden.VerbTend, "", "")
 	if resp.Ok {
 		t.Fatal("another session took a seed held by an unbound tender")
 	}
-	if !strings.Contains(protocol.Deref(resp.Error), "one tender at a time") {
-		t.Fatalf("refusal changed shape for an unbound tender: %v", protocol.Deref(resp.Error))
+	if !strings.Contains(protocol.Deref(resp.Error), "Some-worker") {
+		t.Fatalf("refusal did not name the unbound tender: %v", protocol.Deref(resp.Error))
 	}
 	move(t, d, "sess-a", seed.ID, garden.VerbHarvest, "done", "some-worker")
 

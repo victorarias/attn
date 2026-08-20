@@ -4619,6 +4619,10 @@ model SeedTransitionMessage {
   "reason"?: string;
   // The crew member asking, recorded as the tender on a claim.
   "member"?: string;
+  // Yes, take it from whoever holds it. A seed somebody else still holds is
+  // taken rather than moved, so every verb refuses without this; the CLI
+  // spells it --confirm. Ignored when nobody else holds the seed.
+  "confirm"?: boolean;
 }
 
 // SeedTransitionResultMessage replies to a WebSocket seed_transition,
