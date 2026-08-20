@@ -17,6 +17,11 @@ import (
 // priming (~$0.30, and the day's live context). So: warm it while the user is
 // there, and end the day when they are not, because warmth bought through an
 // absence is warmth nobody uses.
+//
+// Context fill is the third thing it watches, and the only one that is not
+// about money: a member whose context fills up is compacted by its harness, and
+// a compact is not a nap. What the day was survives as the harness's summary of
+// itself rather than as the letter the member would have written.
 
 // CacheState is what attn believes about a session's prompt cache. It is an
 // ESTIMATE and says so in its name: no API reports a cache entry's remaining
@@ -37,6 +42,20 @@ type CacheState struct {
 // estimate says it has lapsed.
 func (c CacheState) Remaining() time.Duration { return c.TTL - c.Age }
 
+// ContextPressure is how full a member's context is against the budget its day
+// gets. Both in tokens; a zero Tokens means attn has no reading — a harness it
+// cannot parse, or a session that has not spoken yet — and a member attn cannot
+// measure is never asked to close on this ground.
+type ContextPressure struct {
+	Tokens int64
+	Budget int64
+}
+
+// Full reports that the day has spent its context budget.
+func (c ContextPressure) Full() bool {
+	return c.Tokens > 0 && c.Budget > 0 && c.Tokens >= c.Budget
+}
+
 // Signals is everything the decision reads. Assembled by the daemon once per
 // tick per awake member.
 type Signals struct {
@@ -49,21 +68,35 @@ type Signals struct {
 	// Lead is how far ahead of the estimated expiry attn acts. It absorbs the
 	// tick interval plus the time a nudge takes to reach the model.
 	Lead time.Duration
-	// Reachable is whether a prompt typed at this session would be read. A
-	// session mid-turn or blocked on an approval is not: it would queue the
-	// prompt behind work nobody asked to interrupt.
+	// Reachable is whether a prompt typed at this session would be read at all.
+	// A session blocked on an approval is not: the prompt would answer the
+	// approval instead of reaching the member.
 	Reachable bool
+	// MidTurn is whether the member is talking to the model right now. Two of
+	// the three actions stay off a turn — a heartbeat has nothing to say to a
+	// session whose cache is being read as we speak, and an absence can wait
+	// for the turn to end. Context fill cannot: the tokens that fill it are
+	// spent inside the turn, and a turn that ends past the harness's own
+	// threshold ends after the compaction it was meant to prevent.
+	MidTurn bool
 	// Settled is whether the session owes nobody an answer. A session holding a
 	// question for the user is reachable but not settled, and the two halves
 	// want opposite things from it: a heartbeat delivered there answers the
 	// member's own question with filler and buries it, while the handoff ask is
 	// precisely the answer an absence has for an open question.
 	Settled bool
+	// Context is how full the member's context is against its budget. Read
+	// independently of everything above: a full context is a full context whether
+	// the user is here, the cache is fresh, or the member is mid-thought.
+	Context ContextPressure
 	// HeartbeatEnabled and AutoSleepEnabled are the two halves' switches. Both
 	// on by default; either off means that half does nothing at all, never that
 	// the other half covers for it.
 	HeartbeatEnabled bool
 	AutoSleepEnabled bool
+	// ContextHandoffEnabled is the third half's switch, default on like the
+	// others.
+	ContextHandoffEnabled bool
 }
 
 // Action is what to do about one awake member this tick.
@@ -79,6 +112,10 @@ const (
 	ActionHeartbeat
 	// ActionSleep prompts the member's handoff so the day ends.
 	ActionSleep
+	// ActionContextHandoff prompts the member's handoff because its context is
+	// nearly full. The same turnover as ActionSleep and for the opposite reason:
+	// sleep ends a day nobody is watching, this ends a day that ran out of room.
+	ActionContextHandoff
 )
 
 func (a Action) String() string {
@@ -87,6 +124,8 @@ func (a Action) String() string {
 		return "heartbeat"
 	case ActionSleep:
 		return "sleep"
+	case ActionContextHandoff:
+		return "context_handoff"
 	default:
 		return "none"
 	}
@@ -99,13 +138,29 @@ func (a Action) String() string {
 // on holiday. Only once the cache is about to lapse is there a decision worth
 // spending anything on — and then who is here decides which way it goes.
 //
-// The two halves ask different things of the session they act on. Ending a day
-// is an answer to whatever the member was waiting for, so it only needs the
-// session to take input. Warming a cache is not an answer to anything, so it
-// waits for a session that owes nobody one — a heartbeat typed at a member
-// holding a question for the user answers that question with filler.
+// Context fill is not gated on cache pressure and sits above it: it is the one
+// condition that only gets worse, and waiting it out is how a day is lost.
+//
+// The three actions ask different things of the session they act on, and it is
+// the same ladder each time. All three need a session that takes input at all.
+// Two of them also wait for the turn to end, because neither is urgent enough
+// to land in whatever a turn has on screen; the context ask does not wait,
+// because the thing it is racing happens inside the turn. And warming a cache
+// additionally waits for a session that owes nobody an answer: a heartbeat
+// typed at a member holding a question for the user answers that question with
+// filler, while ending a day IS an answer to whatever it was waiting for.
 func Decide(s Signals) Action {
 	if !s.Reachable {
+		return ActionNone
+	}
+	// A cache lapse costs a re-write; a full context costs the day — the harness
+	// compacts it, and what the member would have written a letter about survives
+	// only as the harness's summary of itself. So this one asks mid-turn too,
+	// before the cache gate that keeps the other two quiet.
+	if s.ContextHandoffEnabled && s.Context.Full() {
+		return ActionContextHandoff
+	}
+	if s.MidTurn {
 		return ActionNone
 	}
 	if s.Cache.Remaining() > s.Lead {

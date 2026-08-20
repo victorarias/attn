@@ -2,7 +2,6 @@ package daemon
 
 import (
 	"encoding/json"
-	"errors"
 	"strings"
 
 	"github.com/victorarias/attn/internal/protocol"
@@ -104,7 +103,7 @@ func (d *Daemon) handleSessionAnnotationsSubmit(client *wsClient, msg *protocol.
 		return
 	}
 	if err := d.typeDoorbell(sessionID, msg.Text); err != nil {
-		if errors.Is(err, errDoorbellBlockedByApproval) {
+		if doorbellDeferred(err) {
 			result.Status = annotationSubmitStatusSkipped
 			d.sendToClient(client, result)
 			return

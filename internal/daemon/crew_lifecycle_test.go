@@ -10,6 +10,7 @@ import (
 
 	"github.com/victorarias/attn/internal/crew"
 	"github.com/victorarias/attn/internal/protocol"
+	"github.com/victorarias/attn/internal/transcript"
 )
 
 // The tick takes `now` as an argument rather than reading the clock, so every
@@ -487,4 +488,205 @@ func TestCrewLifecycleMemo_ForgetsAClosedSession(t *testing.T) {
 	if !memo.mayHeartbeat("a", now.Add(time.Minute), time.Hour) {
 		t.Fatal("a forgotten session is still holding its grace")
 	}
+}
+
+// The context-full handoff.
+
+// setSessionContextOccupancy plants the reading the transcript watcher would
+// have taken from the session's last turn. The watcher itself is exercised in
+// internal/transcript; what matters here is what the tick does with the number.
+func setSessionContextOccupancy(t *testing.T, d *Daemon, sessionID string, tokens, window int64) {
+	t.Helper()
+	d.watchersMu.Lock()
+	watcher := d.transcriptWatch[sessionID]
+	if watcher == nil {
+		watcher = newTranscriptWatcher(sessionID, protocol.SessionAgentClaude, "", time.Now(), nil)
+		if d.transcriptWatch == nil {
+			d.transcriptWatch = make(map[string]*transcriptWatcher)
+		}
+		d.transcriptWatch[sessionID] = watcher
+	}
+	d.watchersMu.Unlock()
+	watcher.observeOccupancy(transcript.ContextObservation{Tokens: tokens, Window: window})
+}
+
+// The incident this exists for: a member working away with the user right there
+// and a cache nowhere near lapsing, whose context is about to be compacted by
+// its harness. Neither cache-driven half has anything to say about it.
+func TestCrewLifecycleTick_AsksForTheHandoffWhenTheContextIsFull(t *testing.T) {
+	d, sessionID, recorder := newLifecycleDaemon(t)
+	now := time.Now()
+	setSessionActivity(t, d, sessionID, protocol.SessionStateIdle, now.Add(-2*time.Minute))
+	setSessionContextOccupancy(t, d, sessionID, crewContextBudgetDefault, 0)
+
+	d.crewLifecycleTick(now)
+
+	prompts := recorder.prompts()
+	if len(prompts) != 1 {
+		t.Fatalf("the tick sent %q, want the context handoff ask", prompts)
+	}
+	// The ask has to carry both numbers: an agent can act on "at X of Y" and
+	// cannot act on a silent compact. And it has to ask for `--nap`, because a
+	// day that ran out of room says nothing about whether the work is done, so
+	// letting presence decide would park whatever was in flight.
+	for _, want := range []string{
+		"160000 of the 160000 tokens",
+		"`attn handoff --nap -m",
+		"Write the letter first",
+		"carry on without asking",
+	} {
+		if !strings.Contains(prompts[0], want) {
+			t.Fatalf("the context handoff ask does not carry %q: %q", want, prompts[0])
+		}
+	}
+}
+
+// Fire once. A member mid-letter re-nudged about the same full context reads it
+// as a second, different instruction rather than a repeat of the first — and
+// the condition holds for as long as the session lives, so without this it
+// would be re-sent every minute.
+func TestCrewLifecycleTick_AsksAboutAFullContextExactlyOnce(t *testing.T) {
+	d, sessionID, recorder := newLifecycleDaemon(t)
+	now := time.Now()
+	setSessionActivity(t, d, sessionID, protocol.SessionStateIdle, now.Add(-2*time.Minute))
+	setSessionContextOccupancy(t, d, sessionID, crewContextBudgetDefault+50000, 0)
+
+	for i := 0; i < 30; i++ {
+		d.crewLifecycleTick(now.Add(time.Duration(i) * time.Minute))
+	}
+	if got := recorder.prompts(); len(got) != 1 {
+		t.Fatalf("a full context was asked about %d times over half an hour", len(got))
+	}
+}
+
+// If the harness compacted anyway, the session has room again and a later fill
+// is a new day's worth of context, not the same one.
+func TestCrewLifecycleTick_ReArmsAfterAContextThatCameBackUnderBudget(t *testing.T) {
+	d, sessionID, recorder := newLifecycleDaemon(t)
+	now := time.Now()
+	setSessionActivity(t, d, sessionID, protocol.SessionStateIdle, now.Add(-2*time.Minute))
+
+	setSessionContextOccupancy(t, d, sessionID, crewContextBudgetDefault, 0)
+	d.crewLifecycleTick(now)
+	setSessionContextOccupancy(t, d, sessionID, 20000, 0)
+	d.crewLifecycleTick(now.Add(time.Minute))
+	setSessionContextOccupancy(t, d, sessionID, crewContextBudgetDefault, 0)
+	d.crewLifecycleTick(now.Add(2 * time.Minute))
+
+	if got := recorder.prompts(); len(got) != 2 {
+		t.Fatalf("the tick sent %d asks across two separate fills: %q", len(got), got)
+	}
+}
+
+// A session attn has taken no reading of — a harness it cannot parse, or one
+// that has not spoken since the daemon started watching — is never asked on
+// this ground. One turn of blindness, never a guess.
+func TestCrewLifecycleTick_SaysNothingWithoutAReading(t *testing.T) {
+	d, sessionID, recorder := newLifecycleDaemon(t)
+	now := time.Now()
+	setSessionActivity(t, d, sessionID, protocol.SessionStateIdle, now.Add(-2*time.Minute))
+
+	for i := 0; i < 10; i++ {
+		d.crewLifecycleTick(now.Add(time.Duration(i) * time.Minute))
+	}
+	if got := recorder.prompts(); len(got) != 0 {
+		t.Fatalf("a session with no occupancy reading was sent %q", got)
+	}
+}
+
+// Measured over every auto-compaction in the corpus behind this feature: 7 of
+// 286 finished their whole climb inside one turn, the worst burning 159,674
+// tokens without the session ever going idle. A rule that waits for the turn to
+// end loses those days, so this one does not wait.
+func TestCrewLifecycleTick_AsksAMemberThatIsStillWorking(t *testing.T) {
+	d, sessionID, recorder := newLifecycleDaemon(t)
+	now := time.Now()
+	setSessionActivity(t, d, sessionID, protocol.SessionStateWorking, now.Add(-2*time.Minute))
+	setSessionContextOccupancy(t, d, sessionID, crewContextBudgetDefault, 0)
+
+	d.crewLifecycleTick(now)
+
+	if got := recorder.prompts(); len(got) != 1 {
+		t.Fatalf("a working member with a full context was sent %q, want the handoff ask", got)
+	}
+}
+
+// The other two halves still wait for the turn to end, and a mid-turn member is
+// the case that would otherwise collect a heartbeat every minute.
+func TestCrewLifecycleTick_LeavesAWorkingMemberAloneWithoutContextPressure(t *testing.T) {
+	d, sessionID, recorder := newLifecycleDaemon(t)
+	now := time.Now()
+	// Old enough that the cache is past the heartbeat lead, which is what would
+	// fire if the mid-turn rule were dropped for every action rather than one.
+	setSessionActivity(t, d, sessionID, protocol.SessionStateWorking, now.Add(-3*time.Hour))
+
+	d.crewLifecycleTick(now)
+
+	if got := recorder.prompts(); len(got) != 0 {
+		t.Fatalf("a working member with room left was sent %q", got)
+	}
+}
+
+func TestCrewLifecycleTick_ContextHandoffCanBeTurnedOff(t *testing.T) {
+	d, sessionID, recorder := newLifecycleDaemon(t)
+	now := time.Now()
+	setSessionActivity(t, d, sessionID, protocol.SessionStateIdle, now.Add(-2*time.Minute))
+	setSessionContextOccupancy(t, d, sessionID, crewContextBudgetDefault, 0)
+	d.store.SetSetting(SettingCrewContextHandoffEnabled, "false")
+
+	d.crewLifecycleTick(now)
+
+	if got := recorder.prompts(); len(got) != 0 {
+		t.Fatalf("the context half was off and the tick still sent %q", got)
+	}
+}
+
+// The budget: the setting, lowered to fit whenever a window IS known.
+func TestCrewContextBudget(t *testing.T) {
+	d, sessionID, _ := newLifecycleDaemon(t)
+	session := d.store.Get(sessionID)
+	if session == nil {
+		t.Fatalf("no session %s", sessionID)
+	}
+
+	t.Run("the shipped default with no window in sight", func(t *testing.T) {
+		setSessionContextOccupancy(t, d, sessionID, 1000, 0)
+		if got := d.crewContextPressure(session); got.Budget != crewContextBudgetDefault {
+			t.Fatalf("budget = %d, want %d", got.Budget, crewContextBudgetDefault)
+		}
+	})
+
+	t.Run("a stated window smaller than the budget lowers it, minus the letter's room", func(t *testing.T) {
+		// Codex states its model's window on every token_count. A member whose
+		// window is under the budget would otherwise never be asked at all.
+		setSessionContextOccupancy(t, d, sessionID, 1000, 100000)
+		want := int64(100000 - crewContextHandoffMargin)
+		if got := d.crewContextPressure(session); got.Budget != want {
+			t.Fatalf("budget = %d, want %d", got.Budget, want)
+		}
+	})
+
+	t.Run("a window bigger than the budget does not raise it", func(t *testing.T) {
+		setSessionContextOccupancy(t, d, sessionID, 1000, 1000000)
+		if got := d.crewContextPressure(session); got.Budget != crewContextBudgetDefault {
+			t.Fatalf("budget = %d, want the setting to stay the ceiling", got.Budget)
+		}
+	})
+
+	t.Run("the setting moves it", func(t *testing.T) {
+		d.store.SetSetting(SettingCrewContextHandoffTokens, "90000")
+		t.Cleanup(func() { d.store.SetSetting(SettingCrewContextHandoffTokens, "") })
+		setSessionContextOccupancy(t, d, sessionID, 1000, 0)
+		if got := d.crewContextPressure(session); got.Budget != 90000 {
+			t.Fatalf("budget = %d, want the configured 90000", got.Budget)
+		}
+	})
+
+	t.Run("no reading is no pressure", func(t *testing.T) {
+		other := *session
+		other.ID = "no-watcher-session"
+		if got := d.crewContextPressure(&other); got.Tokens != 0 || got.Budget != 0 {
+			t.Fatalf("pressure = %+v, want nothing at all", got)
+		}
+	})
 }

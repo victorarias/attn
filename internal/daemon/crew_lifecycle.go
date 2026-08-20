@@ -11,6 +11,7 @@ import (
 	"github.com/victorarias/attn/internal/docstore"
 	"github.com/victorarias/attn/internal/jobs"
 	"github.com/victorarias/attn/internal/protocol"
+	"github.com/victorarias/attn/internal/transcript"
 )
 
 // The crew lifecycle's daemon half: the tick that watches awake members, the
@@ -57,6 +58,36 @@ const (
 	crewCacheTTLClaude  = 3600
 	crewCacheTTLCodex   = 1800
 	crewCacheTTLDefault = 3600
+)
+
+// crewContextBudgetDefault is how much context a member's day gets before attn
+// asks it to hand off, and crewContextHandoffMargin is the room that number
+// leaves for the closing itself.
+//
+// Receipt, measured 2026-08-19 over every Claude Code transcript on this machine
+// — 265 real auto-compactions between 2026-08-05 and 2026-08-19, Claude Code
+// 2.1.214 through 2.1.235, across opus-5, fable-5 and opus-4-8:
+//
+//   - The harness compacted at 185,578 tokens at the very lowest, and the
+//     current cluster sits at ~267,000. The threshold is NOT a fixed fraction of
+//     anything and it MOVED with a patch release — ~186k on 2.1.215 and earlier,
+//     ~267k from 2.1.216 — so it is not a number attn can predict. What attn can
+//     do is stay under the lowest it has ever seen.
+//   - Writing the letter and filing it cost 312, 363, 1,099, 7,525 and 16,916
+//     tokens across the five prompted handoffs in the record. 25,000 covers the
+//     worst of them by 1.5x.
+//   - 185,578 - 25,000 = 160,578, and 160,000 is also comfortably under the
+//     200,000-token context window of the smallest model attn launches, so the
+//     budget can never sit above a member's ceiling.
+//
+// The incident this exists for: Trellis auto-compacted on 2026-08-19 at
+// preTokens=267,749, and the last occupancy attn could read from its transcript
+// before that was 266,998 — the signal tracks the compaction point to 0.3%.
+const (
+	crewContextBudgetDefault   = 160000
+	crewContextHandoffMargin   = 25000
+	crewContextBudgetMinTokens = 10000
+	crewContextBudgetMaxTokens = 2000000
 )
 
 // crewHeartbeatLeadDefault is how far ahead of the estimated expiry attn acts.
@@ -107,6 +138,22 @@ const crewHeartbeatPrompt = "[attn] Keeping your context warm — no work is bei
 // decides when to ask, never what to say.
 const crewSleepPrompt = "[attn] The user has been away long enough that your day should end rather than carry on warm. Close it now: write your letter to whoever wakes as you next — what you were doing, what is load-bearing, what you would pick up first — and file it with `attn handoff --sleep -m \"<your letter>\"`. Your session ends when it lands; nobody wakes behind it, and you will not be woken again until the user asks."
 
+// crewContextHandoffPrompt ends the day for the other reason. It names the two
+// numbers because an agent can act on "at X of Y" and cannot act on a silent
+// compact — which is exactly what it gets instead if it does not close now.
+//
+// It asks for `--nap` rather than the presence-decided default, because this
+// close says nothing about whether the work is done: the member ran out of
+// room, not out of things to do. Letting presence decide here would strand
+// whatever was in flight until the user came back, and the two costs are not
+// comparable — a successor nobody needed is one priming, work parked for a
+// night is the day. The letter is asked for in resume shape for the same
+// reason: a successor that has to ask where things stand is a compact with
+// extra steps.
+func crewContextHandoffPrompt(tokens, budget int64) string {
+	return fmt.Sprintf("[attn] Your context is at %d of the %d tokens your day gets, and past that your harness compacts it — which would leave its summary of today where your letter should be. This is a day cut short, not a day finished, so close it yourself now. Write the letter first; it is the part that cannot be recovered, and write it so whoever wakes as you next can carry on without asking: what you were in the middle of, exactly where it stands, what is load-bearing, and the first concrete thing they should do. Then file it with `attn handoff --nap -m \"<your letter>\"` — `--nap` wakes your successor even if the user is away, which is right here because the work did not end, you ran out of room. Use plain `attn handoff` instead only if you were genuinely finished and there is nothing to carry.", tokens, budget)
+}
+
 // crewSleepPromptGrace is how long attn waits for a prompted handoff before
 // asking again. A member mid-thought may take minutes to close, and re-asking
 // every tick would bury the first ask under copies of itself.
@@ -120,12 +167,14 @@ type crewLifecycleMemo struct {
 	mu    sync.Mutex
 	acted map[string]time.Time // session id -> when it was last heartbeated
 	asked map[string]time.Time // session id -> when its handoff was last prompted
+	full  map[string]bool      // session id -> its context was already called full
 }
 
 func newCrewLifecycleMemo() *crewLifecycleMemo {
 	return &crewLifecycleMemo{
 		acted: make(map[string]time.Time),
 		asked: make(map[string]time.Time),
+		full:  make(map[string]bool),
 	}
 }
 
@@ -151,11 +200,35 @@ func (m *crewLifecycleMemo) mayAct(table map[string]time.Time, sessionID string,
 	return true
 }
 
+// mayAskContextFull answers once per session and then stays quiet, however long
+// the day runs on: a member mid-letter re-nudged about the same full context
+// reads it as a second, different instruction rather than a repeat of the first.
+// A new session gets a new id and is armed by construction.
+func (m *crewLifecycleMemo) mayAskContextFull(sessionID string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.full[sessionID] {
+		return false
+	}
+	m.full[sessionID] = true
+	return true
+}
+
+// rearmContextFull is called on every tick where the context is back under
+// budget, which means the harness compacted anyway and the session has room
+// again. Without it a compacted session could never be asked a second time.
+func (m *crewLifecycleMemo) rearmContextFull(sessionID string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.full, sessionID)
+}
+
 func (m *crewLifecycleMemo) forget(sessionID string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	delete(m.acted, sessionID)
 	delete(m.asked, sessionID)
+	delete(m.full, sessionID)
 }
 
 // Settings.
@@ -206,6 +279,55 @@ func (d *Daemon) crewCacheTTL(agent string) time.Duration {
 	return d.crewSeconds(SettingCrewCacheTTLSeconds, fallback, crewCacheTTLMinSeconds, crewCacheTTLMaxSeconds)
 }
 
+// crewContextPressure reads how full one member's context is, against the budget
+// its day gets. Absent (zero Tokens, so never full) for a harness attn cannot
+// parse and for a session that has not spoken since the daemon started watching
+// it — one turn of blindness, never a guess.
+//
+// The budget is the setting, lowered to fit whenever a window IS known: codex
+// states its model's window on every token_count, and a session launched with a
+// context-window cap has one attn set itself. A member whose window is smaller
+// than the budget would otherwise never be asked at all — the harness would
+// compact it first, which is the failure this exists to prevent.
+func (d *Daemon) crewContextPressure(session *protocol.Session) crew.ContextPressure {
+	occupancy, ok := d.sessionContextOccupancy(session.ID)
+	if !ok {
+		return crew.ContextPressure{}
+	}
+	budget := d.crewContextBudget()
+	if window := d.crewContextWindow(session, occupancy); window > 0 && window-crewContextHandoffMargin < budget {
+		budget = window - crewContextHandoffMargin
+	}
+	if budget < 1 {
+		return crew.ContextPressure{}
+	}
+	return crew.ContextPressure{Tokens: occupancy.Tokens, Budget: budget}
+}
+
+// crewContextWindow is the session's context window when something states one,
+// 0 otherwise. Claude's transcript never does, which is why the budget is an
+// absolute number rather than a fraction of a window.
+func (d *Daemon) crewContextWindow(session *protocol.Session, occupancy transcript.ContextObservation) int64 {
+	if cap := d.launchContextWindowCap(session.ID, string(session.Agent), d.isChiefOfStaffSession(session.ID)); cap > 0 {
+		return int64(cap)
+	}
+	return occupancy.Window
+}
+
+func (d *Daemon) crewContextBudget() int64 {
+	tokens := crewContextBudgetDefault
+	if d.store != nil {
+		if raw := strings.TrimSpace(d.store.GetSetting(SettingCrewContextHandoffTokens)); raw != "" {
+			tokens = resolveBoundedIntSetting(raw, crewContextBudgetDefault, crewContextBudgetMinTokens, crewContextBudgetMaxTokens)
+			if tokens == crewContextBudgetDefault && raw != fmt.Sprint(crewContextBudgetDefault) {
+				d.logf("crew: %s is %q, which is not a whole number of tokens between %d and %d; using %d",
+					SettingCrewContextHandoffTokens, raw, crewContextBudgetMinTokens, crewContextBudgetMaxTokens, crewContextBudgetDefault)
+			}
+		}
+	}
+	return int64(tokens)
+}
+
 func (d *Daemon) crewHeartbeatLead() time.Duration {
 	return d.crewSeconds(SettingCrewHeartbeatLeadSeconds, crewHeartbeatLeadDefault, crewHeartbeatLeadMinSeconds, crewHeartbeatLeadMaxSeconds)
 }
@@ -251,16 +373,20 @@ func (d *Daemon) crewCacheState(session *protocol.Session, now time.Time) crew.C
 	return state
 }
 
-// crewSessionReachable reports whether a prompt typed here would be read rather
-// than queued behind work nobody asked to interrupt. The doorbell's own rule
-// stops at approvals; this consumer also stays off a session mid-turn, because
-// nothing here is urgent enough to land in whatever a turn has on screen — an
-// in-flight question selector reads as `working` and would swallow the paste as
-// its answer. A member mid-turn is talking to the model right now anyway, so its
-// cache is the freshest in the roster and the tick has nothing to say to it.
+// crewSessionReachable reports whether a prompt typed here would be read at
+// all, which is the doorbell's own rule: everything except an approval, whose
+// selector would read the paste as its answer.
 func crewSessionReachable(session *protocol.Session) bool {
-	return isNudgeDeliveryAllowed(string(session.State)) &&
-		session.State != protocol.SessionStateWorking
+	return isNudgeDeliveryAllowed(string(session.State))
+}
+
+// crewSessionMidTurn reports that the member is talking to the model right now.
+// The heartbeat and the sleep ask both stay off a turn: a member mid-turn has
+// the freshest cache in the roster, and an absence keeps until the turn ends.
+// The context ask does not, so it is the one action that types into a working
+// session — the doorbell's screen guard is what keeps that safe.
+func crewSessionMidTurn(session *protocol.Session) bool {
+	return session.State == protocol.SessionStateWorking
 }
 
 // crewSessionSettled reports that the session owes nobody an answer. Only the
@@ -318,6 +444,7 @@ func (d *Daemon) crewLifecycleTick(now time.Time) {
 	lead := d.crewHeartbeatLead()
 	heartbeat := d.crewBoolSetting(SettingCrewHeartbeatEnabled)
 	autoSleep := d.crewBoolSetting(SettingCrewAutoSleepEnabled)
+	contextHandoff := d.crewBoolSetting(SettingCrewContextHandoffEnabled)
 	for _, member := range members {
 		if !d.crewBindingLive(member) {
 			continue
@@ -327,27 +454,38 @@ func (d *Daemon) crewLifecycleTick(now time.Time) {
 			continue
 		}
 		cache := d.crewCacheState(session, now)
+		pressure := d.crewContextPressure(session)
 		action := crew.Decide(crew.Signals{
-			AwayFor:          awayFor,
-			AwayLimit:        awayLimit,
-			Cache:            cache,
-			Lead:             lead,
-			Reachable:        crewSessionReachable(session),
-			Settled:          crewSessionSettled(session),
-			HeartbeatEnabled: heartbeat,
-			AutoSleepEnabled: autoSleep,
+			AwayFor:   awayFor,
+			AwayLimit: awayLimit,
+			Cache:     cache,
+			Lead:      lead,
+			Reachable: crewSessionReachable(session),
+			MidTurn:   crewSessionMidTurn(session),
+			Settled:   crewSessionSettled(session),
+			Context:   pressure,
+
+			HeartbeatEnabled:      heartbeat,
+			AutoSleepEnabled:      autoSleep,
+			ContextHandoffEnabled: contextHandoff,
 		})
+		if !pressure.Full() {
+			d.crewMemo().rearmContextFull(session.ID)
+		}
+		if action == crew.ActionContextHandoff && !d.crewMemo().mayAskContextFull(session.ID) {
+			continue
+		}
 		if action == crew.ActionNone {
 			continue
 		}
-		d.actOnCrewMember(member, session.ID, action, cache, now)
+		d.actOnCrewMember(member, session.ID, action, cache, pressure, now)
 	}
 }
 
 // actOnCrewMember carries out one decision. Every path is rate-limited against
 // the memo: a nudge that does not visibly land must not be re-sent every minute
 // for as long as the condition holds.
-func (d *Daemon) actOnCrewMember(member crew.Member, sessionID string, action crew.Action, cache crew.CacheState, now time.Time) {
+func (d *Daemon) actOnCrewMember(member crew.Member, sessionID string, action crew.Action, cache crew.CacheState, pressure crew.ContextPressure, now time.Time) {
 	switch action {
 	case crew.ActionHeartbeat:
 		if !d.crewMemo().mayHeartbeat(sessionID, now, d.crewHeartbeatLead()) {
@@ -369,6 +507,13 @@ func (d *Daemon) actOnCrewMember(member crew.Member, sessionID string, action cr
 		}
 		d.logf("crew: asked %s to close its day — the user has been away and the cache is %s from lapsing",
 			crew.DisplayName(member.ID), cache.Remaining().Round(time.Second))
+	case crew.ActionContextHandoff:
+		if err := d.typeDoorbell(sessionID, crewContextHandoffPrompt(pressure.Tokens, pressure.Budget)); err != nil {
+			d.logf("crew: %s was not asked to hand off a full context: %v", crew.DisplayName(member.ID), err)
+			return
+		}
+		d.logf("crew: asked %s to hand off — its context is at %d of the %d tokens its day gets",
+			crew.DisplayName(member.ID), pressure.Tokens, pressure.Budget)
 	}
 }
 

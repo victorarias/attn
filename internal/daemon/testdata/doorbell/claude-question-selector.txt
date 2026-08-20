@@ -1,0 +1,12 @@
+Control  ✔ Submit  →
+Should the widget flag be a per-visit latch or a remembered setting?
+❯ 1. Per-visit latch              ┌──────────────────────────────────────────┐
+    (Recommended)                 │ arrive via settle        -> armed        │
+  2. Latch + remembered           │ arrive via shortcut      -> off          │
+    preference                    │ leave (any route)        -> cleared      │
+                                  │ app restart              -> off          │
+                                  └──────────────────────────────────────────┘
+                                  Notes: press n to add notes
+────────────────────────────────────────────────────────────────────────────────
+  Chat about this
+Enter to select · ↑/↓ to navigate · n to add notes · Tab to switch questions · Esc to cancel

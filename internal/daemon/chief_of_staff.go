@@ -13,7 +13,18 @@ import (
 	"github.com/victorarias/attn/internal/store"
 )
 
-var errDoorbellBlockedByApproval = errors.New("doorbell blocked by pending approval")
+var (
+	errDoorbellBlockedByApproval = errors.New("doorbell blocked by pending approval")
+	errDoorbellBlockedBySelector = errors.New("doorbell blocked by an on-screen selector")
+)
+
+// doorbellDeferred reports the two refusals that are not failures: the target
+// cannot take words right now, and will be able to. Every caller that queues a
+// message rather than reporting an error asks this, so a new reason to hold off
+// reaches all of them at once.
+func doorbellDeferred(err error) bool {
+	return errors.Is(err, errDoorbellBlockedByApproval) || errors.Is(err, errDoorbellBlockedBySelector)
+}
 
 const profileRoleChiefOfStaff = "chief_of_staff"
 
@@ -194,6 +205,12 @@ func (d *Daemon) typeDoorbellRoute(sessionID, prompt string) (composer bool, err
 	if delivered, err := d.deliverDoorbellViaPluginDriver(session, prompt); delivered {
 		return false, err
 	}
+	// The paste is the only route that types at a screen, so it is the only one
+	// that can be answering a selector instead of filling a composer.
+	if line, blocked := d.doorbellSelectorOnScreen(sessionID); blocked {
+		d.logf("doorbell held off session=%s: the screen is waiting on a keypress (%q)", sessionID, line)
+		return false, errDoorbellBlockedBySelector
+	}
 	input := make([]byte, 0, len(bracketedPasteStart)+len(prompt)+len(bracketedPasteEnd))
 	input = append(input, bracketedPasteStart...)
 	input = append(input, prompt...)
@@ -217,6 +234,12 @@ func (d *Daemon) submitDoorbell(sessionID string) error {
 	session := d.store.Get(sessionID)
 	if session == nil || !isNudgeDeliveryAllowed(string(session.State)) {
 		return errDoorbellBlockedByApproval
+	}
+	// Enter is the half of the paste that commits, so a selector that came up
+	// while the words were sitting there is the worse moment to press it.
+	if line, blocked := d.doorbellSelectorOnScreen(sessionID); blocked {
+		d.logf("doorbell submit held off session=%s: the screen is waiting on a keypress (%q)", sessionID, line)
+		return errDoorbellBlockedBySelector
 	}
 	return d.writePTY(sessionID, []byte("\r"))
 }

@@ -211,6 +211,7 @@
     "crew.autosleep_enabled": "true",
     "crew.away_seconds": "9000",
     "crew.cache_ttl_seconds": "3600",
+    "crew.context_handoff_enabled": "true",
     "crew.heartbeat_enabled": "true",
     "crew.heartbeat_lead_seconds": "300",
     "crew.wake_limit": "8",

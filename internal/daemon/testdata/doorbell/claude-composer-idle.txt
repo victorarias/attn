@@ -1,0 +1,10 @@
+ ▐▛███▜▌   Claude Code v2.1.220
+▝▜█████▛▘  Opus 5 (1M context) with high effort · Claude Max
+  ▘▘ ▝▝    ~/projects/example/repo
+                                                        ● high · /effort
+────────────────────────────────────────────────────────────────────────────────
+❯
+────────────────────────────────────────────────────────────────────────────────
+  Opus 5 high  ~/projects/example/repo  (branch)                 /rc connecting…
+  ctx 0%  ·  5h --  ·  7d --
+  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents

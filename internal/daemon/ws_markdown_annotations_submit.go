@@ -1,7 +1,6 @@
 package daemon
 
 import (
-	"errors"
 	"strings"
 	"time"
 
@@ -93,7 +92,7 @@ func (d *Daemon) handleMarkdownAnnotationsSubmit(client *wsClient, msg *protocol
 			return
 		}
 		if err := d.typeDoorbell(targetSession, payload); err != nil {
-			if errors.Is(err, errDoorbellBlockedByApproval) {
+			if doorbellDeferred(err) {
 				result.Status = annotationSubmitStatusSkipped
 				d.sendToClient(client, result)
 				return
