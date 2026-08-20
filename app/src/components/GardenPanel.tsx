@@ -723,16 +723,21 @@ export function GardenPanel({
               };
               const displayedDocument = seedDocument?.seed.id === seed.id ? seedDocument : localDocument;
               return (
+                // The option is the row's own head, not the <li> around it: a
+                // row also carries a drill button and, once open, its whole
+                // detail, and an option that contains other controls stops
+                // being one thing to pick.
                 <li
                   key={seed.id}
-                  id={`garden-row-${seed.id}`}
-                  role="option"
-                  aria-selected={active}
+                  role="presentation"
                   data-active={active}
                   className={`garden-seed ${statusClass(seed.status)}${expanded ? ' is-expanded' : ''}${active ? ' is-active' : ''}`}
                 >
                   <button
                     type="button"
+                    id={`garden-row-${seed.id}`}
+                    role="option"
+                    aria-selected={active}
                     className="garden-seed__head"
                     onClick={() => {
                       setWalk({ of: question, index: rowIndex });
