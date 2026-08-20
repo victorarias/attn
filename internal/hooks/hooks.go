@@ -79,14 +79,16 @@ Running a workflow starts multiple workflow agents and can consume a large amoun
 If neither keyword is present, do NOT run a workflow: use ordinary tools, or briefly note that a workflow could help and ask whether to run one (mention they can opt in with "attn workflow"). The opt-in must be in the user's own words — never infer it from a task that would merely benefit from one.`
 }
 
-// GardenAwarenessGuidance is the shared, always-on garden pointer injected into
-// BOTH the chief and non-chief agent system prompts. It teaches any launched
-// agent that attn keeps work as seeds and that it can plant one. Planting is
-// USER-TRIGGERED: the agent may surface or propose a seed, but it never plants
-// one on its own initiative. Kept verbatim so that boundary wording is identical
-// across the chief prompt, the non-chief prompt, and the skill reference.
+// GardenAwarenessGuidance is the shared, always-on garden block injected into
+// BOTH the chief and non-chief agent system prompts. It carries the rules every
+// agent follows without being asked: plant discovered work, keep the follow-through
+// judgment, wither generously, and settle every seed before reporting done.
+// The craft (how to write a body, where a seed belongs, how to pick up more
+// work) is behind `attn seed guide` rather than here, so this block stays the
+// weight of a rule sheet. Kept verbatim so the rules are identical across the
+// chief prompt, the non-chief prompt, and the skill reference.
 func GardenAwarenessGuidance() string {
-	return "attn keeps work in the garden, as seeds. When the user asks you to capture or track work (even an off-goal thing you noticed and raised with them), plant a seed with `attn seed plant \"<title>\" -m \"<brief>\"` (a body that is self-sufficient on its own: the outcome / what \"done\" looks like, just-enough context, how it is verified, and scope). Suggest planting one when it would help, but plant only when the user asks — never park work in the garden on your own initiative. To leave a note on a seed you were handed the id for but are not tending, append to its log with `attn seed note <seed-id> -m \"<text>\"`. `attn ticket` retired: every write verb now prints the garden command that replaced it, and only `attn ticket show` and `attn ticket list` still read the archived board. The attn skill's garden reference has the how and what makes a good seed."
+	return "attn keeps work in the garden, as seeds: anything worth handing off, parking, or attributing. Plant with `attn seed plant \"<title>\" -m \"<brief>\"`, writing a body that stands on its own: what \"done\" looks like, just-enough context, how it is verified, and what is out of scope. Work you discover mid-task belongs there too; plant it yourself, name in the body what it fell out of, and reach for `attn seed plot` when it is really several pieces that can run in parallel. Read `attn seed ls` first so a thread that already exists gets a note (`attn seed note <id> -m \"<text>\"`) rather than a duplicate.\n\nFix what you found when it is small and sits right where you already are; otherwise plant it and stay on the work you were asked to do. Wither generously: `attn seed wither <id> -m \"<why>\"` closes what nobody should pick up. Before you report a session done, note what you learned, harvest what is finished, and park or hand off what is not. `attn seed guide` prints the craft: writing a body, where a seed belongs, edit versus replant, and how to pick up further work."
 }
 
 // AgentInstructions composes the launch-time instruction blocks injected as a
@@ -172,9 +174,9 @@ func GardenPrimer(prime *GardenPrime) string {
 		return ""
 	}
 	var b strings.Builder
-	b.WriteString(`attn keeps work in **the garden**. A **seed** is one unit of work — a short id (` + "`s-7k3f9m`" + `), a title, a markdown body, and a state. Anything worth handing off, parking, or attributing is a seed; in-session scratch is not. A **plot** is a seed with children — the crown — and its children are parallel by default: only ` + "`blocks`" + ` edges sequence them.
+	b.WriteString(`attn keeps work in **the garden**. A **seed** is one unit of work: a short id (` + "`s-7k3f9m`" + `), a title, a markdown body, and a state. Anything worth handing off, parking, or attributing is a seed; in-session scratch is not. A **plot** is a seed with children, and that parent is the crown. Children are parallel by default: only ` + "`blocks`" + ` edges sequence them.
 
-The loop is ready → tend → harvest. ` + "`attn seed ready`" + ` says what you can pick up right now: nothing open blocks it and nobody holds it. ` + "`attn seed tend <id>`" + ` claims one — one tender at a time, so the claim is how other agents know it is taken. ` + "`attn seed note <id> -m \"…\"`" + ` records what happened and what you learned, for whoever tends it next. ` + "`attn seed harvest <id> -m \"what got done\"`" + ` closes it as done; ` + "`attn seed wither`" + ` closes one nobody will pick up, and ` + "`attn seed park`" + ` puts it down without giving up on it. Plant with ` + "`attn seed plant \"what this is\"`" + `, which prints the id. ` + "`attn seed --help`" + ` has the rest.
+The loop is ready → tend → harvest. ` + "`attn seed ready`" + ` says what you can pick up right now: nothing open blocks it and nobody holds it. ` + "`attn seed tend <id>`" + ` claims one: one tender at a time, so the claim is how other agents know it is taken. ` + "`attn seed park`" + ` puts a seed down without giving up on it, and ` + "`attn seed --help`" + ` has the rest.
 
 `)
 	if prime.Crown == nil {

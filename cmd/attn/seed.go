@@ -61,6 +61,8 @@ func runSeed() {
 		runSeedLink(os.Args[2] == "unlink", args)
 	case "ready":
 		runSeedReady(args)
+	case "guide":
+		runSeedGuide(args)
 	default:
 		fmt.Fprintf(os.Stderr, "seed: unknown command %q\n", os.Args[2])
 		writeSeedHelp(os.Stderr)
@@ -162,6 +164,11 @@ commands:
   notes <id> [--limit <n>] [--json]
         the whole log, newest first. show renders the newest few and says
         how many more are here.
+
+  guide
+        print the craft behind the rules: writing a body, what "done" is per
+        deliverable type, where a seed belongs, edit versus replant, a seed
+        whose tender is gone, and how to pick up further work.
 
   export <id> [--out <path>] [--json]
         write the seed's body to markdown, stamped as generated from the seed —
