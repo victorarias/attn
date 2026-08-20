@@ -239,7 +239,7 @@ func (d *Daemon) automationSetEnabled(ctx context.Context, definitionID string, 
 	return definition, err
 }
 
-// automationDelete soft-deletes definitionID: cancels pending runs, clears
+// automationDelete soft-deletes definitionID: cancels pending runs, retires
 // review-request edges and continuity bindings, fences provider cursors, then
 // soft-deletes and broadcasts. Runs, tickets, sessions, and on-disk artifacts
 // are untouched. Reapplying the same id resurrects. Mirrors
@@ -257,19 +257,20 @@ func (d *Daemon) automationDelete(ctx context.Context, definitionID string) erro
 	if definition == nil {
 		return fmt.Errorf("automation %q not found", definitionID)
 	}
+	now := time.Now()
 	if err := d.cancelPendingAutomationRuns(definitionID, store.AutomationCancelReasonDefinitionDeleted); err != nil {
 		return err
 	}
-	if err := d.store.DeleteAutomationReviewRequestEdges(definitionID); err != nil {
+	if err := d.store.DeactivateAutomationReviewRequestEdges(definitionID, now); err != nil {
 		return err
 	}
-	if err := d.store.ReleaseAutomationContinuityBindings(definitionID, store.AutomationBindingReleasedDefinitionDeleted, time.Now()); err != nil {
+	if err := d.store.ReleaseAutomationContinuityBindings(definitionID, store.AutomationBindingReleasedDefinitionDeleted, now); err != nil {
 		return err
 	}
-	if err := d.store.FenceAutomationProviderCursors(definitionID, time.Now()); err != nil {
+	if err := d.store.FenceAutomationProviderCursors(definitionID, now); err != nil {
 		return err
 	}
-	if err := d.store.DeleteAutomationDefinition(definitionID, time.Now()); err != nil {
+	if err := d.store.DeleteAutomationDefinition(definitionID, now); err != nil {
 		return err
 	}
 	d.broadcastAutomationsChanged(definitionID)

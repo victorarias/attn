@@ -1224,6 +1224,11 @@ CREATE TABLE IF NOT EXISTS app_reconcile_progress (
 			SELECT 'gardenScale', value FROM settings WHERE key = 'ticketBoardScale';
 		DELETE FROM settings WHERE key = 'ticketBoardScale';
 	`},
+	// Current review demand establishes a newly activated automation's baseline;
+	// only a later request cycle is eligible to launch. Existing rows default to
+	// zero so upgrading does not suppress demand already tracked by a live
+	// definition.
+	{119, "record review automation activation baselines", ``},
 }
 
 // migration99SQL is everything migration 99 does after its guarded ALTER.
@@ -1633,6 +1638,11 @@ func migrateDB(db *sql.DB, dbPath string) error {
 				tx.Rollback()
 				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
 			}
+		} else if m.version == 119 {
+			if err := applyMigration119(tx); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
+			}
 		} else if m.version == 114 {
 			if err := applyMigration114(tx); err != nil {
 				tx.Rollback()
@@ -1714,6 +1724,18 @@ func applyMigration116(tx *sql.Tx) error {
 			WHEN 'app.view.crashed' THEN 'view'
 			ELSE 'subscription'
 		END`)
+	return err
+}
+
+func applyMigration119(tx *sql.Tx) error {
+	has, err := columnExists(tx, "automation_review_request_edges", "baseline_cycle")
+	if err != nil {
+		return err
+	}
+	if has {
+		return nil
+	}
+	_, err = tx.Exec(`ALTER TABLE automation_review_request_edges ADD COLUMN baseline_cycle INTEGER NOT NULL DEFAULT 0`)
 	return err
 }
 

@@ -75,6 +75,13 @@ func testAutomationLaunch(agent string) automation.EffectiveLaunch {
 	}
 }
 
+func baselineGitHubReviewAutomation(t *testing.T, s *store.Store, definitionID, host string, at time.Time) {
+	t.Helper()
+	if candidates, err := s.ReconcileAutomationReviewRequests(definitionID, host, nil, at); err != nil || len(candidates) != 0 {
+		t.Fatalf("establish review automation baseline: candidates=%#v err=%v", candidates, err)
+	}
+}
+
 func TestPrepareRepositoryWorktreeUsesLocalOverrideAndExactRevision(t *testing.T) {
 	root := t.TempDir()
 	repo := filepath.Join(root, "repo")
@@ -492,6 +499,7 @@ func TestAutomationRecoveryLeavesGitHubRunsForFreshProviderObservation(t *testin
 		t.Fatal(err)
 	}
 	const subject = "github.com/owner/repo#42"
+	baselineGitHubReviewAutomation(t, s, def.ID, "github.com", now)
 	if _, err := s.ReconcileAutomationReviewRequests(def.ID, "github.com", []string{subject}, now); err != nil {
 		t.Fatal(err)
 	}
@@ -602,12 +610,14 @@ location:
 // Boundary-bound: the GitHub client talks to an httptest.NewServer over a real
 // TCP socket, so the observer's work is not durably blocked.
 func TestManualPRRefreshFeedsGitHubAutomationObserver(t *testing.T) {
+	var requested atomic.Bool
+	requested.Store(true)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
 		case r.URL.Path == "/search/issues":
 			items := `[]`
-			if strings.Contains(r.URL.Query().Get("q"), "review-requested:@me") {
+			if requested.Load() && strings.Contains(r.URL.Query().Get("q"), "review-requested:@me") {
 				items = `[{"number":42,"title":"Change","html_url":"https://github.com/owner/repo/pull/42","draft":false,"state":"open","repository_url":"https://api.github.com/repos/owner/repo","user":{"login":"author"},"comments":0}]`
 			}
 			_, _ = w.Write([]byte(`{"total_count":1,"items":` + items + `}`))
@@ -653,8 +663,21 @@ location: {type: repository_worktree, repository_sources: {default: {type: manag
 	}
 	select {
 	case <-delivered:
+		t.Fatal("activation backlog launched during manual PR refresh")
+	default:
+	}
+	requested.Store(false)
+	if err := d.doRefreshPRsWithResult(); err != nil {
+		t.Fatal(err)
+	}
+	requested.Store(true)
+	if err := d.doRefreshPRsWithResult(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-delivered:
 	case <-time.After(2 * time.Second):
-		t.Fatal("manual PR refresh did not feed the automation observer")
+		t.Fatal("new request from manual PR refresh did not feed the automation observer")
 	}
 }
 
@@ -703,6 +726,7 @@ location: {type: repository_worktree, repository_sources: {default: {type: manag
 	}
 	demand := []*protocol.PR{{Host: "github.com", Repo: "owner/repo", Number: 42, Role: protocol.PRRoleReviewer, State: protocol.PRStateWaiting, Reason: protocol.PRReasonReviewNeeded}}
 	observedAt := time.Now()
+	d.observeGitHubReviewRequests("github.com", nil, observedAt)
 	d.observeGitHubReviewRequests("github.com", demand, observedAt)
 	runs, err := s.ListAutomationRuns("retry-review")
 	if err != nil || len(runs) != 1 || runs[0].State != "pending" || attempts.Load() != 1 {
@@ -733,6 +757,7 @@ func TestContinuationFailurePreservesOriginTicketOutcome(t *testing.T) {
 		t.Fatal(err)
 	}
 	const subject = "github.com/owner/repo#42"
+	baselineGitHubReviewAutomation(t, s, def.ID, "github.com", now)
 	if _, err := s.ReconcileAutomationReviewRequests(def.ID, "github.com", []string{subject}, now); err != nil {
 		t.Fatal(err)
 	}
@@ -780,6 +805,7 @@ func TestSuccessfulContinuationReopensOriginTicketAfterDelivery(t *testing.T) {
 		t.Fatal(err)
 	}
 	const subject = "github.com/owner/repo#42"
+	baselineGitHubReviewAutomation(t, s, def.ID, "github.com", now)
 	if _, err := s.ReconcileAutomationReviewRequests(def.ID, "github.com", []string{subject}, now); err != nil {
 		t.Fatal(err)
 	}
@@ -860,6 +886,7 @@ func TestFreshThreadAfterTicketSweepGetsItsOwnTicketNotTheOldOne(t *testing.T) {
 		t.Fatal(err)
 	}
 	const subject = "github.com/owner/repo#42"
+	baselineGitHubReviewAutomation(t, s, def.ID, "github.com", now)
 	if _, err := s.ReconcileAutomationReviewRequests(def.ID, "github.com", []string{subject}, now); err != nil {
 		t.Fatal(err)
 	}
@@ -912,6 +939,7 @@ func TestChangedHeadContinuationFailsBeforePublishingTicketActivity(t *testing.T
 	const subject = "github.com/owner/repo#42"
 	const firstPayload = `{"provider":"github","host":"github.com","owner":"owner","repository":"repo","number":42,"url":"https://github.com/owner/repo/pull/42","state":"open","head_sha":"0123456789abcdef0123456789abcdef01234567"}`
 	const secondPayload = `{"provider":"github","host":"github.com","owner":"owner","repository":"repo","number":42,"url":"https://github.com/owner/repo/pull/42","state":"open","head_sha":"89abcdef0123456789abcdef0123456789abcdef"}`
+	baselineGitHubReviewAutomation(t, s, def.ID, "github.com", now)
 	if _, err := s.ReconcileAutomationReviewRequests(def.ID, "github.com", []string{subject}, now); err != nil {
 		t.Fatal(err)
 	}
@@ -965,6 +993,7 @@ func TestStoppedContinuationResumesRecordedReviewerWithPinnedContract(t *testing
 		t.Fatal(err)
 	}
 	const subject = "github.com/owner/repo#42"
+	baselineGitHubReviewAutomation(t, d.store, def.ID, "github.com", now)
 	if _, err := d.store.ReconcileAutomationReviewRequests(def.ID, "github.com", []string{subject}, now); err != nil {
 		t.Fatal(err)
 	}
@@ -1072,6 +1101,7 @@ func setupContinuationWorktree(t *testing.T) (*Daemon, automation.WorkRequest, s
 		t.Fatal(err)
 	}
 	const subject = "github.com/owner/repo#42"
+	baselineGitHubReviewAutomation(t, d.store, def.ID, "github.com", now)
 	if _, err := d.store.ReconcileAutomationReviewRequests(def.ID, "github.com", []string{subject}, now); err != nil {
 		t.Fatal(err)
 	}
@@ -1158,6 +1188,7 @@ func TestReRequestCanStartReviewerWhenWithdrawnOriginNeverLaunched(t *testing.T)
 	const subject = "github.com/owner/repo#42"
 	const payload = `{"provider":"github","host":"github.com","owner":"owner","repository":"repo","number":42,"url":"https://github.com/owner/repo/pull/42","state":"open","head_sha":"0123456789abcdef0123456789abcdef01234567"}`
 	const snapshot = `{"prompt":"Review","launch":{},"location":{}}`
+	baselineGitHubReviewAutomation(t, s, def.ID, "github.com", now)
 	if _, err := s.ReconcileAutomationReviewRequests(def.ID, "github.com", []string{subject}, now); err != nil {
 		t.Fatal(err)
 	}
@@ -1200,6 +1231,7 @@ func TestReviewRequestWithdrawalStopsLaunchedPendingReviewer(t *testing.T) {
 		t.Fatal(err)
 	}
 	const subject = "github.com/owner/repo#42"
+	baselineGitHubReviewAutomation(t, s, def.ID, "github.com", now)
 	if _, err := s.ReconcileAutomationReviewRequests(def.ID, "github.com", []string{subject}, now); err != nil {
 		t.Fatal(err)
 	}
@@ -1259,6 +1291,7 @@ func TestReviewRequestWithdrawalLeavesDeliveredReviewerToTicketLifecycle(t *test
 		t.Fatal(err)
 	}
 	const subject = "github.com/owner/repo#42"
+	baselineGitHubReviewAutomation(t, s, def.ID, "github.com", now)
 	if _, err := s.ReconcileAutomationReviewRequests(def.ID, "github.com", []string{subject}, now); err != nil {
 		t.Fatal(err)
 	}
@@ -1305,6 +1338,7 @@ func TestReviewRequestCancellationRecoversBeforeReactivation(t *testing.T) {
 		t.Fatal(err)
 	}
 	const subject = "github.com/owner/repo#42"
+	baselineGitHubReviewAutomation(t, s, def.ID, "github.com", now)
 	if _, err := s.ReconcileAutomationReviewRequests(def.ID, "github.com", []string{subject}, now); err != nil {
 		t.Fatal(err)
 	}
@@ -1356,6 +1390,7 @@ func TestContinuationWithdrawalDoesNotCancelDeliveredOriginReviewer(t *testing.T
 		t.Fatal(err)
 	}
 	const subject = "github.com/owner/repo#42"
+	baselineGitHubReviewAutomation(t, s, def.ID, "github.com", now)
 	if _, err := s.ReconcileAutomationReviewRequests(def.ID, "github.com", []string{subject}, now); err != nil {
 		t.Fatal(err)
 	}

@@ -1,0 +1,6 @@
+kind: fixed
+area: automations
+change: >
+  Newly created, resurrected, and re-enabled requested-review automations now
+  leave existing outstanding review requests alone and start with later request
+  cycles. Requests discovered after ordinary daemon downtime still catch up.

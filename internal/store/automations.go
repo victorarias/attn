@@ -112,15 +112,15 @@ func (s *Store) AutomationReviewRequestNeedsClaim(definitionID, subjectKey strin
 	if s.db == nil {
 		return false, errors.New("automation persistence unavailable")
 	}
-	var active, currentCycle int
-	err := s.db.QueryRow(`SELECT active,cycle FROM automation_review_request_edges WHERE definition_id=? AND subject_key=?`, definitionID, subjectKey).Scan(&active, &currentCycle)
+	var active, currentCycle, baselineCycle int
+	err := s.db.QueryRow(`SELECT active,cycle,baseline_cycle FROM automation_review_request_edges WHERE definition_id=? AND subject_key=?`, definitionID, subjectKey).Scan(&active, &currentCycle, &baselineCycle)
 	if err == sql.ErrNoRows {
 		return false, nil
 	}
 	if err != nil {
 		return false, err
 	}
-	if active != 1 || currentCycle != cycle {
+	if active != 1 || currentCycle != cycle || cycle <= baselineCycle {
 		return false, nil
 	}
 	occurrenceKey := fmt.Sprintf("review_requested:%s:%d", subjectKey, cycle)
@@ -169,6 +169,7 @@ func (s *Store) UpsertAutomationDefinition(id, name, specJSON string, now time.T
 	// deleted_at) instead of colliding with the PRIMARY KEY on an INSERT.
 	err = tx.QueryRow(`SELECT revision, spec_json, enabled, deleted_at FROM automation_definitions WHERE id=?`, id).Scan(&revision, &oldSpec, &oldEnabled, &deletedAt)
 	enabled := true
+	activation := err == sql.ErrNoRows
 	switch err {
 	case sql.ErrNoRows:
 		revision = 1
@@ -188,23 +189,20 @@ func (s *Store) UpsertAutomationDefinition(id, name, specJSON string, now time.T
 			}
 		}
 		_, err = tx.Exec(`UPDATE automation_definitions SET name=?, enabled=?, revision=?, spec_json=?, updated_at=?, deleted_at='' WHERE id=?`, name, enabled, revision, specJSON, formatTicketTime(now), id)
-		if err == nil && wasDeleted {
-			// Re-enabling (via resurrection) begins from the provider's current
-			// truth. A request that arrived while disabled/deleted must be eligible
-			// for latest catch-up even if an older cycle for the same subject had
-			// been active before. Shared with SetAutomationEnabled's own
-			// enabled-state transition.
-			err = clearAutomationReviewRequestEdgesTx(tx, id, now)
-		}
+		activation = wasDeleted
 	}
 	if err != nil {
 		return nil, err
 	}
-	if enabled {
+	if enabled && activation {
+		if err := activateAutomationReviewRequestsTx(tx, id, now); err != nil {
+			return nil, err
+		}
+	} else if enabled {
 		// Fence provider snapshots that began before this definition became
 		// active (or was reapplied). Observation timestamps are captured before
 		// provider fetches, so an in-flight stale refresh cannot launch work under
-		// a newly enabled revision. Unlike the edge clear above, this runs on
+		// a newly enabled revision. Unlike activation baselining, this runs on
 		// every apply that leaves the definition enabled, not just a transition.
 		if err := fenceAutomationProviderCursorsTx(tx, id, now); err != nil {
 			return nil, err
@@ -218,12 +216,17 @@ func (s *Store) UpsertAutomationDefinition(id, name, specJSON string, now time.T
 	return s.GetAutomationDefinition(id)
 }
 
-// clearAutomationReviewRequestEdgesTx deactivates every review-request edge for
-// a definition, so a fresh provider observation after re-enabling accepts
-// latest demand instead of an older, possibly-stale cycle.
-func clearAutomationReviewRequestEdgesTx(tx *sql.Tx, definitionID string, now time.Time) error {
-	_, err := tx.Exec(`UPDATE automation_review_request_edges SET active=0,updated_at=? WHERE definition_id=?`, formatTicketTime(now), definitionID)
-	return err
+// activateAutomationReviewRequestsTx leaves current demand for the first fresh
+// observation of each host to baseline. Edge history stays intact so later
+// request cycles remain monotonic across disable, delete, and resurrection.
+func activateAutomationReviewRequestsTx(tx *sql.Tx, definitionID string, now time.Time) error {
+	if _, err := tx.Exec(`UPDATE automation_review_request_edges SET active=0,updated_at=? WHERE definition_id=?`, formatTicketTime(now), definitionID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM automation_provider_cursors WHERE definition_id=? AND provider='github_review_requested' AND scope<>'*'`, definitionID); err != nil {
+		return err
+	}
+	return fenceAutomationProviderCursorsTx(tx, definitionID, now)
 }
 
 // fenceAutomationProviderCursorsTx records the instant a definition became (or
@@ -239,8 +242,8 @@ func fenceAutomationProviderCursorsTx(tx *sql.Tx, definitionID string, now time.
 
 // SetAutomationEnabled flips a definition's enabled flag and, on an actual
 // disabled->enabled transition, performs the same store-side effects Upsert
-// does for that transition: clearing review-request edges and fencing
-// provider cursors. It is a no-op (changed=false, no side effects, no
+// does for that transition: preparing a per-host activation baseline and
+// fencing provider cursors. It is a no-op (changed=false, no side effects, no
 // revision bump) when the definition already has the requested state.
 // Returns (nil, false, nil) for an unknown or soft-deleted definition.
 //
@@ -290,10 +293,7 @@ func (s *Store) SetAutomationEnabled(id string, enabled bool, now time.Time) (*A
 		return nil, false, err
 	}
 	if enabled {
-		if err := clearAutomationReviewRequestEdgesTx(tx, id, now); err != nil {
-			return nil, false, err
-		}
-		if err := fenceAutomationProviderCursorsTx(tx, id, now); err != nil {
+		if err := activateAutomationReviewRequestsTx(tx, id, now); err != nil {
 			return nil, false, err
 		}
 	}
@@ -470,18 +470,15 @@ func (s *Store) AutomationSessionHasContinuityBinding(sessionID string) (bool, e
 	return exists != 0, nil
 }
 
-// DeleteAutomationReviewRequestEdges removes every review-request edge for a
-// definition. Used only by automationDelete: a soft-deleted definition's
-// provider-side review-request tracking is fully retired, unlike a
-// re-enable (clearAutomationReviewRequestEdgesTx) which only deactivates
-// edges so the next observation starts a fresh cycle.
-func (s *Store) DeleteAutomationReviewRequestEdges(definitionID string) error {
+// DeactivateAutomationReviewRequestEdges retires current review demand while
+// preserving cycle history for a possible resurrection of the definition.
+func (s *Store) DeactivateAutomationReviewRequestEdges(definitionID string, now time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.db == nil {
 		return errors.New("automation persistence unavailable")
 	}
-	_, err := s.db.Exec(`DELETE FROM automation_review_request_edges WHERE definition_id=?`, definitionID)
+	_, err := s.db.Exec(`UPDATE automation_review_request_edges SET active=0,updated_at=? WHERE definition_id=?`, formatTicketTime(now), definitionID)
 	return err
 }
 
@@ -783,6 +780,7 @@ func (s *Store) ReconcileAutomationReviewRequests(definitionID, host string, sub
 		return nil, err
 	}
 	var cursorRaw string
+	baselining := false
 	err = tx.QueryRow(`SELECT observed_at FROM automation_provider_cursors WHERE definition_id=? AND provider='github_review_requested' AND scope=?`, definitionID, host).Scan(&cursorRaw)
 	if err == nil {
 		cursorAt, parseErr := docstore.ParseTime(cursorRaw)
@@ -793,7 +791,9 @@ func (s *Store) ReconcileAutomationReviewRequests(definitionID, host string, sub
 			return nil, nil
 		}
 	}
-	if err != nil && err != sql.ErrNoRows {
+	if err == sql.ErrNoRows {
+		baselining = true
+	} else if err != nil {
 		return nil, err
 	}
 	current := make(map[string]bool, len(subjectKeys))
@@ -856,18 +856,24 @@ func (s *Store) ReconcileAutomationReviewRequests(definitionID, host string, sub
 			return nil, err
 		}
 	}
-	rows, err = tx.Query(`SELECT subject_key,cycle FROM automation_review_request_edges WHERE definition_id=? AND host=? AND active=1 ORDER BY subject_key`, definitionID, host)
+	if baselining {
+		if _, err := tx.Exec(`UPDATE automation_review_request_edges SET baseline_cycle=cycle WHERE definition_id=? AND host=? AND active=1`, definitionID, host); err != nil {
+			return nil, err
+		}
+	}
+	rows, err = tx.Query(`SELECT subject_key,cycle,baseline_cycle FROM automation_review_request_edges WHERE definition_id=? AND host=? AND active=1 ORDER BY subject_key`, definitionID, host)
 	if err != nil {
 		return nil, err
 	}
 	type activeReviewEdge struct {
 		subjectKey string
 		cycle      int
+		baseline   int
 	}
 	var activeEdges []activeReviewEdge
 	for rows.Next() {
 		var edge activeReviewEdge
-		if err := rows.Scan(&edge.subjectKey, &edge.cycle); err != nil {
+		if err := rows.Scan(&edge.subjectKey, &edge.cycle, &edge.baseline); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -878,6 +884,9 @@ func (s *Store) ReconcileAutomationReviewRequests(definitionID, host string, sub
 	}
 	var candidates []AutomationReviewRequestCandidate
 	for _, edge := range activeEdges {
+		if edge.cycle <= edge.baseline {
+			continue
+		}
 		occurrenceKey := fmt.Sprintf("review_requested:%s:%d", edge.subjectKey, edge.cycle)
 		var state string
 		err := tx.QueryRow(`
@@ -983,11 +992,11 @@ func (s *Store) ClaimGitHubReviewAutomationRun(definitionID, subjectKey string, 
 		return nil, false, err
 	}
 	defer tx.Rollback()
-	var active, currentCycle int
-	if err := tx.QueryRow(`SELECT active,cycle FROM automation_review_request_edges WHERE definition_id=? AND subject_key=?`, definitionID, subjectKey).Scan(&active, &currentCycle); err != nil {
+	var active, currentCycle, baselineCycle int
+	if err := tx.QueryRow(`SELECT active,cycle,baseline_cycle FROM automation_review_request_edges WHERE definition_id=? AND subject_key=?`, definitionID, subjectKey).Scan(&active, &currentCycle, &baselineCycle); err != nil {
 		return nil, false, err
 	}
-	if active == 0 || currentCycle != cycle {
+	if active == 0 || currentCycle != cycle || cycle <= baselineCycle {
 		return nil, false, errors.New("review-request edge changed before occurrence claim")
 	}
 	occurrenceKey := fmt.Sprintf("review_requested:%s:%d", subjectKey, cycle)

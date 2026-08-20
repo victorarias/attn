@@ -70,10 +70,12 @@ automation_continuity_bindings
   -- hasPriorAutomationContinuityRun + run-history replay are deleted.
 
 automation_review_request_edges
-  definition_id, subject_key, host, active, cycle, timestamps
+  definition_id, subject_key, host, active, cycle, baseline_cycle, timestamps
   -- accepted_cycle dropped: candidacy = "no run exists for (subject, cycle)";
      a pending run for the subject is re-delivered on each observation, so a
      retryable failure can no longer strand a run until daemon restart.
+  -- baseline_cycle suppresses only demand present when a definition is newly
+     created, resurrected, or re-enabled.
 
 automation_occurrences, automation_provider_cursors: shape as v1.
 ```
@@ -88,7 +90,8 @@ trigger:
   continuity: fresh | singleton     # was policy.continuity
   catch_up: skip | latest           # was policy.catch_up
 # manual            -> always fresh (implied)
-# github_review_... -> always per_subject + latest + worktree (implied)
+# github_review_... -> always per_subject + latest + worktree (implied);
+#                         activation first baselines existing demand
 # overlap: only ever accepted "coalesce" — deleted until a second value exists
 ```
 
