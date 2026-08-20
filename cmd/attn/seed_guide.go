@@ -24,18 +24,17 @@ func writeSeedGuide(w io.Writer) {
 	fmt.Fprint(w, seedGuideText)
 }
 
-const seedGuideText = `The garden holds the work. This is the craft of keeping it worth reading — the
-syntax is in ` + "`attn seed --help`" + `.
+const seedGuideText = `The garden holds the work. The syntax is in ` + "`attn seed --help`" + `.
 
 WRITING A BODY
 
   A body is the brief a delegate is launched with and the cold-start spec
-  somebody picks up months from now. Write it for a reader with no warm
+  somebody reads now or months from now. Write it for a reader with no warm
   context.
 
-  Outcome first. Say what "done" looks like — the stop condition, not a
-  procedure. "Migrate the store to X" is a title; "X is the only backend the
-  daemon talks to, the old path is deleted, tests green" is a stop condition.
+  Outcome first. Say what "done" looks like. "Migrate the store to X" is a
+  title; "X is the only backend the daemon talks to, the old path is deleted,
+  tests green" is a stop condition.
 
   Just-enough context: the paths, the one non-obvious constraint, the why.
 
