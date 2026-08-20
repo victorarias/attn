@@ -120,6 +120,12 @@ because a successor that has to ask where things stand is a compact with extra
 steps. Measured before the change: a member woken behind a plain context-full
 handoff read its letter and answered "nothing to pick up, standing by".
 
+Measured after, on a member appending one number per tool call to a file: it was
+asked mid-count, wrote a letter naming "count.txt currently ends at 35" and
+"First concrete step: run `echo 36 >> count.txt`", and its successor woke and
+carried the file to 51 with no gap and no repeat at the seam. Nobody typed a
+number, and nobody was asked what to do next.
+
 ## Mid-turn: reading and asking
 
 Occupancy is read continuously — the transcript watcher follows every live
