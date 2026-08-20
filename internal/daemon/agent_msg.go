@@ -252,6 +252,9 @@ func agentMessageQueuedDetail(err error) string {
 	if errors.Is(err, errDoorbellBlockedByApproval) {
 		return "queued (target is waiting on an approval — lands when the approval clears)"
 	}
+	if errors.Is(err, errDoorbellBlockedBySelector) {
+		return "queued (target's screen is waiting on a keypress, so typed words would answer it — lands once that clears)"
+	}
 	if errors.Is(err, errDoorbellNotTaken) {
 		return fmt.Sprintf(
 			"queued (typed it, but the target did not start a turn within %s — something in front of its prompt ate it; lands on its next state change)",

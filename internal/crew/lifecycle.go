@@ -68,10 +68,17 @@ type Signals struct {
 	// Lead is how far ahead of the estimated expiry attn acts. It absorbs the
 	// tick interval plus the time a nudge takes to reach the model.
 	Lead time.Duration
-	// Reachable is whether a prompt typed at this session would be read. A
-	// session mid-turn or blocked on an approval is not: it would queue the
-	// prompt behind work nobody asked to interrupt.
+	// Reachable is whether a prompt typed at this session would be read at all.
+	// A session blocked on an approval is not: the prompt would answer the
+	// approval instead of reaching the member.
 	Reachable bool
+	// MidTurn is whether the member is talking to the model right now. Two of
+	// the three actions stay off a turn — a heartbeat has nothing to say to a
+	// session whose cache is being read as we speak, and an absence can wait
+	// for the turn to end. Context fill cannot: the tokens that fill it are
+	// spent inside the turn, and a turn that ends past the harness's own
+	// threshold ends after the compaction it was meant to prevent.
+	MidTurn bool
 	// Settled is whether the session owes nobody an answer. A session holding a
 	// question for the user is reachable but not settled, and the two halves
 	// want opposite things from it: a heartbeat delivered there answers the
@@ -134,21 +141,27 @@ func (a Action) String() string {
 // Context fill is not gated on cache pressure and sits above it: it is the one
 // condition that only gets worse, and waiting it out is how a day is lost.
 //
-// The three actions ask different things of the session they act on. Ending a
-// day — for context or for an absence — is an answer to whatever the member was
-// waiting for, so it only needs the session to take input. Warming a cache is
-// not an answer to anything, so it waits for a session that owes nobody one: a
-// heartbeat typed at a member holding a question for the user answers that
-// question with filler.
+// The three actions ask different things of the session they act on, and it is
+// the same ladder each time. All three need a session that takes input at all.
+// Two of them also wait for the turn to end, because neither is urgent enough
+// to land in whatever a turn has on screen; the context ask does not wait,
+// because the thing it is racing happens inside the turn. And warming a cache
+// additionally waits for a session that owes nobody an answer: a heartbeat
+// typed at a member holding a question for the user answers that question with
+// filler, while ending a day IS an answer to whatever it was waiting for.
 func Decide(s Signals) Action {
 	if !s.Reachable {
 		return ActionNone
 	}
 	// A cache lapse costs a re-write; a full context costs the day — the harness
 	// compacts it, and what the member would have written a letter about survives
-	// only as the harness's summary of itself.
+	// only as the harness's summary of itself. So this one asks mid-turn too,
+	// before the cache gate that keeps the other two quiet.
 	if s.ContextHandoffEnabled && s.Context.Full() {
 		return ActionContextHandoff
+	}
+	if s.MidTurn {
+		return ActionNone
 	}
 	if s.Cache.Remaining() > s.Lead {
 		return ActionNone

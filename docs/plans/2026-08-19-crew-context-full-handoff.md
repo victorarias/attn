@@ -1,8 +1,8 @@
 # Context-full handoff for crew members
 
 Slice 4 of the crew-birth superdraft. A member whose context nears full is
-asked to hand off — the same presence-decided turnover `attn handoff` already
-is — instead of drifting into its harness's auto-compact.
+asked to hand off — the turnover `attn handoff` already is — instead of
+drifting into its harness's auto-compact.
 
 A compact is not a nap. Compaction leaves harness narration as the member's
 memory of the day, where a letter written by the member should be. On
@@ -85,10 +85,10 @@ Both are settings: `crew.context_handoff_tokens` and
 The decision joins the crew lifecycle policy (`internal/crew/lifecycle.go`) as
 a third action beside the heartbeat and auto-sleep, and is read BEFORE cache
 pressure and presence: a cache lapse costs a re-write and can be waited out, a
-full context costs the day and only gets worse. It asks the same thing of a
-session that auto-sleep does — that a prompt typed there would be read — and
-not what the heartbeat asks, because closing IS an answer to whatever the
-member was waiting for.
+full context costs the day and only gets worse. It asks less of the session it
+acts on than the heartbeat does — only that a prompt typed there would be read
+— because closing IS an answer to whatever the member was waiting for, while a
+heartbeat is an answer to nothing.
 
 Delivery is the doorbell every other crew nudge uses. The prompt names both
 numbers, because an agent can act on "at X of Y" and cannot act on a silent
@@ -100,9 +100,87 @@ would read the second copy as a different instruction. It re-arms only when the
 context is observed back under budget — meaning the harness compacted anyway
 and the session has room again. A new session is armed by construction.
 
+## Continuity: the successor has to carry the work
+
+The two closures attn asks for are not the same closure. Auto-sleep ends a day
+nobody is watching, so a successor waking to stand around is exactly what it is
+trying to avoid. A context-full close says nothing about whether the work is
+done — the member ran out of room, not out of things to do — and the presence
+rule would end it there, parking whatever was in flight until the user came
+back.
+
+So the ask names `--nap`, which already exists and means "start the next day
+even if the user is away". Not a new handoff kind, and the costs are not
+comparable: a successor nobody needed is one priming (~$0.15 of context), and
+work parked overnight is the day.
+
+The letter is asked for in resume shape for the same reason — what you were in
+the middle of, exactly where it stands, and the first concrete thing to do —
+because a successor that has to ask where things stand is a compact with extra
+steps. Measured before the change: a member woken behind a plain context-full
+handoff read its letter and answered "nothing to pick up, standing by".
+
+## Mid-turn: reading and asking
+
+Occupancy is read continuously — the transcript watcher follows every live
+session at 500ms and is not gated on state — so a session's context is known
+while it is working. Delivery used to be the gap: the crew tick stayed off a
+session mid-turn, so a member could climb from comfortable to compacted inside
+a single turn without ever being asked.
+
+Measured over the same corpus, 286 auto-compactions:
+
+| | count |
+| --- | --- |
+| the session went idle at or above 160,000 before compacting | 279 (97.6%) |
+| the whole climb finished inside one turn | 7 (2.4%) |
+
+For the 279, the runway from the first idle moment above budget to the
+compaction was at least 117s (p50 33 minutes), so the 60s tick was never the
+constraint. The 7 climbed from a last-idle occupancy of 33k-138k, the worst
+burning 159,674 tokens without the session going idle once.
+
+So the context ask types mid-turn, and it is the only one of the three that
+does: a heartbeat has nothing to say to a session whose cache is being read as
+we speak, and an absence keeps until the turn ends.
+
+## The doorbell's screen guard
+
+Typing into a working session is what made that safe to want, and unsafe to do
+naively. A session's state is only as fresh as its last classification, and
+claude's question tool parks on a selector without firing the permission hook
+that would make attn call it `pending_approval` — so the state reads `working`
+while the screen waits for a keypress, and a bracketed paste followed by Enter
+answers it.
+
+So the doorbell reads the authoritative viewport before it types, and again
+before it presses Enter, and holds off when the screen is waiting on a
+keypress. Every nudge gets this, not only the crew ones.
+
+Receipt, over 44,724 viewports captured from live sessions between 2026-08-03
+and 2026-08-13: 47 of 40,130 `working` screens were selectors, and 6 of 2,217
+`idle` ones — the second group being the case the old comment already admitted
+and nothing covered. All 25 distinct selector footers in that corpus say "to
+select" or "Esc to cancel", so the rule reads those words rather than glyphs:
+claude changed which glyphs it animates with inside one minor version and the
+prose did not move. "to confirm" is deliberately not in the pattern; it appears
+in assistant prose. The footer is read 8 lines up, where 6, 8 and 12 all find
+the same 47 screens and 20 starts matching prose.
+
+A refusal is not a failure: the caller is told the target is holding, and every
+path that queues a message rather than erroring asks one predicate
+(`doorbellDeferred`). A backend that cannot render — an older worker, a session
+with no frame yet — delivers exactly as before, because failing closed on a
+missing capability would turn a snapshot outage into a silent nudge outage.
+
 ## What is not covered
 
 - Harnesses other than Claude Code and Codex report no usage at all, so their
   members are never asked. Stated in `SupportsContextOccupancy`.
 - Occupancy is memory-only, so a daemon restart is blind to a session until its
   next turn. One turn, and the reading is absolute when it arrives.
+- The screen guard is only as good as the words it reads. A harness that
+  invents a selector saying neither "to select" nor "Esc to cancel" is not
+  covered, and the corpus behind the pattern is claude-shaped: 44,344 of its
+  44,724 viewports are claude. Codex approvals reach `pending_approval`, which
+  the doorbell already refuses.

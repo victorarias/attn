@@ -526,8 +526,15 @@ func TestCrewLifecycleTick_AsksForTheHandoffWhenTheContextIsFull(t *testing.T) {
 		t.Fatalf("the tick sent %q, want the context handoff ask", prompts)
 	}
 	// The ask has to carry both numbers: an agent can act on "at X of Y" and
-	// cannot act on a silent compact.
-	for _, want := range []string{"160000 of the 160000 tokens", "`attn handoff -m", "Write the letter first"} {
+	// cannot act on a silent compact. And it has to ask for `--nap`, because a
+	// day that ran out of room says nothing about whether the work is done, so
+	// letting presence decide would park whatever was in flight.
+	for _, want := range []string{
+		"160000 of the 160000 tokens",
+		"`attn handoff --nap -m",
+		"Write the letter first",
+		"carry on without asking",
+	} {
 		if !strings.Contains(prompts[0], want) {
 			t.Fatalf("the context handoff ask does not carry %q: %q", want, prompts[0])
 		}
@@ -584,6 +591,39 @@ func TestCrewLifecycleTick_SaysNothingWithoutAReading(t *testing.T) {
 	}
 	if got := recorder.prompts(); len(got) != 0 {
 		t.Fatalf("a session with no occupancy reading was sent %q", got)
+	}
+}
+
+// Measured over every auto-compaction in the corpus behind this feature: 7 of
+// 286 finished their whole climb inside one turn, the worst burning 159,674
+// tokens without the session ever going idle. A rule that waits for the turn to
+// end loses those days, so this one does not wait.
+func TestCrewLifecycleTick_AsksAMemberThatIsStillWorking(t *testing.T) {
+	d, sessionID, recorder := newLifecycleDaemon(t)
+	now := time.Now()
+	setSessionActivity(t, d, sessionID, protocol.SessionStateWorking, now.Add(-2*time.Minute))
+	setSessionContextOccupancy(t, d, sessionID, crewContextBudgetDefault, 0)
+
+	d.crewLifecycleTick(now)
+
+	if got := recorder.prompts(); len(got) != 1 {
+		t.Fatalf("a working member with a full context was sent %q, want the handoff ask", got)
+	}
+}
+
+// The other two halves still wait for the turn to end, and a mid-turn member is
+// the case that would otherwise collect a heartbeat every minute.
+func TestCrewLifecycleTick_LeavesAWorkingMemberAloneWithoutContextPressure(t *testing.T) {
+	d, sessionID, recorder := newLifecycleDaemon(t)
+	now := time.Now()
+	// Old enough that the cache is past the heartbeat lead, which is what would
+	// fire if the mid-turn rule were dropped for every action rather than one.
+	setSessionActivity(t, d, sessionID, protocol.SessionStateWorking, now.Add(-3*time.Hour))
+
+	d.crewLifecycleTick(now)
+
+	if got := recorder.prompts(); len(got) != 0 {
+		t.Fatalf("a working member with room left was sent %q", got)
 	}
 }
 

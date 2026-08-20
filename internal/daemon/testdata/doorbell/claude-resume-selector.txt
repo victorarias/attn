@@ -1,0 +1,10 @@
+⏺ Filed: the brief is on the board, unbound. Whoever claims it can start cold.
+  That's a wrap.
+────────────────────────────────────────────────────────────────────────────────
+  This session is 19h 8m old and 223.3k tokens.
+  Resuming the full session will consume a substantial portion of your usage
+  limits. We recommend resuming from a summary.
+  ❯ 1. Resume from summary (recommended)
+    2. Resume full session as-is
+    3. Don't ask me again
+  Enter to confirm · Esc to cancel

@@ -141,8 +141,17 @@ const crewSleepPrompt = "[attn] The user has been away long enough that your day
 // crewContextHandoffPrompt ends the day for the other reason. It names the two
 // numbers because an agent can act on "at X of Y" and cannot act on a silent
 // compact — which is exactly what it gets instead if it does not close now.
+//
+// It asks for `--nap` rather than the presence-decided default, because this
+// close says nothing about whether the work is done: the member ran out of
+// room, not out of things to do. Letting presence decide here would strand
+// whatever was in flight until the user came back, and the two costs are not
+// comparable — a successor nobody needed is one priming, work parked for a
+// night is the day. The letter is asked for in resume shape for the same
+// reason: a successor that has to ask where things stand is a compact with
+// extra steps.
 func crewContextHandoffPrompt(tokens, budget int64) string {
-	return fmt.Sprintf("[attn] Your context is at %d of the %d tokens your day gets, and past that your harness compacts it — which would leave its summary of today where your letter should be. Close the day now: write your letter to whoever wakes as you next — what you were doing, what is load-bearing, what you would pick up first — and file it with `attn handoff -m \"<your letter>\"`. Write the letter first; it is the part that cannot be recovered. Existing presence rules decide whether anyone wakes behind you.", tokens, budget)
+	return fmt.Sprintf("[attn] Your context is at %d of the %d tokens your day gets, and past that your harness compacts it — which would leave its summary of today where your letter should be. This is a day cut short, not a day finished, so close it yourself now. Write the letter first; it is the part that cannot be recovered, and write it so whoever wakes as you next can carry on without asking: what you were in the middle of, exactly where it stands, what is load-bearing, and the first concrete thing they should do. Then file it with `attn handoff --nap -m \"<your letter>\"` — `--nap` wakes your successor even if the user is away, which is right here because the work did not end, you ran out of room. Use plain `attn handoff` instead only if you were genuinely finished and there is nothing to carry.", tokens, budget)
 }
 
 // crewSleepPromptGrace is how long attn waits for a prompted handoff before
@@ -364,16 +373,20 @@ func (d *Daemon) crewCacheState(session *protocol.Session, now time.Time) crew.C
 	return state
 }
 
-// crewSessionReachable reports whether a prompt typed here would be read rather
-// than queued behind work nobody asked to interrupt. The doorbell's own rule
-// stops at approvals; this consumer also stays off a session mid-turn, because
-// nothing here is urgent enough to land in whatever a turn has on screen — an
-// in-flight question selector reads as `working` and would swallow the paste as
-// its answer. A member mid-turn is talking to the model right now anyway, so its
-// cache is the freshest in the roster and the tick has nothing to say to it.
+// crewSessionReachable reports whether a prompt typed here would be read at
+// all, which is the doorbell's own rule: everything except an approval, whose
+// selector would read the paste as its answer.
 func crewSessionReachable(session *protocol.Session) bool {
-	return isNudgeDeliveryAllowed(string(session.State)) &&
-		session.State != protocol.SessionStateWorking
+	return isNudgeDeliveryAllowed(string(session.State))
+}
+
+// crewSessionMidTurn reports that the member is talking to the model right now.
+// The heartbeat and the sleep ask both stay off a turn: a member mid-turn has
+// the freshest cache in the roster, and an absence keeps until the turn ends.
+// The context ask does not, so it is the one action that types into a working
+// session — the doorbell's screen guard is what keeps that safe.
+func crewSessionMidTurn(session *protocol.Session) bool {
+	return session.State == protocol.SessionStateWorking
 }
 
 // crewSessionSettled reports that the session owes nobody an answer. Only the
@@ -448,6 +461,7 @@ func (d *Daemon) crewLifecycleTick(now time.Time) {
 			Cache:     cache,
 			Lead:      lead,
 			Reachable: crewSessionReachable(session),
+			MidTurn:   crewSessionMidTurn(session),
 			Settled:   crewSessionSettled(session),
 			Context:   pressure,
 

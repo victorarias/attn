@@ -1616,6 +1616,21 @@ type fakeSpawnBackend struct {
 	themeCalls   []pty.TerminalTheme
 	themeCallIDs []string
 	setThemeErr  error
+	// screen is what Snapshot renders. Empty means the backend answers like a
+	// worker with no frame yet, which is how every test that does not care
+	// about the screen keeps its old behavior.
+	screen string
+}
+
+// Snapshot makes the fake a ptybackend.SnapshotProvider, which is what the
+// doorbell's screen guard looks for.
+func (b *fakeSpawnBackend) Snapshot(_ context.Context, _ string) (pty.SnapshotInfo, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.screen == "" {
+		return pty.SnapshotInfo{}, nil
+	}
+	return pty.SnapshotInfo{Screen: &pty.ViewportSnapshot{Text: b.screen, HasText: true}}, nil
 }
 
 func (b *fakeSpawnBackend) Spawn(_ context.Context, opts ptybackend.SpawnOptions) error {

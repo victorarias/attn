@@ -2,11 +2,18 @@ kind: added
 area: crew
 change: >
   A crew member whose context is nearly full is now asked to hand off — write
-  the letter, file it with `attn handoff` — instead of drifting into its
+  the letter, file it with `attn handoff --nap` — instead of drifting into its
   harness's auto-compact, which would leave the harness's summary of the day
-  where the member's own letter should be. attn reads how full a live session's
+  where the member's own letter should be. The letter is asked for in resume
+  shape and a successor wakes even if you are away, because a day that ran out
+  of room is not a day that finished. attn reads how full a live session's
   context is from its transcript (Claude Code and Codex; other harnesses report
   nothing and are left alone), asks once per session, and re-asks only if a
   compaction happened anyway and the context filled a second time. A member's
   day gets 160,000 tokens by default — `crew.context_handoff_tokens` moves it,
   `crew.context_handoff_enabled=false` turns the whole thing off.
+
+  Separately, every nudge attn types into a session now checks the screen
+  first and holds off when it is waiting on a keypress rather than on words —
+  a question or resume prompt that is up before attn has classified it no
+  longer eats the message as its answer.

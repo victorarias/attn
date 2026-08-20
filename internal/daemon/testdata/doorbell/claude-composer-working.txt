@@ -1,0 +1,10 @@
+  auto-settling can take us home when every agent is settled
+  when that happens, take me back into an agent when it needs me
+· Marinating… (0s)
+                                                                       0 tokens
+────────────────────────────────────────────────────────────────────────────────
+❯
+────────────────────────────────────────────────────────────────────────────────
+  Opus 5 high  ~/projects/example/repo  (branch)                            /rc
+  ctx 0%  ·  5h --  ·  7d --
+  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents

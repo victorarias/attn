@@ -147,10 +147,30 @@ func TestDecide(t *testing.T) {
 			want:    ActionContextHandoff,
 		},
 		{
-			// Mid-turn the ask would queue behind work nobody asked to interrupt, and
-			// the member is talking to the model right now anyway.
+			// Unreachable here means an approval is up, and the paste would answer
+			// the approval rather than reach the member.
 			name:    "an unreachable session is not asked to close a full context",
 			signals: with(func(s *Signals) { s.Cache = warm; s.Context = full; s.Reachable = false }),
+			want:    ActionNone,
+		},
+		{
+			// The tokens that fill a context are spent inside the turn, so a rule
+			// that waits for the turn to end is a rule that waits for the compaction
+			// it exists to prevent.
+			name:    "a full context is asked mid-turn",
+			signals: with(func(s *Signals) { s.Cache = warm; s.Context = full; s.MidTurn = true }),
+			want:    ActionContextHandoff,
+		},
+		{
+			// The other two halves keep waiting for the turn to end: a member
+			// mid-turn has the freshest cache in the roster, and an absence keeps.
+			name:    "a lapsing cache waits for the turn to end",
+			signals: with(func(s *Signals) { s.Cache = expiring; s.MidTurn = true }),
+			want:    ActionNone,
+		},
+		{
+			name:    "an absence waits for the turn to end",
+			signals: with(func(s *Signals) { s.Cache = expiring; s.AwayFor = 3 * time.Hour; s.MidTurn = true }),
 			want:    ActionNone,
 		},
 		{
