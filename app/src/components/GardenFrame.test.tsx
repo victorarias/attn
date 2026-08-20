@@ -126,6 +126,12 @@ describe('GardenFrame', () => {
       rerender(<GardenFrame {...props('dock')} {...board} />);
       expect(document.querySelector('.garden-board')).toBeNull();
       expect(document.querySelector('.garden-panel')).not.toBeNull();
+
+      // And it does not come back on the next promotion: the choice belonged to
+      // the stay it was made in, not to the reader forever.
+      rerender(<GardenFrame {...props('full')} {...board} />);
+      expect(document.querySelector('.garden-board')).toBeNull();
+      expect(document.querySelector('.garden-panel')).not.toBeNull();
     });
   });
 });

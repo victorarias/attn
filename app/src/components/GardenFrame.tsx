@@ -126,10 +126,18 @@ export function GardenFrame({
   // Two views over one garden: the list answers what is here, the board answers
   // how it is moving. The switch lives here rather than in either view, so
   // neither owns the other — and only in the window, because four columns of
-  // cards need the room. Promotion lands on the list whatever the reader last
-  // chose: the point of the gesture is that the thing you were reading got
-  // bigger, and arriving somewhere else would say the opposite.
-  const [view, setView] = useState<'list' | 'board'>('list');
+  // cards need the room.
+  //
+  // The choice belongs to the frame it was made in: promotion lands on the list
+  // whatever the reader last chose, because the gesture says "this, bigger" and
+  // arriving somewhere else would say the opposite. Storing the frame beside the
+  // choice is what makes that a derivation. Clearing it from an effect instead
+  // would paint the board once in a dock-sized box, and the usual alternative —
+  // remount under a key — is the one thing this component exists to avoid.
+  const [chosen, setChosen] = useState<{ mode: GardenMode; view: 'list' | 'board' }>({ mode, view: 'list' });
+  if (chosen.mode !== mode) setChosen({ mode, view: 'list' });
+  const view = chosen.mode === mode ? chosen.view : 'list';
+  const chooseView = (next: 'list' | 'board') => setChosen({ mode, view: next });
   const frameRef = useRef<HTMLDivElement | null>(null);
   const [viewport, setViewport] = useState(() => ({ w: window.innerWidth, h: window.innerHeight }));
   const [flying, setFlying] = useState(false);
@@ -141,10 +149,6 @@ export function GardenFrame({
     onResize();
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
-  }, [mode]);
-
-  useEffect(() => {
-    if (mode !== 'full') setView('list');
   }, [mode]);
 
   // In list view the bottom of the Escape ladder is registered by GardenPanel,
@@ -188,10 +192,10 @@ export function GardenFrame({
   const boardable = mode === 'full' && Boolean(moveSeed && noteSeed);
   const viewToggle = boardable ? (
     <div className="garden-view-switch" role="group" aria-label="Garden view">
-      <button type="button" aria-pressed={view === 'list'} onClick={() => setView('list')}>
+      <button type="button" aria-pressed={view === 'list'} onClick={() => chooseView('list')}>
         list
       </button>
-      <button type="button" aria-pressed={view === 'board'} onClick={() => setView('board')}>
+      <button type="button" aria-pressed={view === 'board'} onClick={() => chooseView('board')}>
         board
       </button>
     </div>
