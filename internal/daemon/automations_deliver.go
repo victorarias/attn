@@ -13,6 +13,7 @@ import (
 
 	agentdriver "github.com/victorarias/attn/internal/agent"
 	"github.com/victorarias/attn/internal/automation"
+	"github.com/victorarias/attn/internal/garden"
 	attngit "github.com/victorarias/attn/internal/git"
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/pty"
@@ -409,12 +410,40 @@ func (d *Daemon) activateAutomationContinuationTicket(req automation.WorkRequest
 	if ticket.AutomationRunID == req.RunID || !ticket.Status.IsTerminal() {
 		return nil
 	}
+	if err := d.activateAutomationContinuationSeed(req.IDs.SessionID); err != nil {
+		return err
+	}
 	comment := "Reopened for automation occurrence " + req.RunID + "."
 	if _, err := d.store.SetTicketStatus(ticket.ID, store.TicketStatusWorking, "automation:"+req.DefinitionID, comment, time.Now()); err != nil {
 		return err
 	}
 	d.publishTicketFact(FactTicketStatusChanged, ticket.ID)
 	d.notifyTicketObservers(ticket.ID)
+	return nil
+}
+
+func (d *Daemon) activateAutomationContinuationSeed(sessionID string) error {
+	seedID, ok := d.gardenDispatchCrown(sessionID)
+	if !ok {
+		return nil
+	}
+	seed, _, err := d.readSeed(seedID)
+	if err != nil {
+		return fmt.Errorf("read automation continuation seed %s: %w", seedID, err)
+	}
+	actor := garden.Tender{Session: sessionID}
+	if garden.Closed(seed.Status) {
+		if _, _, err := d.applySeedTransition(seedID, garden.VerbReplant, actor, ""); err != nil {
+			return fmt.Errorf("replant automation continuation seed %s: %w", seedID, err)
+		}
+		seed.Status = garden.StatusPlanted
+	}
+	if seed.Status == garden.StatusGrowing && seed.TenderSession == sessionID {
+		return nil
+	}
+	if _, _, err := d.applySeedTransition(seedID, garden.VerbTend, actor, ""); err != nil {
+		return fmt.Errorf("tend automation continuation seed %s: %w", seedID, err)
+	}
 	return nil
 }
 func (d *Daemon) prepareAutomationLocation(_ context.Context, req automation.WorkRequest) (automation.PreparedLocation, error) {

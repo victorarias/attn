@@ -4,7 +4,7 @@
 
 An enabled `github_review_requested` automation starts once when Victor's review
 is requested, then sends each later relevant PR head to the same automation
-ticket/session. Each automation definition remains an independent reviewer.
+seed/session. Each automation definition remains an independent reviewer.
 
 ## Recommendation
 
@@ -72,6 +72,7 @@ doPRPoll
       EnsurePullRequestRevision          fetches the exact commit
       EnsureAutomationSessionWorktree    preserves the owned checkout
       EnsureAutomationContinuationTicket records the immutable input path
+      activateAutomationContinuationSeed replants/retends a completed review
       notifyTicketObservers              queues the same reviewer's inbox
         30s countdown / 10m bundle       throttles reviewer wake-ups
 ```
@@ -125,6 +126,7 @@ store transaction provide the idempotency fence.
 | Older run is still pending | Retry that immutable run first; a later refresh catches up once, to the then-latest head. No overtaking. |
 | Reviewer session is live | Append ticket activity and nudge it; never spawn a second session. |
 | Reviewer session stopped with a valid transcript | Existing resume safety restarts the same logical session. |
+| Reviewer harvested its seed | Replant the same bound seed and return it to the same reviewer before resuming. |
 | Owned worktree is dirty, committed, or on another branch | Fetch the new SHA, leave checkout and evidence untouched. |
 | Request withdrawn, PR approved/closed, or absent from current demand | Deactivate the edge; cancel only undelivered work as today. No push continuation. |
 | Focused snapshot is draft or closed | Ignore it before claim. |
@@ -145,6 +147,8 @@ claim. Distinct heads accepted between those boundaries remain visible evidence.
 - [x] Keep claim transactional and idempotent for `(definition, subject, cycle, SHA)`.
 - [x] Permit changed-head continuity while retaining definition-contract, ticket,
       repository identity, transcript-resume, and unattended-launch checks.
+- [x] Replant and retend a harvested reviewer seed before reopening its internal
+      continuity ticket.
 - [x] Keep the existing fetch-exact-SHA / preserve-owned-checkout boundary.
 - [x] Add a changelog fragment.
 - [x] Run focused store, daemon, and git tests; then live-verify both configured
@@ -163,7 +167,8 @@ claim. Distinct heads accepted between those boundaries remain visible evidence.
   on the same binding; approved/withdrawn/draft/closed inputs do not continue.
 - Delivery/git: changed-head continuation passes the contract gate, reuses stable
   IDs, fetches the exact commit, leaves dirty files/branch/HEAD untouched, records
-  the new occurrence path, and nudges or resumes the existing reviewer safely.
+  the new occurrence path, replants a harvested bound seed, and nudges or resumes
+  the existing reviewer safely.
   Reuse the existing ticket burst test for the 30-second/10-minute throttle, and add
   one automation-path assertion that two continuation events reach that same inbox
   without spawning a second reviewer.
@@ -182,11 +187,13 @@ fetch the new commit but never move an agent-owned checkout automatically.
   independence, contract/identity safety, and dirty-worktree preservation.
 - `go test -race ./internal/store -run 'TestGitHubReview' -count=1` passes.
 - The changed daemon/store/git packages compile for Linux amd64 with CGO disabled.
-- Packaged scenario `AUTOMATION-PR-CONTINUITY` passes in isolated profile
-  `reviewpush` (run `automation-pr-continuity-2026-08-19T13-49-27-067Z`). It
+- Packaged scenario `AUTOMATION-PR-CONTINUITY` passes after the main-branch rebase
+  in isolated profile `reviewpush2` (run
+  `automation-pr-continuity-2026-08-20T10-29-50-929Z`). It
   exercised independent GPT Sol and solstice-alpha definitions, continued both
   on the new head without replacement reviewers, preserved dirty evidence,
-  resumed after restart, and retained the missing-worktree refusal.
+  replanted and retended a harvested reviewer seed, resumed after restart, and
+  retained the missing-worktree refusal.
 - JavaScript syntax checks, changelog validation, and `git diff --check` pass.
 - The pre-commit suite passed every Go package and all 2,994 frontend tests. Its
   E2E pass completed 195 tests before one unrelated terminal-layout test timed

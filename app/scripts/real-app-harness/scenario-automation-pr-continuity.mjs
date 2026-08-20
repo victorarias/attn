@@ -45,16 +45,6 @@ function runJSON(binary, args, env) {
   return JSON.parse(run(binary, args, env));
 }
 
-function setTicketStatus(binary, args, env) {
-  try {
-    return run(binary, args, env);
-  } catch (error) {
-    const stderr = String(error?.stderr || '');
-    if (!stderr.includes('unread ticket activity')) throw error;
-    return run(binary, args, env);
-  }
-}
-
 function createFixture(root) {
   const repo = path.join(root, 'fixture-repo');
   fs.mkdirSync(repo, { recursive: true });
@@ -270,6 +260,7 @@ async function main() {
   let daemonEnv = null;
   let sessionID = '';
   let ticketID = '';
+  let seedID = '';
   let worktree = '';
   let secondarySessionID = '';
   let secondaryTicketID = '';
@@ -311,6 +302,7 @@ async function main() {
       sessionID = runRow.session_id;
       ticketID = runRow.ticket_id;
       worktree = observer.getSession(sessionID)?.directory || path.join(dataDirForProfile(profile), 'automation', 'worktrees', sessionID, 'repo');
+      seedID = observer.getSession(sessionID)?.seed_id || '';
       const firstLaunch = await poll(() => invocations(probe.log).length >= 1 ? invocations(probe.log)[0] : null, 'first Codex launch');
       const prompt = firstLaunch.argv.at(-1) || '';
       runner.assert(
@@ -336,6 +328,7 @@ async function main() {
       runner.assert(fs.existsSync(worktree), 'initial exact-SHA worktree exists', { worktree });
       runner.assert(execFileSync('git', ['rev-parse', 'HEAD'], { cwd: worktree, encoding: 'utf8' }).trim() === fixture.sha, 'initial worktree is pinned to provider SHA');
       runner.assert(secondarySessionID !== sessionID && secondaryTicketID !== ticketID, 'the Sol and Solstice definitions own independent reviewer bindings');
+      runner.assert(seedID.startsWith('s-'), 'the reviewer reports through a garden seed', { seedID });
     });
     await runner.step('continue_live_reviewer_on_new_head', async () => {
       fs.writeFileSync(path.join(worktree, 'review-notes.txt'), 'preserve me across review cycles\n');
@@ -388,17 +381,6 @@ async function main() {
       await captureDOM(client, '.sidebar', path.join(runner.runDir, 'sidebar-provenance.png'));
       await captureDOM(client, '.workspace-pane-header', path.join(runner.runDir, 'pane-provenance.png'));
 
-      const ticketUi = await client.request('ticket_open_detail', { ticketId: ticketID });
-      runner.assert(
-        ticketUi.automation.includes('Slice 4 packaged continuity proof')
-          && ticketUi.automation.includes('repo#42')
-          && ticketUi.automation.includes('Automation live-test review'),
-        'ticket detail shows full automation and pull-request provenance',
-        { automation: ticketUi.automation },
-      );
-      await captureDOM(client, '[data-testid="ticket-detail-panel"]', path.join(runner.runDir, 'ticket-provenance.png'));
-      await client.request('ticket_close_detail');
-
       await client.request('automations_open_panel');
       const automationsUi = await client.request('automations_select_definition', { definitionId: definitionID });
       const initialRun = automationsUi.runs.find((run) => run.id === (observer.getSession(sessionID)?.automation?.run_id || ''))
@@ -414,7 +396,7 @@ async function main() {
     });
     await runner.step('seed_resume_and_stop_origin', async () => {
       await socketRequest(resources.socket, { cmd: 'set_session_resume_id', id: sessionID, resume_session_id: seed.id });
-      setTicketStatus(binary, ['ticket', 'status', 'completed', '--ticket', ticketID, '--session', sessionID, '--comment', 'first review complete'], daemonEnv);
+      run(binary, ['seed', 'harvest', seedID, '-m', 'first review complete', '--session', sessionID], daemonEnv);
       const db = path.join(dataDirForProfile(profile), 'attn.db');
       execFileSync('sqlite3', ['-cmd', '.timeout 5000', db, `UPDATE tickets SET archived_at=datetime('now') WHERE id='${ticketID.replaceAll("'", "''")}';`]);
       await client.request('close_session', { sessionId: sessionID });
@@ -440,6 +422,8 @@ async function main() {
       const tickets = runJSON(binary, ['ticket', 'list', '--all', '--json'], daemonEnv);
       const ticket = tickets.find((item) => item.id === ticketID);
       runner.assert(ticket?.status === 'working' && !ticket.archived_at, 'successful continuation reopens and unarchives the ticket', ticket);
+      const continuedSeed = runJSON(binary, ['seed', 'show', seedID, '--json'], daemonEnv)?.seed;
+      runner.assert(continuedSeed?.status === 'growing' && continuedSeed?.tender_session === sessionID, 'successful continuation replants and retends the reviewer seed', continuedSeed);
       return row;
     });
     await runner.step('daemon_restart_preserves_continuity', async () => {
@@ -482,9 +466,9 @@ async function main() {
       }, 'visible missing-worktree failure', 30_000);
       runner.assert(String(failed.last_error).includes('worktree') && String(failed.last_error).includes('missing'), 'missing delivered worktree fails without recreation', failed);
     });
-    runner.finishSuccess({ profile, definitionID, sessionID, ticketID, worktree, seed, continuation });
+    runner.finishSuccess({ profile, definitionID, sessionID, ticketID, seedID, worktree, seed, continuation });
   } catch (error) {
-    runner.finishFailure(error, { profile, definitionID, sessionID, ticketID, worktree, seed });
+    runner.finishFailure(error, { profile, definitionID, sessionID, ticketID, seedID, worktree, seed });
     throw error;
   } finally {
     await client.quitApp().catch(() => {});

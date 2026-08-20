@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/victorarias/attn/internal/automation"
+	"github.com/victorarias/attn/internal/garden"
 	attngit "github.com/victorarias/attn/internal/git"
 	"github.com/victorarias/attn/internal/github"
 	"github.com/victorarias/attn/internal/launchcontract"
@@ -873,6 +874,46 @@ func TestContinuationActivationFailsIfTicketDisappeared(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "disappeared during delivery") {
 		t.Fatalf("missing ticket activation err=%v", err)
+	}
+}
+
+func TestSuccessfulContinuationReopensBoundSeed(t *testing.T) {
+	d := newGardenDaemon(t)
+	now := time.Date(2026, 8, 20, 10, 0, 0, 0, time.UTC)
+	const sessionID = "sess-a"
+	if _, err := d.store.CreateTicket(store.Ticket{
+		ID: "ticket-1", Title: "Review", Status: store.TicketStatusDone,
+		Assignee: sessionID, AutomationRunID: "run-1",
+	}, "automation:review", now); err != nil {
+		t.Fatal(err)
+	}
+	seedID, err := d.bindDelegationSeed(sessionID, "", "Review the pull request.", "Review", "", t.TempDir(), "codex", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := d.applySeedTransition(seedID, garden.VerbHarvest, garden.Tender{Session: sessionID}, "first review complete"); err != nil {
+		t.Fatal(err)
+	}
+	req := automation.WorkRequest{
+		RunID: "run-2", DefinitionID: "review", ContinuityKey: "github.com/owner/repo#42",
+		IDs: automation.DeliveryIDs{TicketID: "ticket-1", SessionID: sessionID},
+	}
+	if err := d.activateAutomationContinuationTicket(req); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.activateAutomationContinuationTicket(req); err != nil {
+		t.Fatal(err)
+	}
+	seed, _, err := d.readSeed(seedID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if seed.Status != garden.StatusGrowing || seed.TenderSession != sessionID {
+		t.Fatalf("continued seed=%#v, want growing and tended by %s", seed, sessionID)
+	}
+	ticket, err := d.store.GetTicket("ticket-1")
+	if err != nil || ticket == nil || ticket.Status != store.TicketStatusWorking {
+		t.Fatalf("continued ticket=%#v err=%v", ticket, err)
 	}
 }
 
