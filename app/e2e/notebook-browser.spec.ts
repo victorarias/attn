@@ -43,7 +43,7 @@ test.describe('NotebookBrowser (fs surface)', () => {
     await page.keyboard.type(' Extra words.', { delay: 8 });
 
     await page.waitForFunction(() => window.__HARNESS__.getCalls('writeFile').length > 0, null, {
-      timeout: 4000,
+      timeout: 15000,
     });
     const writes = await page.evaluate(() => window.__HARNESS__.getCalls('writeFile'));
     const last = writes[writes.length - 1] as [string, string, string | undefined];
@@ -87,7 +87,7 @@ test.describe('NotebookBrowser (fs surface)', () => {
       page.locator('.cm-scroller').evaluate((el) => (el as HTMLElement).scrollTop);
     expect(await scrollTop()).toBeLessThan(40);
     await rail.getByRole('button', { name: 'Subsection detail' }).click();
-    await expect.poll(scrollTop, { timeout: 2000 }).toBeGreaterThan(150);
+    await expect.poll(scrollTop).toBeGreaterThan(150);
   });
 
   test('keeps the reader scrolled in place when the open note changes on disk (and ignores unrelated changes)', async ({ page }) => {
@@ -122,7 +122,7 @@ test.describe('NotebookBrowser (fs surface)', () => {
       // Scroll to the very bottom to prove the appended line is in the document.
       await page.locator('.cm-scroller').evaluate((el) => { (el as HTMLElement).scrollTop = (el as HTMLElement).scrollHeight; });
       return (await page.locator('.cm-content').textContent()) ?? '';
-    }, { timeout: 2000 }).toContain('Appended by an agent');
+    }).toContain('Appended by an agent');
 
     // ... and crucially, the apply itself did NOT jump the viewport: re-park and confirm
     // a fresh genuine change leaves scrollTop where the reader left it.
@@ -262,7 +262,7 @@ test.describe('NotebookBrowser (fs surface)', () => {
     await expect(page.getByRole('heading', { level: 2, name: 'fences' })).toBeVisible();
 
     // The JS language parser lazy-loads on demand — give it generous room to arrive.
-    await expect(page.locator('.cm-md-codeblock .tok-keyword')).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('.cm-md-codeblock .tok-keyword')).toBeVisible();
     await expect(page.locator('.cm-md-blockquote')).toHaveCount(1);
     await expect(page.locator('.cm-md-hr')).toHaveCount(1);
   });
@@ -432,7 +432,7 @@ test.describe('NotebookBrowser (fs surface)', () => {
     await page.keyboard.type(' more', { delay: 8 });
 
     const banner = page.locator('.notebook-browser-editor-conflict');
-    await expect(banner).toBeVisible({ timeout: 4000 });
+    await expect(banner).toBeVisible();
 
     // Stop forcing conflicts so the reload's own read succeeds normally, then reload —
     // this is the button click that steals focus.
@@ -500,6 +500,6 @@ test.describe('NotebookBrowser (fs surface)', () => {
     const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
     await page.locator('.cm-md-link[data-href="#down-below"]').click({ modifiers: [modifier] });
 
-    await expect.poll(scrollTop, { timeout: 2000 }).toBeGreaterThan(150);
+    await expect.poll(scrollTop).toBeGreaterThan(150);
   });
 });

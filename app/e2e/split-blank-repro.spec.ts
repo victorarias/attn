@@ -86,7 +86,7 @@ test('agent pane stays painted after opening a shell split', async ({ page, daem
   //    the same entry until the deadline. That is this step's CI flake.
   await emitUntilVisible(page, agentId, fullFrame('OLD'), 'OLD line 0');
   await expect
-    .poll(async () => lastRealDraw(await readTrace(page, agentId))?.quads ?? 0, { timeout: 5000 })
+    .poll(async () => lastRealDraw(await readTrace(page, agentId))?.quads ?? 0)
     .toBeGreaterThan(50);
 
   const sizeBefore = await page.evaluate((sid) => window.__TEST_GET_SESSION_PANE_SIZE?.(sid) ?? null, agentId);
@@ -108,7 +108,7 @@ test('agent pane stays painted after opening a shell split', async ({ page, daem
       const size = await page.evaluate((sid) => window.__TEST_GET_SESSION_PANE_SIZE?.(sid) ?? null, agentId);
       if (!size || !sizeBefore) return 'no-size';
       return size.rows !== sizeBefore.rows || size.cols !== sizeBefore.cols ? 'resized' : 'same';
-    }, { timeout: 8000 })
+    })
     .toBe('resized');
 
   const sizeAfter = await page.evaluate((sid) => window.__TEST_GET_SESSION_PANE_SIZE?.(sid) ?? null, agentId);
@@ -157,7 +157,7 @@ async function setupAgent(
   await daemon.injectSession({ id: agentId, label: 'Agent Split', state: 'working', directory: '/tmp/test/agent-split', workspace_id: workspaceId });
   await page.locator(`[data-testid="session-${agentId}"]`).click();
   const terminal = page.locator(`[data-pane-session-id="${agentId}"][data-pane-kind="agent"] .terminal-container`);
-  await expect(terminal).toBeVisible({ timeout: 5000 });
+  await expect(terminal).toBeVisible();
   await waitForPaneReady(page, agentId);
   return terminal;
 }
@@ -196,7 +196,6 @@ async function emitUntilVisible(
       await emit(page, sessionId, data);
       return page.evaluate((sid) => window.__TEST_GET_SESSION_PANE_TEXT?.(sid) ?? '', sessionId);
     }, {
-      timeout: 15000,
       message: `setup frame never reached the model for ${sessionId} (emit dropped before the pane was wired)`,
     })
     .toContain(marker);
@@ -225,9 +224,7 @@ async function waitForPaneReady(
   sessionId: string,
 ) {
   await expect
-    .poll(async () => page.evaluate((sid) => window.__TEST_GET_SESSION_PANE_SIZE?.(sid) ?? null, sessionId), {
-      timeout: 10000,
-    })
+    .poll(async () => page.evaluate((sid) => window.__TEST_GET_SESSION_PANE_SIZE?.(sid) ?? null, sessionId))
     .not.toBeNull();
 }
 

@@ -43,7 +43,7 @@ async function openTerminalSession(
   });
   await page.locator(`[data-testid="session-${sessionId}"]`).click();
   const terminal = page.locator(`[data-pane-session-id="${sessionId}"][data-pane-kind="agent"] .terminal-container`);
-  await expect(terminal).toBeVisible({ timeout: 5000 });
+  await expect(terminal).toBeVisible();
   // The container becomes visible before the Ghostty wasm terminal finishes
   // initializing, and PTY data delivered before the pane handle registers is
   // dropped by design (a real attach replays it; the e2e mock has no replay).
@@ -55,7 +55,6 @@ async function openTerminalSession(
           .some((event) => event.event === 'connect_terminal'),
         sessionId,
       ),
-      { timeout: 5000 },
     )
     .toBe(true);
   // connect_terminal fires before ptyAttach, so the mock banner is still in
@@ -75,7 +74,6 @@ async function writeBlockStream(
   await expect
     .poll(
       async () => page.evaluate((id) => window.__TEST_GET_SESSION_PANE_TEXT?.(id) ?? '', sessionId),
-      { timeout: 5000 },
     )
     .toContain('world');
   // Pixel centers of buffer rows 0 (command line) and 1 (first output row).
@@ -108,12 +106,12 @@ test.describe('Ghostty terminal command blocks', () => {
     await terminal.click({ position: { x: 30, y: rows.outputRowY } });
     await page.keyboard.press('Meta+c');
     await expect
-      .poll(async () => page.evaluate(() => navigator.clipboard.readText()), { timeout: 3000 })
+      .poll(async () => page.evaluate(() => navigator.clipboard.readText()))
       .toBe('echo hello\nhello\nworld');
 
     await page.keyboard.press('Meta+Shift+c');
     await expect
-      .poll(async () => page.evaluate(() => navigator.clipboard.readText()), { timeout: 3000 })
+      .poll(async () => page.evaluate(() => navigator.clipboard.readText()))
       .toBe('echo hello');
   });
 
@@ -129,7 +127,7 @@ test.describe('Ghostty terminal command blocks', () => {
     await terminal.click({ position: { x: 100, y: rows.commandRowY } });
     await page.keyboard.press('Meta+c');
     await expect
-      .poll(async () => page.evaluate(() => navigator.clipboard.readText()), { timeout: 3000 })
+      .poll(async () => page.evaluate(() => navigator.clipboard.readText()))
       .toBe('echo hello');
   });
 
@@ -162,19 +160,19 @@ test.describe('Ghostty terminal command blocks', () => {
     await page.locator('[data-testid="terminal-context-menu-copy-output"]').click();
     await expect(menu).not.toBeVisible();
     await expect
-      .poll(async () => page.evaluate(() => navigator.clipboard.readText()), { timeout: 3000 })
+      .poll(async () => page.evaluate(() => navigator.clipboard.readText()))
       .toBe('hello\nworld');
 
     await terminal.click({ button: 'right', position: { x: 30, y: rows.outputRowY } });
     await page.locator('[data-testid="terminal-context-menu-copy-command"]').click();
     await expect
-      .poll(async () => page.evaluate(() => navigator.clipboard.readText()), { timeout: 3000 })
+      .poll(async () => page.evaluate(() => navigator.clipboard.readText()))
       .toBe('echo hello');
 
     await terminal.click({ button: 'right', position: { x: 30, y: rows.outputRowY } });
     await page.locator('[data-testid="terminal-context-menu-copy"]').click();
     await expect
-      .poll(async () => page.evaluate(() => navigator.clipboard.readText()), { timeout: 3000 })
+      .poll(async () => page.evaluate(() => navigator.clipboard.readText()))
       .toBe('echo hello\nhello\nworld');
   });
 
@@ -203,7 +201,6 @@ test.describe('Ghostty terminal command blocks', () => {
             .filter((event) => event.event === 'send_to_pty' && event.data === 'pasted-text').length,
           's-block-menu-out',
         ),
-        { timeout: 3000 },
       )
       .toBe(1);
   });
@@ -222,13 +219,13 @@ test.describe('Ghostty terminal command blocks', () => {
     await filterInput.fill('wor');
 
     const results = page.locator('[data-testid="ghostty-filter-results"]');
-    await expect(results.locator('.ghostty-filter-line')).toHaveCount(1, { timeout: 3000 });
+    await expect(results.locator('.ghostty-filter-line')).toHaveCount(1);
     await expect(results.locator('.ghostty-filter-line mark')).toHaveText('wor');
     await expect(page.locator('[data-testid="ghostty-filter-count"]')).toHaveText('1 line');
 
     // A query matching nothing shows the empty state, not stale lines.
     await filterInput.fill('absent-needle');
-    await expect(results.locator('.ghostty-filter-line')).toHaveCount(0, { timeout: 3000 });
+    await expect(results.locator('.ghostty-filter-line')).toHaveCount(0);
     await expect(results.locator('.ghostty-filter-empty')).toBeVisible();
 
     // Esc closes the filter and returns focus to the terminal.
@@ -246,7 +243,7 @@ test.describe('Ghostty terminal command blocks', () => {
     // ('echo') and the block command ('echo hello').
     await terminal.click({ position: { x: 100, y: rows.commandRowY }, clickCount: 3 });
     await expect
-      .poll(async () => page.evaluate(() => navigator.clipboard.readText()), { timeout: 3000 })
+      .poll(async () => page.evaluate(() => navigator.clipboard.readText()))
       .toBe('prompt> echo hello');
   });
 });

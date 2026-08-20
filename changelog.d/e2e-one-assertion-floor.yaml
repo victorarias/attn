@@ -1,0 +1,13 @@
+kind: internal
+area: testing
+change: >
+  The frontend E2E suite had 238 hand-picked assertion timeouts, five of
+  them at 500ms and 76 at 2000ms. A passing assertion returns as soon as
+  its condition holds, so those numbers were never spent on a green run —
+  they only decided how slow a machine had to be before a healthy run went
+  red, and CI is 3-4x slower than a laptop. They are now one floor of 15s
+  in the Playwright config, past where any healthy assertion goes and
+  under the 30s test timeout. Fourteen explicit budgets remain, each for a
+  reason the floor does not cover: probes asking whether an element is
+  absent, retry harnesses where a timeout is the detector that ends an
+  attempt, and waits that are not assertions.

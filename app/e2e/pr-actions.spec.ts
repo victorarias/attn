@@ -19,7 +19,7 @@ test.describe('PR Actions', () => {
 
     // Wait for PR card to appear
     const prCard = page.locator('[data-testid="pr-card"]').filter({ hasText: 'Test PR' });
-    await expect(prCard).toBeVisible({ timeout: 15000 });
+    await expect(prCard).toBeVisible();
 
     // 4. Hover on row first to trigger CSS hover state, then click the approve button
     await prCard.hover();
@@ -51,7 +51,7 @@ test.describe('PR Actions', () => {
 
     // Wait for PR card to appear
     const prCard = page.locator('[data-testid="pr-card"]').filter({ hasText: 'Merge Test PR' });
-    await expect(prCard).toBeVisible({ timeout: 15000 });
+    await expect(prCard).toBeVisible();
 
     // 4. Hover on row first to trigger CSS hover state, then click the merge button
     await prCard.hover();
@@ -60,7 +60,7 @@ test.describe('PR Actions', () => {
 
     // 5. Handle merge confirmation modal
     const confirmButton = page.locator('.modal-btn-primary', { hasText: 'Merge' });
-    await expect(confirmButton).toBeVisible({ timeout: 2000 });
+    await expect(confirmButton).toBeVisible();
     await confirmButton.click();
 
     // 6. Wait for merge to complete
@@ -87,7 +87,7 @@ test.describe('PR Actions', () => {
 
     // Wait for PR card to appear
     const prCard = page.locator('[data-testid="pr-card"]').filter({ hasText: 'Mute Test PR' });
-    await expect(prCard).toBeVisible({ timeout: 15000 });
+    await expect(prCard).toBeVisible();
 
     // 4. Hover on row first to trigger CSS hover state, then click the mute button
     await prCard.hover();
@@ -95,7 +95,7 @@ test.describe('PR Actions', () => {
     await muteButton.click();
 
     // 5. PR card should disappear from the list
-    await expect(prCard).not.toBeVisible({ timeout: 5000 });
+    await expect(prCard).not.toBeVisible();
   });
 
   test('multiple PRs from same repo', async ({ page, mockGitHub, startDaemonWithPRs }) => {
@@ -192,8 +192,8 @@ test.describe('PR Actions', () => {
     await muteRepoButton.click();
 
     // 6. Both PRs from test/mute-repo should disappear
-    await expect(pr60).not.toBeVisible({ timeout: 5000 });
-    await expect(pr61).not.toBeVisible({ timeout: 5000 });
+    await expect(pr60).not.toBeVisible();
+    await expect(pr61).not.toBeVisible();
 
     // 7. PR from test/other-repo should still be visible
     await expect(pr70).toBeVisible();
@@ -216,7 +216,7 @@ test.describe('PR Actions', () => {
 
     // Wait for PR card to appear
     const prCard = page.locator('[data-testid="pr-card"]').filter({ hasText: 'Undo Test PR' });
-    await expect(prCard).toBeVisible({ timeout: 15000 });
+    await expect(prCard).toBeVisible();
 
     // 4. Hover on row first to trigger CSS hover state, then click the mute button
     await prCard.hover();
@@ -224,17 +224,17 @@ test.describe('PR Actions', () => {
     await muteButton.click();
 
     // 5. PR card should disappear
-    await expect(prCard).not.toBeVisible({ timeout: 5000 });
+    await expect(prCard).not.toBeVisible();
 
     // 6. Undo toast should appear
     const undoToast = page.locator('.undo-toast');
-    await expect(undoToast).toBeVisible({ timeout: 2000 });
+    await expect(undoToast).toBeVisible();
 
     // 7. Click the undo button
     const undoButton = undoToast.locator('.toast-undo-btn');
     await undoButton.click();
 
     // 8. PR card should reappear
-    await expect(prCard).toBeVisible({ timeout: 5000 });
+    await expect(prCard).toBeVisible();
   });
 });

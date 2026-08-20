@@ -56,7 +56,7 @@ test.describe('Session State Changes', () => {
     await createSession(page, daemon, { id: 's3', label: 'Finished', state: 'idle', cwd: '/tmp/test/s3' });
 
     // Verify grouping headers
-    await expect(page.locator('[data-testid="session-group-working"]')).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('[data-testid="session-group-working"]')).toBeVisible();
     await expect(page.locator('[data-testid="session-group-waiting"]')).toBeVisible();
     await expect(page.locator('[data-testid="session-group-idle"]')).toBeVisible();
 
@@ -75,7 +75,7 @@ test.describe('Session State Changes', () => {
     await page.locator('[data-testid="session-s1"]').click();
 
     const activeTerminal = page.locator('.view-container.visible .terminal-wrapper.active');
-    await expect(activeTerminal).toBeVisible({ timeout: 5000 });
+    await expect(activeTerminal).toBeVisible();
 
     await page.waitForFunction(() => {
       const events = (window as any).__TEST_PTY_EVENTS as Array<{ event: string; data?: string }> | undefined;
@@ -88,7 +88,7 @@ test.describe('Session State Changes', () => {
           return false;
         }
       });
-    }, null, { timeout: 10000 });
+    }, null, { timeout: 15000 });
   });
 
   test('state indicator colors match design spec', async ({ page, daemon }) => {
@@ -102,7 +102,7 @@ test.describe('Session State Changes', () => {
     await createSession(page, daemon, { id: 's3', label: 'Idle', state: 'idle', cwd: '/tmp/test/s3' });
 
     // Wait for sessions to appear
-    await expect(page.locator('[data-testid="session-s1"]')).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('[data-testid="session-s1"]')).toBeVisible();
 
     // Verify colors (RGB equivalents)
     const workingDot = page.locator('[data-testid="session-s1"] [data-testid="state-indicator"]');
@@ -125,14 +125,14 @@ test.describe('Session State Changes', () => {
     await createSession(page, daemon, { id: 's3', label: 'Idle', state: 'idle', cwd: '/tmp/test/s3' });
 
     // Wait for sessions to load
-    await expect(page.locator('[data-testid="session-s1"]')).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('[data-testid="session-s1"]')).toBeVisible();
 
     // Open attention drawer through the action menu.
     await page.keyboard.press('Meta+k');
     await page.getByText('Open attention drawer').click();
 
     // Wait for drawer to open
-    await expect(page.locator('.side-panel-shell.is-open .attention-drawer .attention-drawer-panel')).toBeVisible({ timeout: 2000 });
+    await expect(page.locator('.side-panel-shell.is-open .attention-drawer .attention-drawer-panel')).toBeVisible();
 
     // Only waiting_input session should appear
     await expect(page.locator('[data-testid="attention-session-s2"]')).toBeVisible();

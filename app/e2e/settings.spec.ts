@@ -7,7 +7,7 @@ test.describe('Settings', () => {
     await page.goto('/');
 
     // Wait for dashboard to load
-    await expect(page.locator('.dashboard')).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('.dashboard')).toBeVisible();
 
     // Click settings button
     const settingsBtn = page.getByTestId('settings-button');
@@ -15,7 +15,7 @@ test.describe('Settings', () => {
 
     // Settings modal should open
     const modal = page.getByTestId('settings-modal');
-    await expect(modal).toBeVisible({ timeout: 2000 });
+    await expect(modal).toBeVisible();
     const searchInput = modal.getByRole('searchbox', { name: 'Search settings' });
     await expect(searchInput).toHaveAttribute('autocorrect', 'off');
     await expect(searchInput).toHaveAttribute('autocapitalize', 'none');
@@ -40,12 +40,12 @@ test.describe('Settings', () => {
     await startDaemonWithPRs();
     await page.goto('/');
 
-    await expect(page.locator('.dashboard')).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('.dashboard')).toBeVisible();
 
     // Open settings
     await page.getByTestId('settings-button').click();
     const modal = page.getByTestId('settings-modal');
-    await expect(modal).toBeVisible({ timeout: 2000 });
+    await expect(modal).toBeVisible();
 
     // Click overlay (outside modal)
     await page.getByTestId('settings-overlay').click({ position: { x: 10, y: 10 } });
@@ -58,12 +58,12 @@ test.describe('Settings', () => {
     await startDaemonWithPRs();
     await page.goto('/');
 
-    await expect(page.locator('.dashboard')).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('.dashboard')).toBeVisible();
 
     // Open settings
     await page.getByTestId('settings-button').click();
     const modal = page.getByTestId('settings-modal');
-    await expect(modal).toBeVisible({ timeout: 2000 });
+    await expect(modal).toBeVisible();
     await modal.getByTestId('settings-nav-general').click();
 
     // Type a projects directory
@@ -78,7 +78,7 @@ test.describe('Settings', () => {
 
     // Reopen settings
     await page.getByTestId('settings-button').click();
-    await expect(modal).toBeVisible({ timeout: 2000 });
+    await expect(modal).toBeVisible();
     await modal.getByTestId('settings-nav-general').click();
 
     // Value should be preserved
@@ -99,19 +99,19 @@ test.describe('Settings', () => {
 
     // Wait for PR to appear
     const prCard = page.locator('[data-testid="pr-card"]').filter({ hasText: 'Settings Test PR' });
-    await expect(prCard).toBeVisible({ timeout: 15000 });
+    await expect(prCard).toBeVisible();
 
     // Mute the repo
     const repoHeader = page.locator('.repo-header').filter({ hasText: 'settings-repo' });
     await repoHeader.locator('.repo-mute-btn').click();
 
     // PR should disappear
-    await expect(prCard).not.toBeVisible({ timeout: 5000 });
+    await expect(prCard).not.toBeVisible();
 
     // Open settings
     await page.getByTestId('settings-button').click();
     const modal = page.getByTestId('settings-modal');
-    await expect(modal).toBeVisible({ timeout: 2000 });
+    await expect(modal).toBeVisible();
     await modal.getByTestId('settings-nav-hygiene').click();
 
     // Muted repo should appear in list
@@ -133,17 +133,17 @@ test.describe('Settings', () => {
 
     // Wait for PR to appear
     const prCard = page.locator('[data-testid="pr-card"]').filter({ hasText: 'Unmute Test PR' });
-    await expect(prCard).toBeVisible({ timeout: 15000 });
+    await expect(prCard).toBeVisible();
 
     // Mute the repo
     const repoHeader = page.locator('.repo-header').filter({ hasText: 'unmute-repo' });
     await repoHeader.locator('.repo-mute-btn').click();
-    await expect(prCard).not.toBeVisible({ timeout: 5000 });
+    await expect(prCard).not.toBeVisible();
 
     // Open settings
     await page.getByTestId('settings-button').click();
     const modal = page.getByTestId('settings-modal');
-    await expect(modal).toBeVisible({ timeout: 2000 });
+    await expect(modal).toBeVisible();
     await modal.getByTestId('settings-nav-hygiene').click();
 
     // Click unmute button
@@ -155,7 +155,7 @@ test.describe('Settings', () => {
     await expect(modal).not.toBeVisible();
 
     // PR should reappear
-    await expect(prCard).toBeVisible({ timeout: 5000 });
+    await expect(prCard).toBeVisible();
   });
 
   test('mute author hides PR and shows in settings', async ({ page, mockGitHub, startDaemonWithPRs }) => {
@@ -173,7 +173,7 @@ test.describe('Settings', () => {
 
     // Wait for PR to appear
     const prCard = page.locator('[data-testid="pr-card"]').filter({ hasText: 'Dependabot PR' });
-    await expect(prCard).toBeVisible({ timeout: 15000 });
+    await expect(prCard).toBeVisible();
 
     // Hover over PR row to reveal the mute author button
     const prRow = page.locator('.pr-row').filter({ hasText: 'Dependabot PR' });
@@ -185,12 +185,12 @@ test.describe('Settings', () => {
     await muteAuthorBtn.click();
 
     // PR should disappear
-    await expect(prCard).not.toBeVisible({ timeout: 5000 });
+    await expect(prCard).not.toBeVisible();
 
     // Open settings
     await page.getByTestId('settings-button').click();
     const modal = page.getByTestId('settings-modal');
-    await expect(modal).toBeVisible({ timeout: 2000 });
+    await expect(modal).toBeVisible();
     await modal.getByTestId('settings-nav-hygiene').click();
 
     // Verify Muted Authors section exists
@@ -216,18 +216,18 @@ test.describe('Settings', () => {
 
     // Wait for PR to appear
     const prCard = page.locator('[data-testid="pr-card"]').filter({ hasText: 'Renovate PR' });
-    await expect(prCard).toBeVisible({ timeout: 15000 });
+    await expect(prCard).toBeVisible();
 
     // Mute the author
     const prRow = page.locator('.pr-row').filter({ hasText: 'Renovate PR' });
     await prRow.hover();
     await prRow.locator('[data-testid="mute-author-button"]').click();
-    await expect(prCard).not.toBeVisible({ timeout: 5000 });
+    await expect(prCard).not.toBeVisible();
 
     // Open settings
     await page.getByTestId('settings-button').click();
     const modal = page.getByTestId('settings-modal');
-    await expect(modal).toBeVisible({ timeout: 2000 });
+    await expect(modal).toBeVisible();
     await modal.getByTestId('settings-nav-hygiene').click();
 
     // Click unmute button for the author
@@ -239,6 +239,6 @@ test.describe('Settings', () => {
     await expect(modal).not.toBeVisible();
 
     // PR should reappear
-    await expect(prCard).toBeVisible({ timeout: 5000 });
+    await expect(prCard).toBeVisible();
   });
 });

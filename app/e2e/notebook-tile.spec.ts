@@ -34,7 +34,6 @@ test.describe('NotebookTile (workspace tile)', () => {
     await expect(page.locator('.notebook-browser-list')).toHaveCount(1);
     await expect.poll(
       () => page.locator('.notebook-browser-list').evaluate((el) => el.getBoundingClientRect().width),
-      { timeout: 2000 },
     ).toBeLessThan(2);
 
     // Widening again unfolds both panes (auto follows width; no manual override set).

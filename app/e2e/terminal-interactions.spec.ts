@@ -117,7 +117,6 @@ async function expectOpenedUrl(page: import('@playwright/test').Page, url: strin
       async () => page.evaluate(
         () => (window as Window & { __OPENED_TERMINAL_URLS?: string[] }).__OPENED_TERMINAL_URLS ?? [],
       ),
-      { timeout: 3000 },
     )
     .toContain(url);
 }
@@ -136,7 +135,6 @@ async function expectTerminalInputCount(
         ).filter((event) => event.event === 'send_to_pty' && event.data === expectedData).length,
         { id: sessionId, expectedData: data },
       ),
-      { timeout: 3000 },
     )
     .toBe(count);
 }
@@ -177,11 +175,10 @@ async function openTerminalSession(
   await createSession(page, daemon, sessionId);
   await page.locator(`[data-testid="session-${sessionId}"]`).click();
   const terminal = page.locator(`[data-pane-session-id="${sessionId}"][data-pane-kind="agent"] .terminal-container`);
-  await expect(terminal).toBeVisible({ timeout: 5000 });
+  await expect(terminal).toBeVisible();
   await expect
     .poll(
       async () => page.evaluate((id) => window.__TEST_GET_SESSION_PANE_SIZE?.(id) ?? null, sessionId),
-      { timeout: 10000 },
     )
     .not.toBeNull();
   // A measured pane does not mean the session's startup output has arrived.
@@ -200,7 +197,6 @@ test.describe('Ghostty terminal interactions', () => {
     await expect
       .poll(
         async () => page.evaluate(() => window.__TEST_GET_SESSION_PANE_TEXT?.('s-link') ?? ''),
-        { timeout: 5000 },
       )
       .toContain(url);
 
@@ -212,7 +208,6 @@ test.describe('Ghostty terminal interactions', () => {
         async () => page.evaluate(
           () => (window as Window & { __OPENED_TERMINAL_URLS?: string[] }).__OPENED_TERMINAL_URLS ?? [],
         ),
-        { timeout: 500 },
       )
       .toEqual([]);
     await page.keyboard.down('Meta');
@@ -239,7 +234,6 @@ test.describe('Ghostty terminal interactions', () => {
     await expect
       .poll(
         async () => page.evaluate(() => window.__TEST_GET_SESSION_PANE_TEXT?.('s-osc8-link') ?? ''),
-        { timeout: 5000 },
       )
       .toContain('Learn more');
 
@@ -251,7 +245,6 @@ test.describe('Ghostty terminal interactions', () => {
         async () => page.evaluate(
           () => (window as Window & { __OPENED_TERMINAL_URLS?: string[] }).__OPENED_TERMINAL_URLS ?? [],
         ),
-        { timeout: 500 },
       )
       .toEqual([]);
     await page.keyboard.down('Meta');
@@ -270,7 +263,6 @@ test.describe('Ghostty terminal interactions', () => {
     await expect
       .poll(
         async () => page.evaluate(() => window.__TEST_GET_SESSION_PANE_TEXT?.('s-file-link') ?? ''),
-        { timeout: 5000 },
       )
       .toContain('src/main.go:12:3');
 
@@ -278,7 +270,7 @@ test.describe('Ghostty terminal interactions', () => {
     // cursor appears once the candidate resolves and the accelerator is held.
     await terminal.hover({ position: { x: 55, y: 8 } });
     await page.keyboard.down('Meta');
-    await expect(terminal).toHaveCSS('cursor', 'pointer', { timeout: 3000 });
+    await expect(terminal).toHaveCSS('cursor', 'pointer');
     await terminal.click({ position: { x: 55, y: 8 } });
     await page.keyboard.up('Meta');
 
@@ -287,7 +279,6 @@ test.describe('Ghostty terminal interactions', () => {
         async () => page.evaluate(
           () => (window as Window & { __OPENED_TERMINAL_PATHS?: string[] }).__OPENED_TERMINAL_PATHS ?? [],
         ),
-        { timeout: 3000 },
       )
       .toContain('/tmp/test/terminal-links/src/main.go');
   });
@@ -306,14 +297,13 @@ test.describe('Ghostty terminal interactions', () => {
     await expect
       .poll(
         async () => page.evaluate(() => window.__TEST_GET_SESSION_PANE_TEXT?.('s-file-link-tool') ?? ''),
-        { timeout: 5000 },
       )
       .toContain('Read(/tmp/test/terminal-links/src/main.go');
 
     // Hover inside the path portion (col ~14 at the e2e cell width).
     await terminal.hover({ position: { x: 120, y: 8 } });
     await page.keyboard.down('Meta');
-    await expect(terminal).toHaveCSS('cursor', 'pointer', { timeout: 3000 });
+    await expect(terminal).toHaveCSS('cursor', 'pointer');
     await terminal.click({ position: { x: 120, y: 8 } });
     await page.keyboard.up('Meta');
 
@@ -322,7 +312,6 @@ test.describe('Ghostty terminal interactions', () => {
         async () => page.evaluate(
           () => (window as Window & { __OPENED_TERMINAL_PATHS?: string[] }).__OPENED_TERMINAL_PATHS ?? [],
         ),
-        { timeout: 3000 },
       )
       .toContain('/tmp/test/terminal-links/src/main.go');
   });
@@ -338,7 +327,6 @@ test.describe('Ghostty terminal interactions', () => {
     await expect
       .poll(
         async () => page.evaluate(() => window.__TEST_GET_SESSION_PANE_TEXT?.('s-file-link-wrap') ?? ''),
-        { timeout: 5000 },
       )
       .toContain('wrapped-target.go');
 
@@ -357,7 +345,7 @@ test.describe('Ghostty terminal interactions', () => {
 
     await terminal.hover({ position: hoverAt });
     await page.keyboard.down('Meta');
-    await expect(terminal).toHaveCSS('cursor', 'pointer', { timeout: 3000 });
+    await expect(terminal).toHaveCSS('cursor', 'pointer');
     await terminal.click({ position: hoverAt });
     await page.keyboard.up('Meta');
 
@@ -366,7 +354,6 @@ test.describe('Ghostty terminal interactions', () => {
         async () => page.evaluate(
           () => (window as Window & { __OPENED_TERMINAL_PATHS?: string[] }).__OPENED_TERMINAL_PATHS ?? [],
         ),
-        { timeout: 3000 },
       )
       .toContain(wrappedPath);
   });
@@ -383,7 +370,6 @@ test.describe('Ghostty terminal interactions', () => {
     await expect
       .poll(
         async () => page.evaluate(() => window.__TEST_GET_SESSION_PANE_TEXT?.('s-file-link-refit') ?? ''),
-        { timeout: 5000 },
       )
       .toContain('src/main.go:12:3');
 
@@ -406,13 +392,12 @@ test.describe('Ghostty terminal interactions', () => {
           (id) => window.__TEST_GET_SESSION_PANE_SIZE?.(id) ?? null,
           's-file-link-refit',
         ),
-        { timeout: 5000 },
       )
       .not.toEqual(sizeBefore);
 
     // Pressing Cmd with the pointer unmoved must re-detect the link under it.
     await page.keyboard.down('Meta');
-    await expect(terminal).toHaveCSS('cursor', 'pointer', { timeout: 3000 });
+    await expect(terminal).toHaveCSS('cursor', 'pointer');
     await terminal.click({ position: { x: 55, y: 8 } });
     await page.keyboard.up('Meta');
 
@@ -421,7 +406,6 @@ test.describe('Ghostty terminal interactions', () => {
         async () => page.evaluate(
           () => (window as Window & { __OPENED_TERMINAL_PATHS?: string[] }).__OPENED_TERMINAL_PATHS ?? [],
         ),
-        { timeout: 3000 },
       )
       .toContain('/tmp/test/terminal-links/src/main.go');
   });
@@ -434,13 +418,12 @@ test.describe('Ghostty terminal interactions', () => {
     await expect
       .poll(
         async () => page.evaluate(() => window.__TEST_GET_SESSION_PANE_TEXT?.('s-file-link-stream') ?? ''),
-        { timeout: 5000 },
       )
       .toContain('src/main.go:12:3');
 
     await terminal.hover({ position: { x: 55, y: 8 } });
     await page.keyboard.down('Meta');
-    await expect(terminal).toHaveCSS('cursor', 'pointer', { timeout: 3000 });
+    await expect(terminal).toHaveCSS('cursor', 'pointer');
 
     const renderCountBefore = await page.evaluate((sessionId) => {
       const snapshots = window.__ATTN_TERMINAL_PERF_DUMP?.() ?? [];
@@ -482,7 +465,6 @@ test.describe('Ghostty terminal interactions', () => {
         async () => page.evaluate(
           () => (window as Window & { __OPENED_TERMINAL_PATHS?: string[] }).__OPENED_TERMINAL_PATHS ?? [],
         ),
-        { timeout: 3000 },
       )
       .toContain('/tmp/test/terminal-links/src/main.go');
 
@@ -493,7 +475,6 @@ test.describe('Ghostty terminal interactions', () => {
     await expect
       .poll(
         async () => page.evaluate(() => window.__TEST_GET_SESSION_PANE_TEXT?.('s-file-link-stream') ?? ''),
-        { timeout: 3000 },
       )
       .toContain('plain text');
     await page.keyboard.down('Meta');
@@ -517,7 +498,6 @@ test.describe('Ghostty terminal interactions', () => {
     await expect
       .poll(
         async () => page.evaluate(() => window.__TEST_GET_SESSION_PANE_TEXT?.('s-file-link-miss') ?? ''),
-        { timeout: 5000 },
       )
       .toContain('missing/file.go');
 
@@ -534,7 +514,6 @@ test.describe('Ghostty terminal interactions', () => {
         async () => page.evaluate(
           () => (window as Window & { __OPENED_TERMINAL_PATHS?: string[] }).__OPENED_TERMINAL_PATHS ?? [],
         ),
-        { timeout: 500 },
       )
       .toEqual([]);
   });
@@ -551,7 +530,6 @@ test.describe('Ghostty terminal interactions', () => {
     await expect
       .poll(
         async () => page.evaluate(() => window.__TEST_GET_SESSION_PANE_TEXT?.('s-link-offset') ?? ''),
-        { timeout: 5000 },
       )
       .toContain(url);
 
@@ -583,7 +561,6 @@ test.describe('Ghostty terminal interactions', () => {
         async () => page.evaluate(
           () => (window as Window & { __OPENED_TERMINAL_URLS?: string[] }).__OPENED_TERMINAL_URLS ?? [],
         ),
-        { timeout: 500 },
       )
       .toEqual([]);
 
@@ -628,7 +605,6 @@ test.describe('Ghostty terminal interactions', () => {
     await expect
       .poll(
         async () => page.evaluate(() => window.__TEST_GET_SESSION_PANE_TEXT?.('s-link-tracked') ?? ''),
-        { timeout: 5000 },
       )
       .toContain(url);
 
@@ -695,7 +671,6 @@ test.describe('Ghostty terminal interactions', () => {
     await expect
       .poll(
         async () => page.evaluate(() => window.__TEST_GET_SESSION_PANE_TEXT?.('s-image-paste') ?? ''),
-        { timeout: 5000 },
       )
       .toContain('ready');
 
@@ -757,14 +732,13 @@ test.describe('Ghostty terminal interactions', () => {
     await expect
       .poll(
         async () => page.evaluate(() => window.__TEST_GET_SESSION_PANE_TEXT?.('s-double-click') ?? ''),
-        { timeout: 5000 },
       )
       .toContain('selectable-word');
 
     await terminal.dblclick({ position: { x: 55, y: 8 } });
 
     await expect
-      .poll(async () => page.evaluate(() => navigator.clipboard.readText()), { timeout: 3000 })
+      .poll(async () => page.evaluate(() => navigator.clipboard.readText()))
       .toBe('selectable-word');
   });
 
@@ -781,7 +755,7 @@ test.describe('Ghostty terminal interactions', () => {
     await page.mouse.move(bounds!.x + 56, bounds!.y + 8);
     await page.mouse.up();
 
-    await expect.poll(async () => page.evaluate(() => navigator.clipboard.readText()), { timeout: 3000 })
+    await expect.poll(async () => page.evaluate(() => navigator.clipboard.readText()))
       .toBe('clipboard-sentinel');
   });
 
@@ -799,7 +773,7 @@ test.describe('Ghostty terminal interactions', () => {
     await page.keyboard.up('Alt');
 
     await expect
-      .poll(async () => page.evaluate(() => navigator.clipboard.readText()), { timeout: 3000 })
+      .poll(async () => page.evaluate(() => navigator.clipboard.readText()))
       .toContain(text);
   });
 
@@ -816,14 +790,13 @@ test.describe('Ghostty terminal interactions', () => {
     await page.mouse.up();
 
     await expect
-      .poll(async () => page.evaluate(() => navigator.clipboard.readText()), { timeout: 3000 })
+      .poll(async () => page.evaluate(() => navigator.clipboard.readText()))
       .toContain(url);
     await expect
       .poll(
         async () => page.evaluate(
           () => (window as Window & { __OPENED_TERMINAL_URLS?: string[] }).__OPENED_TERMINAL_URLS ?? [],
         ),
-        { timeout: 500 },
       )
       .toEqual([]);
   });
@@ -842,7 +815,6 @@ test.describe('Ghostty terminal interactions', () => {
     await expect
       .poll(
         async () => page.evaluate(() => window.__TEST_GET_SESSION_PANE_TEXT?.('s-release-outside') ?? ''),
-        { timeout: 5000 },
       )
       .toContain(text);
 
@@ -860,7 +832,7 @@ test.describe('Ghostty terminal interactions', () => {
     await page.mouse.up();
 
     await expect
-      .poll(async () => page.evaluate(() => navigator.clipboard.readText()), { timeout: 3000 })
+      .poll(async () => page.evaluate(() => navigator.clipboard.readText()))
       .toContain(text);
   });
 
@@ -890,7 +862,7 @@ test.describe('Ghostty terminal interactions', () => {
     await page.mouse.move(terminalBounds!.x + 220, rowY);
     await page.mouse.up();
     await expect
-      .poll(async () => page.evaluate(() => navigator.clipboard.readText()), { timeout: 3000 })
+      .poll(async () => page.evaluate(() => navigator.clipboard.readText()))
       .toContain(anchor);
 
     await terminal.hover({ position: { x: 20, y: 8 } });
@@ -898,7 +870,7 @@ test.describe('Ghostty terminal interactions', () => {
     await page.keyboard.press('Meta+Shift+c');
 
     await expect
-      .poll(async () => page.evaluate(() => navigator.clipboard.readText()), { timeout: 3000 })
+      .poll(async () => page.evaluate(() => navigator.clipboard.readText()))
       .toContain(anchor);
   });
 });

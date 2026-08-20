@@ -33,7 +33,7 @@ async function openTerminalSession(
   });
   await page.locator(`[data-testid="session-${sessionId}"]`).click();
   const terminal = page.locator(`[data-pane-session-id="${sessionId}"][data-pane-kind="agent"] .terminal-container`);
-  await expect(terminal).toBeVisible({ timeout: 5000 });
+  await expect(terminal).toBeVisible();
   // The container becomes visible before the Ghostty wasm terminal finishes
   // initializing, and PTY data delivered before the pane handle registers is
   // dropped by design (a real attach replays it; the e2e mock has no replay).
@@ -45,7 +45,6 @@ async function openTerminalSession(
           .some((event) => event.event === 'connect_terminal'),
         sessionId,
       ),
-      { timeout: 5000 },
     )
     .toBe(true);
   // connect_terminal fires before ptyAttach, so the mock banner is still in
@@ -78,7 +77,6 @@ test.describe('Ghostty terminal find', () => {
     await expect
       .poll(
         async () => page.evaluate(() => window.__TEST_GET_SESSION_PANE_TEXT?.('s-find') ?? ''),
-        { timeout: 5000 },
       )
       .toContain('second FIND_NEEDLE');
 
@@ -91,7 +89,7 @@ test.describe('Ghostty terminal find', () => {
 
     await findInput.pressSequentially('find_needle', { delay: 10 });
     const count = page.locator('[data-testid="ghostty-find-count"]');
-    await expect(count).toHaveText('2/2', { timeout: 5000 });
+    await expect(count).toHaveText('2/2');
 
     // Enter walks upward to the first (older) match and scrolls it into view.
     await page.keyboard.press('Enter');
@@ -99,7 +97,6 @@ test.describe('Ghostty terminal find', () => {
     await expect
       .poll(
         async () => page.evaluate(() => window.__TEST_GET_SESSION_PANE_VISIBLE_TEXT?.('s-find') ?? ''),
-        { timeout: 3000 },
       )
       .toContain('first FIND_NEEDLE');
 
@@ -109,7 +106,6 @@ test.describe('Ghostty terminal find', () => {
     await expect
       .poll(
         async () => page.evaluate(() => window.__TEST_GET_SESSION_PANE_VISIBLE_TEXT?.('s-find') ?? ''),
-        { timeout: 3000 },
       )
       .toContain('second FIND_NEEDLE');
   });
@@ -144,7 +140,6 @@ test.describe('Ghostty terminal find', () => {
     await expect
       .poll(
         async () => page.evaluate(() => window.__TEST_GET_SESSION_PANE_TEXT?.('s-find-case') ?? ''),
-        { timeout: 5000 },
       )
       .toContain('Case case CASE');
 
@@ -152,9 +147,9 @@ test.describe('Ghostty terminal find', () => {
     const findInput = page.locator('[data-testid="ghostty-find-input"]');
     await findInput.pressSequentially('case', { delay: 10 });
     const count = page.locator('[data-testid="ghostty-find-count"]');
-    await expect(count).toHaveText('3/3', { timeout: 5000 });
+    await expect(count).toHaveText('3/3');
 
     await page.getByRole('button', { name: 'Match case' }).click();
-    await expect(count).toHaveText('1/1', { timeout: 5000 });
+    await expect(count).toHaveText('1/1');
   });
 });
