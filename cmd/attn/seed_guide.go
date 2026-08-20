@@ -41,8 +41,9 @@ WRITING A BODY
   A verification contract: how completion is known, and what evidence lands as
   an attachment. This is what makes "ready for review" mean something.
 
-  Scope and autonomy bounds: what is deferred, and what is a real blocker
-  versus a call the tender can make.
+  Scope and autonomy bounds: what is deferred or out of scope, and where the
+  tender's authority ends — when to stop and ask versus when to make the call
+  and keep going. A body that says nothing here defaults to checking in.
 
   A body may say "ship till done": that is an instruction to work end to end
   on your own, following the stop conditions and requirements until they are
