@@ -56,6 +56,35 @@ describe('block chrome', () => {
     expect(container.querySelector('.markdown-code-frame')).toBeNull();
   });
 
+  /**
+   * mermaid's parse error quotes the line it choked on. Rendered as prose that
+   * quote reads as markdown the agent wrote — the harness's criterion 1 caught
+   * it as raw syntax reaching the reader — and the caret it points with lands
+   * nowhere near the column it accuses.
+   */
+  it('reports a failed diagram as source, not as prose', async () => {
+    mermaidMock.render.mockRejectedValueOnce(
+      new Error('Parse error on line 5:\n...    E -->|[| C[CSI Entry]\n-------------^\nExpecting NODE_STRING'),
+    );
+    const { container } = render(
+      <ReaderPresentation>
+        <Markdown>{'```mermaid\nflowchart LR\n  E -->|[| C\n```\n'}</Markdown>
+      </ReaderPresentation>,
+    );
+    await waitFor(() => {
+      expect(container.querySelector('.markdown-mermaid-error-detail')).not.toBeNull();
+    });
+    expect(container.querySelector('.markdown-mermaid-error-detail')?.tagName).toBe('PRE');
+    // The reader's own test: what is left once every preformatted subtree is
+    // taken away carries no markdown syntax.
+    const prose = container.innerHTML
+      .replace(/<pre[\s\S]*?<\/pre>/g, ' ')
+      .replace(/<code[\s\S]*?<\/code>/g, ' ')
+      .replace(/<[^>]+>/g, '\n');
+    expect(prose).not.toMatch(/\|[^\n|]*\|/);
+    expect(container.querySelector('.markdown-mermaid-frame--error')).not.toBeNull();
+  });
+
   it('gives an ordinary diagram the same header an oversized one gets', async () => {
     const { container } = render(
       <ReaderPresentation>

@@ -305,8 +305,19 @@
   font-size: var(--font-size-sm);
 }
 
+.markdown-mermaid-error-detail {
+  margin: 0 0 8px 0;
+  color: var(--color-error, #ef4444);
+  white-space: pre-wrap;
+  overflow-x: auto;
+}
+
 .markdown-mermaid-error {
   color: var(--color-text-secondary);
   white-space: pre-wrap;
   overflow-x: auto;
+}
+
+.markdown-mermaid-frame--error > .markdown-mermaid-error-wrap {
+  padding: 0.25rem 1rem 1rem;
 }

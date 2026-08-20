@@ -223,10 +223,24 @@ function RenderedMermaidDiagram({
   }, [focusState]);
 
   if (error) {
-    return (
+    // mermaid's message quotes the line it choked on and points a caret under
+    // the column, so it is source rather than prose: in a paragraph the caret
+    // lands nowhere near what it accuses, and the fence syntax it quotes reads
+    // as text the agent wrote.
+    const report = (
       <div className="markdown-mermaid-error-wrap">
-        <p className="markdown-mermaid-error-note">Diagram failed to render: {error}</p>
+        <p className="markdown-mermaid-error-note">Diagram failed to render</p>
+        <pre className="markdown-mermaid-error-detail">{error}</pre>
         <pre className="markdown-mermaid-error">{code}</pre>
+      </div>
+    );
+    if (presentation === 'static') return report;
+    return (
+      <div className="markdown-mermaid-frame markdown-mermaid-frame--error">
+        <div className="markdown-mermaid-toolbar" data-md-chrome="1">
+          <span className="markdown-mermaid-label">diagram</span>
+        </div>
+        {report}
       </div>
     );
   }
