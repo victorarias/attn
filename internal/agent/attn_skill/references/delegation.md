@@ -43,7 +43,7 @@ Prefer a brief file so the task can be drafted and revised before submission:
 
     brief_file="$(mktemp "${TMPDIR:-/tmp}/attn-delegate.XXXXXX")"
     # Write a concise task, relevant context, constraints, and expected output.
-    attn delegate --brief-file "$brief_file"
+    attn delegate --brief-file "$brief_file" --model <model>
 
 The brief should let the delegated agent start immediately. Include:
 
@@ -66,7 +66,7 @@ Use `--brief <text>` only for short, simple tasks.
 
 When the work is already planted, dispatch at it instead of planting a duplicate:
 
-    attn delegate --brief-file "$brief_file" --plot <seed-id>
+    attn delegate --brief-file "$brief_file" --plot <seed-id> --model <model>
 
 The delegate binds that seed rather than a new one, and launches knowing it.
 Aimed at a **crown**, a flag-free `attn seed ready` inside the delegate answers
@@ -79,11 +79,11 @@ The source agent is used by default; `--agent` selects another supported one.
 Plugin agents work only when they declare delegated initial-prompt support.
 Copilot delegation is currently unsupported.
 
-`--model` and `--effort` pin the delegated agent's model and reasoning effort
-for that delegation only; omitted, the agent uses its own defaults. `--effort`
-takes the agent's native levels (claude: low, medium, high, xhigh, max; codex:
-minimal, low, medium, high, xhigh). Agents without a native mechanism (e.g.
-copilot) reject these flags.
+`--model` is required and pins the delegated agent's model for that delegation
+only. `--effort` takes the agent's native levels (claude: low, medium, high,
+xhigh, max; codex: minimal, low, medium, high, xhigh) and defaults to medium.
+Agents without a native effort mechanism reject an explicit `--effort`; the
+default is not applied to them.
 
 ## Placement
 
@@ -106,7 +106,7 @@ labels, directories, and workspace IDs to identify domain workspaces the user
 already has (e.g. code reviews, goalie rotation, triage). When the delegated
 task matches an existing workspace's domain, place it there with `--workspace`:
 
-    attn delegate --brief-file "$brief_file" --workspace <workspace-id>
+    attn delegate --brief-file "$brief_file" --workspace <workspace-id> --model <model>
 
 When delegating multiple independent items in parallel, route each agent to the
 workspace that fits its domain rather than creating a new workspace per item.

@@ -142,8 +142,8 @@ func TestDelegateRefusesRetiredTicketFlags(t *testing.T) {
 		args []string
 		want string
 	}{
-		{"ticket", []string{"--ticket", "some-ticket"}, "attn seed plant"},
-		{"confirm", []string{"--brief", "do a thing", "--confirm"}, "attn seed tend"},
+		{"ticket", []string{"--ticket", "some-ticket", "--model", "opus"}, "attn seed plant"},
+		{"confirm", []string{"--brief", "do a thing", "--confirm", "--model", "opus"}, "attn seed tend"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := parseDelegateArgs(tc.args)

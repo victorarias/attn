@@ -1,0 +1,8 @@
+kind: fixed
+area: cli
+change: >
+  `attn delegate` now requires the dispatcher to choose a model explicitly and
+  defaults supported agents to medium reasoning effort.
+symptom: >
+  A delegated agent could silently inherit a model from its own configuration,
+  making cost and quality depend on a choice the dispatcher could not see.

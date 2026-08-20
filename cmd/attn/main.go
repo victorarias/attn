@@ -699,8 +699,8 @@ commands:
   agent msg <target> "text"            message a live session, crew member or seed's tender
 	  session <command>                 inspect a session's conversation
   state explain <id>                replay why a session's state is what it is
-  delegate --brief-file <path>      start another agent with a delegated brief
-  delegate --plot <seed-id>         start another agent at an existing seed
+  delegate --brief-file <path> --model <name>  start another agent with a delegated brief
+  delegate --plot <seed-id> --model <name>     start another agent at an existing seed
   journal append --entry <text>     serialized append to the daily notebook journal
   workspace context <command>       edit shared workspace context
   open <file.md|seed-id> [--session <id>]   show a document in attn
@@ -749,12 +749,12 @@ func runDelegate() {
 		printJSON(result)
 		return
 	}
-	warnIfDaemonVersionMismatch()
 	args, err := parseDelegateArgs(os.Args[2:])
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "delegate: %v\n", err)
 		os.Exit(2)
 	}
+	warnIfDaemonVersionMismatch()
 	c := client.New("")
 	// Print the caller-owned recovery key before crossing the transport. The
 	// daemon may durably accept the request even if this process never receives
@@ -792,7 +792,7 @@ func runDelegate() {
 }
 
 func writeDelegateHelp(w io.Writer) {
-	fmt.Fprint(w, `usage: attn delegate (--brief <text> | --brief-file <path>) [options]
+	fmt.Fprint(w, `usage: attn delegate (--brief <text> | --brief-file <path>) --model <name> [options]
 
 A delegation binds a seed: the brief is its body, the delegate its tender, and
 the seed is where the delegate reports. Tickets retired.
@@ -823,12 +823,12 @@ worktree options:
 session options:
 	--request-id <id>          stable retry key (generated and printed when omitted; op- is reserved)
   --agent <name>             configured prompt-capable built-in or plugin agent
-  --model <name>             pin the agent's model (alias or full id, e.g.
-                             "opus" or "claude-opus-4-8"; defaults to the
-                             agent's own default)
+  --model <name>             required; pin the agent's model (alias or full id,
+                             e.g. "gpt-5.6-sol" or "opus")
   --effort <level>           pin the agent's reasoning effort (claude: low,
                              medium, high, xhigh, max; codex: minimal, low,
-                             medium, high, xhigh)
+                             medium, high, xhigh); defaults to medium for agents
+                             that support reasoning effort
   --name <text>              name for the agent and, when a new workspace is
                              created, the workspace (max 16 chars, must be
                              unique; defaults to the directory name)
@@ -2375,6 +2375,10 @@ func parseDelegateArgs(args []string) (delegateCLIArgs, error) {
 	if fs.NArg() != 0 {
 		return delegateCLIArgs{}, fmt.Errorf("unexpected arguments: %v", fs.Args())
 	}
+	modelPin := strings.TrimSpace(*model)
+	if modelPin == "" {
+		return delegateCLIArgs{}, errors.New("--model is required (for example, --model gpt-5.6-sol or --model opus); --effort defaults to medium when supported")
+	}
 	source := strings.TrimSpace(*sourceSessionID)
 	if source == "" {
 		source = strings.TrimSpace(os.Getenv("ATTN_SESSION_ID"))
@@ -2437,7 +2441,7 @@ func parseDelegateArgs(args []string) (delegateCLIArgs, error) {
 		options: client.DelegateOptions{
 			RequestID:          stableRequestID,
 			Agent:              strings.TrimSpace(*agentName),
-			Model:              strings.TrimSpace(*model),
+			Model:              modelPin,
 			Effort:             strings.TrimSpace(*effort),
 			Label:              strings.TrimSpace(*name),
 			Yolo:               *yolo,
