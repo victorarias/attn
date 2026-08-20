@@ -239,9 +239,9 @@
   background: var(--md-frame-bg);
 }
 
-/* A bare <pre> only reaches this rule on a surface without the code frame
-   (an error fallback, the pending-diagram box). Framed blocks hand their
-   border and background to .markdown-code-frame and leave the pre flat. */
+/* Every <pre> the transcript can show. A framed block overrides the edge back
+   off in Markdown.css — that rule carries two classes to this one's one, so it
+   wins wherever the stylesheets land in the bundle. */
 .conversation-message-text pre {
   margin: 0 0 0.7em 0;
   padding: 0.7em 0.8em;

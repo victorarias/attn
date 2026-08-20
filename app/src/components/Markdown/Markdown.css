@@ -54,8 +54,10 @@
   color: var(--color-text-primary);
 }
 
-/* The frame owns the edge; the pre inside is just the scrolling text. */
-.markdown-code-frame pre {
+/* The frame owns the edge; the pre inside is just the scrolling text. Two
+   classes so it outranks a reading surface's own `<pre>` rule whichever
+   stylesheet the bundler emits last. */
+.markdown-code-frame .markdown-code-frame-pre {
   margin: 0;
   border: 0;
   border-radius: 0;

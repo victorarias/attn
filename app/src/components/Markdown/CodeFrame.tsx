@@ -78,7 +78,7 @@ export function CodeFrame({ children, className }: CodeFrameProps) {
         <span className="markdown-code-frame-language">{language ?? 'text'}</span>
         <CopyButton text={fenceText(children)} />
       </div>
-      <pre className={className}>{children}</pre>
+      <pre className={`${className ?? ''} markdown-code-frame-pre`.trim()}>{children}</pre>
     </div>
   );
 }
