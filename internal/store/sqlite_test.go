@@ -1677,3 +1677,78 @@ func tableExistsForTest(t *testing.T, db *sql.DB, name string) bool {
 	}
 	return got == name
 }
+
+func TestMigration118CarriesTicketBoardScaleToGardenScale(t *testing.T) {
+	cases := []struct {
+		name     string
+		seed     map[string]string
+		wantVal  string
+		wantGone bool
+	}{
+		{
+			name:     "a stored ticket-board scale becomes the garden's",
+			seed:     map[string]string{"ticketBoardScale": "1.3"},
+			wantVal:  "1.3",
+			wantGone: true,
+		},
+		{
+			name:     "an already-written garden scale wins over the legacy key",
+			seed:     map[string]string{"ticketBoardScale": "1.3", "gardenScale": "0.8"},
+			wantVal:  "0.8",
+			wantGone: true,
+		},
+		{
+			name:    "nothing stored stays nothing stored",
+			seed:    map[string]string{},
+			wantVal: "",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dbPath := filepath.Join(t.TempDir(), "test.db")
+			s, err := NewWithDB(dbPath)
+			if err != nil {
+				t.Fatalf("NewWithDB error: %v", err)
+			}
+			defer s.Close()
+
+			// Roll back to a pre-118 shape so migrateDB re-applies it over the
+			// seeded rows. getCurrentVersion is MAX-based, so the recorded
+			// version has to come out too.
+			for k, v := range tc.seed {
+				if _, err := s.db.Exec(`INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)`, k, v); err != nil {
+					t.Fatalf("seed %s: %v", k, err)
+				}
+			}
+			if _, err := s.db.Exec(`DELETE FROM schema_migrations WHERE version >= 118`); err != nil {
+				t.Fatalf("unrecord migration 118: %v", err)
+			}
+
+			if err := migrateDB(s.db, dbPath); err != nil {
+				t.Fatalf("migrateDB error: %v", err)
+			}
+
+			var got string
+			err = s.db.QueryRow(`SELECT value FROM settings WHERE key = 'gardenScale'`).Scan(&got)
+			if tc.wantVal == "" {
+				if err == nil {
+					t.Fatalf("gardenScale = %q, want no row", got)
+				}
+			} else {
+				if err != nil {
+					t.Fatalf("read gardenScale: %v", err)
+				}
+				if got != tc.wantVal {
+					t.Fatalf("gardenScale = %q, want %q", got, tc.wantVal)
+				}
+			}
+
+			var legacy string
+			err = s.db.QueryRow(`SELECT value FROM settings WHERE key = 'ticketBoardScale'`).Scan(&legacy)
+			if tc.wantGone && err == nil {
+				t.Fatalf("ticketBoardScale still present with %q", legacy)
+			}
+		})
+	}
+}

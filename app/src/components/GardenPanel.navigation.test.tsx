@@ -46,12 +46,24 @@ describe('GardenPanel navigation', () => {
   const elsewhere = seed({ id: 's-alone1', title: 'unrelated work' });
   const all = [shipIt, first, second, elsewhere];
 
-  it('opens on the whole garden', () => {
+  // The root is crowns and loose seeds. A seed inside a crown lives in its
+  // plot — listing it at root too reads as two seeds.
+  it('opens on crowns and loose seeds, keeping plot children inside their plot', () => {
     render(<GardenPanel isOpen onClose={vi.fn()} seedsTotal={4} seeds={all} />);
 
-    for (const title of ['ship the thing', 'first step', 'second step', 'unrelated work']) {
-      expect(screen.getByText(title)).toBeInTheDocument();
-    }
+    expect(screen.getByText('ship the thing')).toBeInTheDocument();
+    expect(screen.getByText('unrelated work')).toBeInTheDocument();
+    expect(screen.queryByText('first step')).not.toBeInTheDocument();
+    expect(screen.queryByText('second step')).not.toBeInTheDocument();
+  });
+
+  // A child whose crown missed the push must still be reachable: hidden under
+  // an absent crown is hidden everywhere.
+  it('lists a child at root when its crown is not in the push', () => {
+    const orphan = childOf('s-gone99', { id: 's-orph11', title: 'crown got capped away' });
+    render(<GardenPanel isOpen onClose={vi.fn()} seedsTotal={9} seeds={[orphan, elsewhere]} />);
+
+    expect(screen.getByText('crown got capped away')).toBeInTheDocument();
   });
 
   // A crown row's whole job is saying whether its plot is draining and where it
@@ -68,12 +80,15 @@ describe('GardenPanel navigation', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Open the plot under ship the thing' }));
 
-    expect(screen.getByText('first step')).toBeInTheDocument();
     expect(screen.getByText('second step')).toBeInTheDocument();
     // Scoped: the plot is what is on screen, and the rest of the garden is not.
     expect(screen.queryByText('unrelated work')).not.toBeInTheDocument();
+    // The harvested child sits behind the closed toggle, in the plot too.
+    expect(screen.queryByText('first step')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '1 closed' }));
+    expect(screen.getByText('first step')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Whole garden' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Garden' }));
 
     expect(screen.getByText('unrelated work')).toBeInTheDocument();
   });
@@ -98,9 +113,11 @@ describe('GardenPanel navigation', () => {
     // in the listing.
     expect(screen.queryByRole('button', { name: 'Open the plot under a slice' })).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Whole garden' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Garden' }));
 
     expect(screen.getByText('the epic')).toBeInTheDocument();
+    // At root there is nowhere back to: the trail is gone.
+    expect(screen.queryByRole('button', { name: 'Garden' })).not.toBeInTheDocument();
   });
 
   // A crown that leaves the garden while the panel sits in its plot must not
@@ -109,7 +126,7 @@ describe('GardenPanel navigation', () => {
     const { rerender } = render(<GardenPanel isOpen onClose={vi.fn()} seedsTotal={4} seeds={all} />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Open the plot under ship the thing' }));
-    expect(screen.getByText('first step')).toBeInTheDocument();
+    expect(screen.getByText('second step')).toBeInTheDocument();
 
     rerender(<GardenPanel isOpen onClose={vi.fn()} seedsTotal={1} seeds={[elsewhere]} />);
 
