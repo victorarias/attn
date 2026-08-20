@@ -53,6 +53,15 @@ board now reads keys from the document while it is up and steps aside for
 anything being typed into, and a press moves the DOM focus to what was pressed.
 Any keyboard-first surface in this app has the same trap waiting.
 
+**A 3px rise can resize the drop target under the hand.** The zones are an
+absolutely-positioned overlay inside the column's scroller, and they arrive with
+a `translateY(3px)`. That transform counts toward the scroller's scrollable
+overflow, so every reveal flashed a scrollbar in and out — and its arrival
+narrowed the content box, which resized the zone the hand was already over,
+mid-gesture. The fix is one rule: while the zones are up they cover the cards, so
+the column stops scrolling. Worth remembering anywhere an overlay animates inside
+an `overflow: auto` box.
+
 ## The drag-zone model, and what it taught me about the garden
 
 Dragging a card over a column splits that column into one labelled zone per verb
@@ -175,14 +184,14 @@ grid` move from `blocked by 1` to `ready` in the same repaint: nothing told it
 to, the projection just reads differently now. Then the same verb by keyboard —
 `↑` to the card, `Enter` for its menu, `↓↓↓` to Wither, `Enter`, note, `Enter`.
 
-![kanban-dark](https://raw.githubusercontent.com/victorarias/attn-pr-evidence/2b5897062f56f5556a20d2e83795a2d80a646f5b/delegate-proto-kanban-7ebfbf30/kanban-dark.gif)
+![kanban-dark](https://raw.githubusercontent.com/victorarias/attn-pr-evidence/5007aa61af3331432a393b56dc964d87322cd431/delegate-proto-kanban-7ebfbf30/kanban-dark.gif)
 
-[Full-quality recording (mp4)](https://raw.githubusercontent.com/victorarias/attn-pr-evidence/2b5897062f56f5556a20d2e83795a2d80a646f5b/delegate-proto-kanban-7ebfbf30/kanban-dark.mp4)
+[Full-quality recording (mp4)](https://raw.githubusercontent.com/victorarias/attn-pr-evidence/5007aa61af3331432a393b56dc964d87322cd431/delegate-proto-kanban-7ebfbf30/kanban-dark.mp4)
 
 **Light** — the same board in the other theme, parking a ready seed. Parked
 grows exactly one zone, because `park` is the only verb the garden accepts
 there, and the composer says `goes on the log` because `park` refuses a reason.
 
-![kanban-light](https://raw.githubusercontent.com/victorarias/attn-pr-evidence/2b5897062f56f5556a20d2e83795a2d80a646f5b/delegate-proto-kanban-7ebfbf30/kanban-light.gif)
+![kanban-light](https://raw.githubusercontent.com/victorarias/attn-pr-evidence/5007aa61af3331432a393b56dc964d87322cd431/delegate-proto-kanban-7ebfbf30/kanban-light.gif)
 
-[Full-quality recording (mp4)](https://raw.githubusercontent.com/victorarias/attn-pr-evidence/2b5897062f56f5556a20d2e83795a2d80a646f5b/delegate-proto-kanban-7ebfbf30/kanban-light.mp4)
+[Full-quality recording (mp4)](https://raw.githubusercontent.com/victorarias/attn-pr-evidence/5007aa61af3331432a393b56dc964d87322cd431/delegate-proto-kanban-7ebfbf30/kanban-light.mp4)

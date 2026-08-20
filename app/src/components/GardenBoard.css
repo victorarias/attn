@@ -253,6 +253,14 @@
   position: relative;
 }
 
+/* While the zones are up they cover the cards, so there is nothing left to
+   scroll — and the 3px rise below is enough to flash a scrollbar into the
+   scroller, whose arrival narrows the content box and resizes the zone under
+   the hand mid-gesture. */
+.garden-board__column.is-hovered .garden-board__body {
+  overflow-y: hidden;
+}
+
 .garden-board__cards {
   display: flex;
   flex-direction: column;
