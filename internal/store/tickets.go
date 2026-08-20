@@ -1424,3 +1424,44 @@ func parseTicketTime(s string) time.Time {
 	}
 	return t
 }
+
+// StrandedTickets returns the mid-flight work the garden cutover left behind:
+// tickets that ended crashed or failed and are still on the board, newest
+// first.
+//
+// The cutover converted the unbound todo column and left in-flight tickets to
+// drain themselves. These are the ones that never drained — their session died,
+// so nobody is reporting to them and no seed mirrors onto them. They are as
+// inert as an unbound todo was, which is what makes them convertible.
+//
+// An automation run's ticket is excluded. It is daemon-internal bookkeeping —
+// continuation, retention and crash classification are keyed on it — and the
+// run already reports to a seed of its own through the mirror, so replanting it
+// would both duplicate that seed and take the key out from under the run.
+func (s *Store) StrandedTickets() ([]*Ticket, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if s.db == nil {
+		return nil, nil
+	}
+	rows, err := s.db.Query(ticketSelect+`
+		WHERE archived_at = '' AND automation_run_id IS NULL AND status IN (?, ?)
+		ORDER BY created_at DESC, id DESC`,
+		string(TicketStatusCrashed), string(TicketStatusFailed),
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var tickets []*Ticket
+	for rows.Next() {
+		ticket, err := scanTicket(rows)
+		if err != nil {
+			return nil, err
+		}
+		tickets = append(tickets, ticket)
+	}
+	return tickets, rows.Err()
+}

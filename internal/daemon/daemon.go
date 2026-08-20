@@ -1087,6 +1087,7 @@ func (d *Daemon) Start() error {
 	}
 	d.ensureGardenCollections()
 	d.convertBacklogTicketsToSeeds()
+	d.replantStrandedTickets()
 	d.ensureCrewCollections()
 	d.importCrewHomes()
 	if err := d.migrateCrewTicketIdentities(); err != nil {

@@ -1,0 +1,16 @@
+kind: fixed
+area: garden
+change: >
+  Work whose session died before the garden arrived is in the garden now. The
+  cutover moved the backlog over and left work that was already in flight on the
+  old ticket board, on the assumption it would finish itself — but a session that
+  crashes never does, so its ticket sat stamped crashed on a surface nothing
+  points at any more, reading as though the work had vanished. attn now replants
+  that work as seeds: a crashed ticket becomes a growing seed still held by the
+  session that died, so it is offered to whoever picks it up and goes straight
+  back to that session if it ever comes back; a ticket its agent reported failed
+  becomes a withered seed with the reason on it. Each seed's log says which
+  ticket it came from and carries the reconciler's verdict on what the dead agent
+  had actually gotten done, and the ticket is closed and archived behind it —
+  still readable in full with `attn ticket show`. It happens at startup and again
+  the moment a fresh death is reconciled, so nothing waits for a restart.

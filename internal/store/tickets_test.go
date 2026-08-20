@@ -650,3 +650,50 @@ func TestSubmitTicketAttachIsAtomicAndIdempotent(t *testing.T) {
 		t.Fatalf("ticket = %+v, attachments=%d", ticket, attachments)
 	}
 }
+
+// StrandedTickets is the migration's population: the mid-flight work the garden
+// cutover left on the retired board. Everything else on the board is somebody
+// else's business — a live ticket still drains itself, a closed one is over, an
+// archived one already moved, and an automation run's ticket is daemon
+// bookkeeping that already has a seed.
+func TestStrandedTicketsAreTheDeadOnesStillOnTheBoard(t *testing.T) {
+	s := New()
+	t.Cleanup(func() { _ = s.Close() })
+
+	mk := func(id string, status TicketStatus, automationRunID string) {
+		t.Helper()
+		if _, err := s.CreateTicket(Ticket{
+			ID: id, Title: id, Assignee: "sess-" + id, AutomationRunID: automationRunID,
+		}, "chief", ticketBase); err != nil {
+			t.Fatalf("CreateTicket %s: %v", id, err)
+		}
+		if status != TicketStatusTodo {
+			if _, err := s.SetTicketStatus(id, status, TicketAuthorAttn, "", ticketBase); err != nil {
+				t.Fatalf("SetTicketStatus %s: %v", id, err)
+			}
+		}
+	}
+	mk("crashed-one", TicketStatusCrashed, "")
+	mk("failed-one", TicketStatusFailed, "")
+	mk("working-one", TicketStatusWorking, "")
+	mk("todo-one", TicketStatusTodo, "")
+	mk("done-one", TicketStatusDone, "")
+	mk("crashed-automation", TicketStatusCrashed, "run-1")
+	mk("crashed-archived", TicketStatusCrashed, "")
+	if err := s.ArchiveTicket("crashed-archived", ticketBase); err != nil {
+		t.Fatalf("ArchiveTicket: %v", err)
+	}
+
+	stranded, err := s.StrandedTickets()
+	if err != nil {
+		t.Fatalf("StrandedTickets: %v", err)
+	}
+	got := make([]string, 0, len(stranded))
+	for _, ticket := range stranded {
+		got = append(got, ticket.ID)
+	}
+	want := "crashed-one failed-one"
+	if joined := strings.Join(got, " "); joined != want && joined != "failed-one crashed-one" {
+		t.Fatalf("stranded = %q, want the two dead unarchived non-automation tickets (%q)", joined, want)
+	}
+}

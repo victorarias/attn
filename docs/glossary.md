@@ -250,6 +250,14 @@ replaced it and exits nonzero. Three things survive, on purpose:
 Unbound backlog todos were converted to seeds at the cutover, each carrying its
 description as the seed's body and a log note naming the ticket it came from.
 
+A ticket whose session **died** converts the same way, and for the same reason:
+nobody is left to move it, so it is as inert as an unbound todo was. The daemon
+replants it at every boot and again as soon as a death is reconciled — a crashed
+ticket becomes a growing seed still tended by the session that died (dead, so the
+seed is ready for anyone; alive again, and the hold comes back with it), a failed
+one becomes a withered seed carrying the reason. Both carry the reconciler's
+verdict on the seed's log, and the ticket is closed and archived behind them.
+
 ## The raw tier
 
 Machine-internal capture under `.attn/raw/`, the keeper's **input**, never
