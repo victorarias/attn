@@ -8,7 +8,7 @@
 // does — a broadcast about the projects directory has no business wiping a
 // half-typed reviewer model.
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import type { SavedFlash } from './useSavedFlash';
 import type { SessionAgent } from '../types/sessionAgent';
 
@@ -52,11 +52,18 @@ export function useSettingDraft({
   savedFlash,
 }: SettingDraftOptions): SettingDraft {
   const [value, setValue] = useState(actual);
+  const [seededFrom, setSeededFrom] = useState<string | null>(active ? actual : null);
 
-  useEffect(() => {
-    if (!active) return;
+  // Reseeding during render rather than from an effect: React re-runs the
+  // component before painting, so the field never shows a stale value for a
+  // frame. Closing sets the mark to null, which is what makes reopening always
+  // reseed and drop a half-typed draft.
+  if (active && seededFrom !== actual) {
+    setSeededFrom(actual);
     setValue(actual);
-  }, [active, actual]);
+  } else if (!active && seededFrom !== null) {
+    setSeededFrom(null);
+  }
 
   const commit = useCallback(() => {
     const next = trim ? value.trim() : value;
@@ -110,11 +117,16 @@ export function useAgentSettingDrafts({
   savedFlash,
 }: AgentSettingDraftOptions): AgentSettingDraft {
   const [values, setValues] = useState<AgentValues>(actual);
+  const [seededFrom, setSeededFrom] = useState<AgentValues | null>(active ? actual : null);
 
-  useEffect(() => {
-    if (!active) return;
+  // Same reseed rule as useSettingDraft, keyed on the memoized per-agent object
+  // the caller passes rather than on a string.
+  if (active && seededFrom !== actual) {
+    setSeededFrom(actual);
     setValues(actual);
-  }, [active, actual]);
+  } else if (!active && seededFrom !== null) {
+    setSeededFrom(null);
+  }
 
   const value = useCallback((agent: SessionAgent) => values[agent] || '', [values]);
 

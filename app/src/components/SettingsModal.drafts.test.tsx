@@ -93,6 +93,20 @@ describe('SettingsModal drafts', () => {
     });
   });
 
+  it('drops a half-typed field when the modal is closed and opened again', async () => {
+    const { rerender } = renderModal({ settings: { projects_directory: '/Users/you/code' } });
+    fireEvent.click(screen.getByTestId('settings-nav-workspace'));
+
+    const input = await screen.findByTestId('settings-projects-directory-input');
+    fireEvent.change(input, { target: { value: '/Users/you/half-typed' } });
+
+    rerender({ isOpen: false });
+    rerender({ isOpen: true });
+
+    expect(await screen.findByTestId('settings-projects-directory-input'))
+      .toHaveValue('/Users/you/code');
+  });
+
   // The effort <select> is whole the moment it changes, so it writes without a
   // blur — and raises the mark on the model input it shares a row with rather
   // than a second one of its own.
