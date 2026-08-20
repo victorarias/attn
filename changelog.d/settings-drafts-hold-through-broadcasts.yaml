@@ -1,0 +1,6 @@
+kind: fixed
+area: app
+change: >
+  Typing in a settings field is no longer wiped when some unrelated setting
+  changes underneath you. Each field now reseeds from its own saved value
+  rather than every field reseeding whenever anything is saved.
