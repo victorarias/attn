@@ -306,8 +306,8 @@ func TestGardenAwarenessGuidanceCarriesTheRules(t *testing.T) {
 		"attn seed note",
 		"attn seed wither",
 		"what it fell out of",
-		"Planting is not a detour",
-		"leave the garden true",
+		"small and sits right where you already are",
+		"harvest what is finished",
 		"attn seed guide",
 	} {
 		if !strings.Contains(garden, phrase) {

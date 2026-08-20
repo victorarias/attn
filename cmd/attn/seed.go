@@ -166,9 +166,9 @@ commands:
         how many more are here.
 
   guide
-        print the craft of keeping the garden worth reading: writing a body,
-        where a seed belongs, edit versus replant, a seed whose tender is
-        gone, and how to pick up further work.
+        print the craft behind the rules: writing a body, what "done" is per
+        deliverable type, where a seed belongs, edit versus replant, a seed
+        whose tender is gone, and how to pick up further work.
 
   export <id> [--out <path>] [--json]
         write the seed's body to markdown, stamped as generated from the seed —

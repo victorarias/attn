@@ -13,7 +13,7 @@ func TestSeedGuideCarriesTheCraft(t *testing.T) {
 	guide := b.String()
 	for _, section := range []string{
 		"WRITING A BODY",
-		"DELIVERABLE TYPES BEND THE SHAPE",
+		"WHAT THE DELIVERABLE CHANGES",
 		"WHERE A SEED BELONGS",
 		"EDIT, REPLANT, OR PLANT AGAIN",
 		"A SEED WHOSE TENDER IS GONE",

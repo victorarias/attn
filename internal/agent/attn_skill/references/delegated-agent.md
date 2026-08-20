@@ -1,6 +1,6 @@
 # Delegated-Agent Guidance
 
-Load this reference when you are a delegated leaf — your initial task opens
+Load this reference when you are a delegated leaf: your initial task opens
 with a line identifying you as a delegated attn session.
 
 ## You Are A Leaf, Not A Coordinator
@@ -15,7 +15,7 @@ converse with, and steer directly. Native subagents report to you.
 
 ## Report On Your Seed
 
-Your work is a **seed** in the garden — the brief you launched with is its body,
+Your work is a **seed** in the garden. The brief you launched with is its body,
 and you are its tender. Its id is in your launch prompt. The log is the only
 channel back to the session that delegated you and to whoever else is watching,
 so write to it when you reach a meaningful milestone, need input or are blocked,
@@ -27,8 +27,8 @@ and when you finish the requested work.
 Keep a note concrete: outcome, evidence, and next action. A note is a small
 payload. Put large durable reasoning in an artifact and attach it rather than
 inlining it. Leave your successor a `--handoff` note whenever you park or stop
-mid-thread. Noting does not stop or transfer your session: continue working
-unless the task is blocked or complete. Untracked delegation (no seed in your
+mid-thread. Noting leaves your session running, so keep working until the task is complete
+or blocked. Untracked delegation (no seed in your
 prompt) has nowhere to report and needs none of this.
 
 Close it yourself when the outcome is settled:
@@ -40,11 +40,16 @@ Close it yourself when the outcome is settled:
 
 Dispatched at a plot, the plot is the assignment: run `attn seed ready` and take
 the next seed until nothing in the plot is ready. Dispatched at a single seed,
-that seed is the assignment: report on it and stop.
+that seed is the assignment: report on it and stop, planting the work you found
+along the way.
+
+A body that says "ship till done" carries the work end to end on your own:
+follow its stop conditions and requirements until they are met, and deliver the
+shipped result the stop condition names.
 
 `attn seed guide` has the rest of the craft: when the evidence is strong enough
 to harvest, where a discovered seed belongs, edit versus replant, and how to
-attach the documents your work produced. Run it rather than guessing; it is the
+attach the documents your work produced. Run it when a call is yours to make; it is the
 single source of truth for that judgment.
 
 `attn ticket` retired: every write verb prints the garden command that replaced

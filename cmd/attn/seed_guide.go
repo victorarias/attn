@@ -57,17 +57,19 @@ WRITING A BODY
   The log records the history of the work as it happens. Write the work into
   the body and the history into the log.
 
-DELIVERABLE TYPES BEND THE SHAPE
+WHAT THE DELIVERABLE CHANGES
 
   How much to prescribe, what "done" is, and who reviews all move with the kind
   of work.
 
-  feature / code    done: behavior exists, tests green, PR up. Attach the plan
-                    while it is active. Prescribe outcome and constraints, not
+  feature / code    done: whatever the stop condition says, from behavior
+                    exists and tests green through a PR up, merged, or
+                    released. Attach the plan while it is active, and
+                    prescribe the outcome and the constraints rather than
                     the implementation.
   bug fix           done: root cause found, then fixed, with a regression test.
-                    Give symptom and repro only; prescribing the fix invites
-                    symptom-patching.
+                    Give the symptom and the repro, and let the tender find
+                    the cause.
   research          done: a sourced answer feeding a decision. Frame the
                     question, not a task. The answer is the deliverable.
   docs / prose      done: the durable point made, the old superseded. Say the
@@ -87,11 +89,11 @@ WHERE A SEED BELONGS
   Under the plot you are working in, when it is part of that plan and someone
   reading the crown would expect to see it: plant it with ` + "`--part-of <crown>`" + `.
 
-  Freestanding, when it is real work that simply is not this plan. Say what it
-  fell out of and leave it in the garden.
+  Freestanding, when it is real work that belongs outside this plan. Say what
+  it fell out of and leave it in the garden.
 
-  Not a seed at all, when it is one fact about work already planted. That goes
-  on the log of the seed it belongs to.
+  On the log of a seed that already covers it, when what you have is one fact
+  about work already planted.
 
 EDIT, REPLANT, OR PLANT AGAIN
 
@@ -99,18 +101,18 @@ EDIT, REPLANT, OR PLANT AGAIN
   surfaced, scope narrowed. ` + "`attn seed edit`" + ` leaves the state and the claim
   alone.
 
-  Plant a new seed when the work is different work. A body rewritten into
-  something its log no longer describes loses the thread.
+  Plant a new seed when the work is different work, so its log describes it
+  from the first entry.
 
   Replant when a closed seed turns out unfinished. ` + "`attn seed replant`" + ` reopens
   it, and a closed seed reopens before it moves again.
 
 A SEED WHOSE TENDER IS GONE
 
-  A claim held by a session that is no longer running does not hold the seed:
-  it comes back as ready and tending it succeeds. Read the log and the freshest
-  handoff before you touch the work, since the previous tender may have left
-  the branch, the PR, or the failure half-done.
+  A claim held by a session that is no longer running lapses: the seed comes
+  back as ready and tending it succeeds. Read the log and the freshest handoff
+  first, so you know what the previous tender left behind on the branch, the
+  PR, or the failing test.
 
 PICKING UP FURTHER WORK
 
@@ -118,19 +120,20 @@ PICKING UP FURTHER WORK
   ` + "`attn seed ready`" + ` and take the next one, until nothing in the plot is ready.
 
   Dispatched at a single seed: that seed is the assignment. Report on it and
-  stop. Work you found along the way is planted, not picked up.
+  stop. Plant the work you found along the way and leave it in the garden.
 
 ARTIFACTS
 
-  A document is associated with a seed, never moved into it:
+  A seed records an association to a document, and the document stays where
+  it lives:
 
     attn seed attach <id> --path <file.md> [--repo <repository>]
     attn seed attach <id> --notebook <document-id>
     attn seed attach <id> --url <url>
     attn seed detach <id> --path <file.md>
 
-  Where the document lives does not change. A committed plan stays canonical in
-  Git; an untracked staging file belongs in the Notebook. Edit only the
+  A committed plan stays canonical in Git; an untracked staging file belongs in
+  the Notebook. Edit only the
   canonical source, and note a meaningful edit, rename, or deletion on the seed
   so whoever reads it next knows to re-read it.
 
