@@ -16,11 +16,11 @@ test.describe('Settings visual harness', () => {
       await startDaemonWithPRs();
       await page.goto('/');
 
-      await expect(page.locator('.dashboard')).toBeVisible({ timeout: 5000 });
+      await expect(page.locator('.dashboard')).toBeVisible();
       await page.getByTestId('settings-button').click();
 
       const modal = page.getByTestId('settings-modal');
-      await expect(modal).toBeVisible({ timeout: 2000 });
+      await expect(modal).toBeVisible();
 
       const modalBox = await modal.boundingBox();
       expect(modalBox?.width ?? 0).toBeGreaterThan(Math.min(300, viewport.width - 80));

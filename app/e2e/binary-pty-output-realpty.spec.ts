@@ -103,13 +103,13 @@ test.describe('Binary PTY output transport', () => {
     expect(spawnResult.success, JSON.stringify(spawnResult)).toBe(true);
 
     await page.locator(`[data-testid="session-${sessionId}"]`).click();
-    await expect(page.locator('.terminal-wrapper.active')).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('.terminal-wrapper.active')).toBeVisible();
 
     // Wait for live PTY output (shell prompt) to flow to the pane.
     await page.waitForFunction((id) => {
       const events = (window as any).__TEST_PTY_EVENTS as Array<{ event: string; id?: string }> | undefined;
       return Boolean(events?.some((evt) => evt.event === 'data' && evt.id === id));
-    }, sessionId, { timeout: 5000 });
+    }, sessionId, { timeout: 15000 });
 
     // The transport assertion: live output for a local session came down as
     // binary frames (recorded with source 'binary'), and none of it as the

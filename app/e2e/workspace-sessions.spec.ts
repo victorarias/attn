@@ -79,11 +79,11 @@ test.describe('Workspace Sessions', () => {
       { id: 'b2', label: 'beta-two', paneId: 'pane-b2', cwd: '/tmp/workspace-b' },
     ], 'pane-b2');
 
-    await expect(page.locator('[data-testid="sidebar-workspace-workspace-a"]')).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('[data-testid="sidebar-workspace-workspace-a"]')).toBeVisible();
     await expect(page.locator('[data-testid="sidebar-workspace-workspace-b"]')).toBeVisible();
 
     await page.locator('[data-testid="session-a1"]').click();
-    await expect(page.locator('[data-session-terminal-workspace="workspace-a"]')).toBeVisible({ timeout: 2000 });
+    await expect(page.locator('[data-session-terminal-workspace="workspace-a"]')).toBeVisible();
 
     await page.locator('[data-testid="sidebar-session-a2"]').click();
     await expect(page.locator('[data-testid="sidebar-workspace-workspace-a"]')).toHaveClass(/selected/);
@@ -122,16 +122,16 @@ test.describe('Workspace Sessions', () => {
     ]);
 
     await page.locator('[data-testid="session-shortcut-a"]').click();
-    await expect(page.locator('.terminal-wrapper.active [data-pane-id="pane-shortcut-a"]')).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('.terminal-wrapper.active [data-pane-id="pane-shortcut-a"]')).toBeVisible();
 
     await page.keyboard.press('Meta+n');
-    await expect(page.locator('.location-picker-overlay')).toBeVisible({ timeout: 2000 });
+    await expect(page.locator('.location-picker-overlay')).toBeVisible();
     await expect(page.locator('.picker-title')).toHaveText('New Session Location');
     await page.keyboard.press('Escape');
-    await expect(page.locator('.location-picker-overlay')).toHaveCount(0, { timeout: 2000 });
+    await expect(page.locator('.location-picker-overlay')).toHaveCount(0);
 
     await page.keyboard.press('Meta+t');
-    await expect(page.locator('.location-picker-overlay')).toBeVisible({ timeout: 2000 });
+    await expect(page.locator('.location-picker-overlay')).toBeVisible();
     await expect(page.locator('.picker-title')).toHaveText('New Workspace Location');
   });
 
@@ -147,7 +147,7 @@ test.describe('Workspace Sessions', () => {
 
     await page.locator('[data-testid="session-focus-agent"]').click();
     const activeWorkspace = page.locator('[data-session-terminal-workspace="workspace-focus"]');
-    await expect(activeWorkspace).toBeVisible({ timeout: 5000 });
+    await expect(activeWorkspace).toBeVisible();
     await expect(page.locator('[data-testid="sidebar-session-focus-agent"]')).toHaveClass(/selected/);
     await expect(activeWorkspace).toHaveAttribute('data-active-pane-id', 'pane-focus-agent');
 

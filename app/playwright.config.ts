@@ -12,6 +12,15 @@ export default defineConfig({
   retries: 0,
   workers: 1,
   reporter: 'list',
+  // One floor for every assertion, because a passing assertion returns the
+  // moment its condition holds — the budget is only ever spent on the failure
+  // path, so a tight one buys nothing and a generous one costs nothing. The
+  // number is a tripwire: the slowest whole test here runs 2.9s locally and CI
+  // runs 3-4x slower, so no healthy assertion reaches 15s, and it stays under
+  // the 30s test timeout so a blown assertion reports itself rather than
+  // surfacing as a timed-out test. `retries: 0` means a budget a healthy CI run
+  // can touch is a red build, never a silent retry.
+  expect: { timeout: 15_000 },
   use: {
     baseURL: `http://localhost:${TEST_VITE_PORT}`,
     trace: 'on-first-retry',

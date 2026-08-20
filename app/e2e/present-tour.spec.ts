@@ -97,6 +97,10 @@ async function findContainerByTitle(page: Page, path: string): Promise<Locator |
  * (observed as `element was detached from the DOM, retrying` until the test
  * times out). Retry the whole hover→click gesture until a new draft form
  * actually appears, skipping the click if a prior attempt already landed.
+ *
+ * The budgets inside the block are deliberately short and do not follow the
+ * config's assertion floor: here a timeout is the detector that ends a failed
+ * attempt so the next one can start, and `toPass` is the real bound.
  */
 async function openDraftViaGutter(container: Locator, line: Locator) {
   const page = container.page();

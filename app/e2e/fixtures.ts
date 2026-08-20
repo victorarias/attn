@@ -672,7 +672,6 @@ export async function waitForMockPtyBanner(
     .poll(
       async () => page.evaluate((id) => window.__TEST_GET_SESSION_PANE_TEXT?.(id) ?? '', sessionId),
       {
-        timeout: 5000,
         message:
           `mock pty banner never reached the pane for ${sessionId}; the session did not `
           + `attach, or startup output is being dropped before the pane registers`,

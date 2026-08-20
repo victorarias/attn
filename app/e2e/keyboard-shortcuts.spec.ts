@@ -75,15 +75,15 @@ test.describe('Keyboard Shortcuts', () => {
       await page.waitForSelector('.dashboard');
 
       await createSession(page, daemon, { id: 's-new', label: 'Root', state: 'working', cwd: '/tmp/test/new-session' });
-      await expect(page.locator('[data-testid="session-s-new"]')).toBeVisible({ timeout: 5000 });
+      await expect(page.locator('[data-testid="session-s-new"]')).toBeVisible();
 
       await page.locator('[data-testid="session-s-new"]').click();
-      await expect(page.locator('[data-session-terminal-workspace="workspace-s-new"]')).toBeVisible({ timeout: 2000 });
+      await expect(page.locator('[data-session-terminal-workspace="workspace-s-new"]')).toBeVisible();
 
       await page.keyboard.press('Meta+n');
 
       const selectedWorkspaceSessions = page.locator('.workspace-group.selected .session-item');
-      await expect(page.locator('.location-picker-overlay')).toBeVisible({ timeout: 2000 });
+      await expect(page.locator('.location-picker-overlay')).toBeVisible();
       await expect(page.locator('.picker-title')).toHaveText('New Session Location');
       await expect(selectedWorkspaceSessions).toHaveCount(1);
       await expect(page.locator('.terminal-wrapper.active [data-pane-kind="agent"]')).toHaveCount(1);
@@ -95,18 +95,18 @@ test.describe('Keyboard Shortcuts', () => {
       await page.waitForSelector('.dashboard');
 
       await createSession(page, daemon, { id: 's-shell', label: 'Root', state: 'working', cwd: '/tmp/test/shell-session' });
-      await expect(page.locator('[data-testid="session-s-shell"]')).toBeVisible({ timeout: 5000 });
+      await expect(page.locator('[data-testid="session-s-shell"]')).toBeVisible();
 
       await page.locator('[data-testid="session-s-shell"]').click();
-      await expect(page.locator('[data-session-terminal-workspace="workspace-s-shell"]')).toBeVisible({ timeout: 2000 });
+      await expect(page.locator('[data-session-terminal-workspace="workspace-s-shell"]')).toBeVisible();
       await page.locator('.terminal-wrapper.active .terminal-container').click();
 
       await page.keyboard.press('Meta+d');
 
       const selectedWorkspaceSessions = page.locator('.workspace-group.selected .session-item');
-      await expect(selectedWorkspaceSessions).toHaveCount(2, { timeout: 5000 });
+      await expect(selectedWorkspaceSessions).toHaveCount(2);
       await expect(page.locator('.workspace-group.selected')).toContainText('shell');
-      await expect(page.locator('.terminal-wrapper.active [data-pane-kind="agent"]')).toHaveCount(2, { timeout: 5000 });
+      await expect(page.locator('.terminal-wrapper.active [data-pane-kind="agent"]')).toHaveCount(2);
     });
 
     test('⌘⇧D creates a session-backed horizontal shell split in the current workspace', async ({ page, daemon }) => {
@@ -115,19 +115,19 @@ test.describe('Keyboard Shortcuts', () => {
       await page.waitForSelector('.dashboard');
 
       await createSession(page, daemon, { id: 's-horizontal', label: 'Root', state: 'working', cwd: '/tmp/test/horizontal-session' });
-      await expect(page.locator('[data-testid="session-s-horizontal"]')).toBeVisible({ timeout: 5000 });
+      await expect(page.locator('[data-testid="session-s-horizontal"]')).toBeVisible();
 
       await page.locator('[data-testid="session-s-horizontal"]').click();
-      await expect(page.locator('[data-session-terminal-workspace="workspace-s-horizontal"]')).toBeVisible({ timeout: 2000 });
+      await expect(page.locator('[data-session-terminal-workspace="workspace-s-horizontal"]')).toBeVisible();
       await page.locator('.terminal-wrapper.active .terminal-container').click();
 
       await page.keyboard.press('Meta+Shift+d');
 
       const selectedWorkspaceSessions = page.locator('.workspace-group.selected .session-item');
-      await expect(selectedWorkspaceSessions).toHaveCount(2, { timeout: 5000 });
+      await expect(selectedWorkspaceSessions).toHaveCount(2);
       await expect(page.locator('.workspace-group.selected')).toContainText('shell');
-      await expect(page.locator('.terminal-wrapper.active [data-pane-kind="agent"]')).toHaveCount(2, { timeout: 5000 });
-      await expect(page.locator('.terminal-wrapper.active [data-split-direction="horizontal"]')).toHaveCount(1, { timeout: 5000 });
+      await expect(page.locator('.terminal-wrapper.active [data-pane-kind="agent"]')).toHaveCount(2);
+      await expect(page.locator('.terminal-wrapper.active [data-split-direction="horizontal"]')).toHaveCount(1);
     });
 
     test('⌘⇧N creates a picked session on a horizontal split in the current workspace', async ({ page, daemon }) => {
@@ -136,13 +136,13 @@ test.describe('Keyboard Shortcuts', () => {
       await page.waitForSelector('.dashboard');
 
       await createSession(page, daemon, { id: 's-picked-horizontal', label: 'Root', state: 'working', cwd: '/tmp/test/picked-horizontal-session' });
-      await expect(page.locator('[data-testid="session-s-picked-horizontal"]')).toBeVisible({ timeout: 5000 });
+      await expect(page.locator('[data-testid="session-s-picked-horizontal"]')).toBeVisible();
 
       await page.locator('[data-testid="session-s-picked-horizontal"]').click();
-      await expect(page.locator('[data-session-terminal-workspace="workspace-s-picked-horizontal"]')).toBeVisible({ timeout: 2000 });
+      await expect(page.locator('[data-session-terminal-workspace="workspace-s-picked-horizontal"]')).toBeVisible();
 
       await page.keyboard.press('Meta+Shift+n');
-      await expect(page.locator('.location-picker-overlay')).toBeVisible({ timeout: 2000 });
+      await expect(page.locator('.location-picker-overlay')).toBeVisible();
       await expect(page.locator('.picker-title')).toHaveText('New Session Location');
       await expect(page.locator('.workspace-group.selected .session-item')).toHaveCount(1);
 
@@ -153,10 +153,10 @@ test.describe('Keyboard Shortcuts', () => {
       await page.keyboard.press('Enter');
 
       const selectedWorkspaceSessions = page.locator('.workspace-group.selected .session-item');
-      await expect(selectedWorkspaceSessions).toHaveCount(2, { timeout: 10000 });
+      await expect(selectedWorkspaceSessions).toHaveCount(2);
       await expect(page.locator('.workspace-group.selected')).toContainText('tmp');
-      await expect(page.locator('.terminal-wrapper.active [data-pane-kind="agent"]')).toHaveCount(2, { timeout: 10000 });
-      await expect(page.locator('.terminal-wrapper.active [data-split-direction="horizontal"]')).toHaveCount(1, { timeout: 5000 });
+      await expect(page.locator('.terminal-wrapper.active [data-pane-kind="agent"]')).toHaveCount(2);
+      await expect(page.locator('.terminal-wrapper.active [data-split-direction="horizontal"]')).toHaveCount(1);
     });
 
     test('⌘⇧Z zooms toward the active pane without hiding the others', async ({ page, daemon }) => {
@@ -165,10 +165,10 @@ test.describe('Keyboard Shortcuts', () => {
       await page.waitForSelector('.dashboard');
 
       await createSession(page, daemon, { id: 's-zoom', label: 'Zoom', state: 'working', cwd: '/tmp/test/zoom' });
-      await expect(page.locator('[data-testid="session-s-zoom"]')).toBeVisible({ timeout: 5000 });
+      await expect(page.locator('[data-testid="session-s-zoom"]')).toBeVisible();
 
       await page.locator('[data-testid="session-s-zoom"]').click();
-      await expect(page.locator('.terminal-wrapper.active')).toBeVisible({ timeout: 2000 });
+      await expect(page.locator('.terminal-wrapper.active')).toBeVisible();
 
       await page.evaluate(() => {
         window.__TEST_SET_SESSION_WORKSPACE?.('s-zoom', {
@@ -188,7 +188,7 @@ test.describe('Keyboard Shortcuts', () => {
           },
         }, 'pane-shell-1');
       });
-      await expect(page.locator('[data-pane-session-id="s-zoom"][data-pane-id="pane-shell-1"]')).toBeVisible({ timeout: 5000 });
+      await expect(page.locator('[data-pane-session-id="s-zoom"][data-pane-id="pane-shell-1"]')).toBeVisible();
 
       const workspace = page.locator('[data-session-terminal-workspace="workspace-s-zoom"]');
       const mainPane = page.locator('[data-pane-session-id="s-zoom"][data-pane-id="pane-session"]');
@@ -207,13 +207,13 @@ test.describe('Keyboard Shortcuts', () => {
 
       await utilityPane.click();
       await page.keyboard.press('Meta+Shift+z');
-      await expect(workspace).toHaveAttribute('data-zoomed-pane-id', 'pane-shell-1', { timeout: 2000 });
-      await expect(rootSplit).toHaveAttribute('data-split-ratio', '0.240', { timeout: 2000 });
+      await expect(workspace).toHaveAttribute('data-zoomed-pane-id', 'pane-shell-1');
+      await expect(rootSplit).toHaveAttribute('data-split-ratio', '0.240');
       await expect(zoomHint).toHaveAttribute('data-active', 'true');
 
-      await expect.poll(async () => (await utilityPane.boundingBox())?.width ?? 0, { timeout: 2000 })
+      await expect.poll(async () => (await utilityPane.boundingBox())?.width ?? 0)
         .toBeGreaterThan(utilityBefore!.width);
-      await expect.poll(async () => (await mainPane.boundingBox())?.width ?? 0, { timeout: 2000 })
+      await expect.poll(async () => (await mainPane.boundingBox())?.width ?? 0)
         .toBeLessThan(mainBefore!.width);
 
       const mainAfterZoom = await mainPane.boundingBox();
@@ -226,13 +226,13 @@ test.describe('Keyboard Shortcuts', () => {
       await expect(utilityPane).toBeVisible();
 
       await mainPane.click();
-      await expect(workspace).toHaveAttribute('data-zoomed-pane-id', 'pane-session', { timeout: 2000 });
-      await expect(rootSplit).toHaveAttribute('data-split-ratio', '0.760', { timeout: 2000 });
+      await expect(workspace).toHaveAttribute('data-zoomed-pane-id', 'pane-session');
+      await expect(rootSplit).toHaveAttribute('data-split-ratio', '0.760');
       await expect(zoomHint).toHaveAttribute('data-active', 'true');
 
-      await expect.poll(async () => (await mainPane.boundingBox())?.width ?? 0, { timeout: 2000 })
+      await expect.poll(async () => (await mainPane.boundingBox())?.width ?? 0)
         .toBeGreaterThan(mainAfterZoom!.width);
-      await expect.poll(async () => (await utilityPane.boundingBox())?.width ?? 0, { timeout: 2000 })
+      await expect.poll(async () => (await utilityPane.boundingBox())?.width ?? 0)
         .toBeLessThan(utilityAfterZoom!.width);
 
       const mainRetargeted = await mainPane.boundingBox();
@@ -302,7 +302,7 @@ test.describe('Keyboard Shortcuts', () => {
       await page.keyboard.press('Meta+e');
       await expect(page.getByTestId('chord-leader-hud')).toBeVisible();
       // No follow key: the HUD disappears once the leader times out.
-      await expect(page.getByTestId('chord-leader-hud')).not.toBeVisible({ timeout: 2000 });
+      await expect(page.getByTestId('chord-leader-hud')).not.toBeVisible();
       await expect(page.getByRole('dialog', { name: 'Action menu' })).not.toBeVisible();
     });
   });
@@ -335,7 +335,7 @@ test.describe('Keyboard Shortcuts', () => {
       await page.keyboard.press('Escape');
       await page.keyboard.press('Meta+k');
       await page.getByText('Open attention drawer').click();
-      await expect(page.locator('.side-panel-shell.is-open .attention-drawer .attention-drawer-panel')).toBeVisible({ timeout: 2000 });
+      await expect(page.locator('.side-panel-shell.is-open .attention-drawer .attention-drawer-panel')).toBeVisible();
     });
   });
 
@@ -347,19 +347,19 @@ test.describe('Keyboard Shortcuts', () => {
 
       // Create and select a session to enter terminal view
       await createSession(page, daemon, { id: 's1', label: 'Test', state: 'working', cwd: '/tmp/test/s1' });
-      await expect(page.locator('[data-testid="session-s1"]')).toBeVisible({ timeout: 5000 });
+      await expect(page.locator('[data-testid="session-s1"]')).toBeVisible();
 
       // Click to select (enters terminal view)
       await page.locator('[data-testid="session-s1"]').click();
 
       // Should show terminal area
-      await expect(page.locator('.terminal-wrapper.active')).toBeVisible({ timeout: 2000 });
+      await expect(page.locator('.terminal-wrapper.active')).toBeVisible();
 
       // ⌘G should return to dashboard
       await page.keyboard.press('Meta+g');
 
       // Dashboard should be visible, no active session
-      await expect(page.locator('.dashboard')).toBeVisible({ timeout: 2000 });
+      await expect(page.locator('.dashboard')).toBeVisible();
     });
 
     test('Escape goes to dashboard', async ({ page, daemon }) => {
@@ -368,14 +368,14 @@ test.describe('Keyboard Shortcuts', () => {
       await page.waitForSelector('.dashboard');
 
       await createSession(page, daemon, { id: 's1', label: 'Test', state: 'working', cwd: '/tmp/test/s1' });
-      await expect(page.locator('[data-testid="session-s1"]')).toBeVisible({ timeout: 5000 });
+      await expect(page.locator('[data-testid="session-s1"]')).toBeVisible();
 
       await page.locator('[data-testid="session-s1"]').click();
-      await expect(page.locator('.terminal-wrapper.active')).toBeVisible({ timeout: 2000 });
+      await expect(page.locator('.terminal-wrapper.active')).toBeVisible();
 
       // Escape should return to dashboard
       await page.keyboard.press('Escape');
-      await expect(page.locator('.dashboard')).toBeVisible({ timeout: 2000 });
+      await expect(page.locator('.dashboard')).toBeVisible();
     });
   });
 
@@ -390,16 +390,16 @@ test.describe('Keyboard Shortcuts', () => {
       await createSession(page, daemon, { id: 's2', label: 'Second', state: 'working', cwd: '/tmp/test/s2' });
       await createSession(page, daemon, { id: 's3', label: 'Third', state: 'working', cwd: '/tmp/test/s3' });
 
-      await expect(page.locator('[data-testid="session-s1"]')).toBeVisible({ timeout: 5000 });
+      await expect(page.locator('[data-testid="session-s1"]')).toBeVisible();
 
       // Switching from a focused Ghostty terminal must not forward the shortcut's digit.
       await page.locator('[data-testid="session-s1"]').click();
       const firstTerminal = page.locator('[data-pane-session-id="s1"][data-pane-kind="agent"] .terminal-container');
-      await expect(firstTerminal).toBeVisible({ timeout: 5000 });
+      await expect(firstTerminal).toBeVisible();
       await firstTerminal.focus();
 
       await page.keyboard.press('Meta+2');
-      await expect(page.locator('[data-session-terminal-workspace="workspace-s2"]')).toBeVisible({ timeout: 2000 });
+      await expect(page.locator('[data-session-terminal-workspace="workspace-s2"]')).toBeVisible();
       expect(await page.evaluate(() => (
         window.__TEST_GET_SESSION_INPUT_EVENTS?.('s1') ?? []
       ).filter((event) => event.event === 'send_to_pty').length)).toBe(0);
@@ -409,7 +409,7 @@ test.describe('Keyboard Shortcuts', () => {
 
       // ⌘1 should select first session
       await page.keyboard.press('Meta+1');
-      await expect(page.locator('.terminal-wrapper.active')).toBeVisible({ timeout: 2000 });
+      await expect(page.locator('.terminal-wrapper.active')).toBeVisible();
     });
 
     test('⌘↑/⌘↓ navigates between sessions', async ({ page, daemon }) => {
@@ -420,11 +420,11 @@ test.describe('Keyboard Shortcuts', () => {
       await createSession(page, daemon, { id: 's1', label: 'First', state: 'working', cwd: '/tmp/test/s1' });
       await createSession(page, daemon, { id: 's2', label: 'Second', state: 'working', cwd: '/tmp/test/s2' });
 
-      await expect(page.locator('[data-testid="session-s1"]')).toBeVisible({ timeout: 5000 });
+      await expect(page.locator('[data-testid="session-s1"]')).toBeVisible();
 
       // Select first session
       await page.keyboard.press('Meta+1');
-      await expect(page.locator('.terminal-wrapper.active')).toBeVisible({ timeout: 2000 });
+      await expect(page.locator('.terminal-wrapper.active')).toBeVisible();
 
       // ⌘↓ should go to next session
       await page.keyboard.press('Meta+ArrowDown');
@@ -444,7 +444,7 @@ test.describe('Keyboard Shortcuts', () => {
       await createSession(page, daemon, { id: 's1', label: 'Working', state: 'working', cwd: '/tmp/test/s1' });
       await createSession(page, daemon, { id: 's2', label: 'Waiting', state: 'waiting_input', cwd: '/tmp/test/s2' });
 
-      await expect(page.locator('[data-testid="session-s1"]')).toBeVisible({ timeout: 5000 });
+      await expect(page.locator('[data-testid="session-s1"]')).toBeVisible();
 
       // Dispatch directly so the browser does not consume Cmd+J as its own
       // shortcut before the application shortcut listener receives it.
@@ -458,7 +458,7 @@ test.describe('Keyboard Shortcuts', () => {
       });
 
       // Should be viewing a terminal (the waiting session)
-      await expect(page.locator('.terminal-wrapper.active')).toBeVisible({ timeout: 2000 });
+      await expect(page.locator('.terminal-wrapper.active')).toBeVisible();
     });
   });
 
@@ -480,14 +480,14 @@ test.describe('Keyboard Shortcuts', () => {
         branch: 'feature/cleanup',
       });
 
-      await expect(page.locator('[data-testid="session-s1"]')).toBeVisible({ timeout: 5000 });
+      await expect(page.locator('[data-testid="session-s1"]')).toBeVisible();
       await page.locator('[data-testid="session-s1"]').click();
-      await expect(page.locator('.terminal-wrapper.active')).toBeVisible({ timeout: 2000 });
+      await expect(page.locator('.terminal-wrapper.active')).toBeVisible();
 
       await page.keyboard.press('Meta+w');
 
       const dialog = page.locator('.worktree-cleanup-prompt .cleanup-content');
-      await expect(dialog).toBeVisible({ timeout: 2000 });
+      await expect(dialog).toBeVisible();
 
       // In headless CI document.hasFocus() returns false, so two problems arise:
       // 1. page.keyboard.press() routes via the OS focus chain, which may not
@@ -530,22 +530,22 @@ test.describe('Keyboard Shortcuts', () => {
 
       // Sidebar is only visible in session view, so create a session first
       await createSession(page, daemon, { id: 's1', label: 'Test', state: 'working', cwd: '/tmp/test/s1' });
-      await expect(page.locator('[data-testid="session-s1"]')).toBeVisible({ timeout: 5000 });
+      await expect(page.locator('[data-testid="session-s1"]')).toBeVisible();
 
       // Click session to enter session view
       await page.locator('[data-testid="session-s1"]').click();
-      await expect(page.locator('.terminal-wrapper.active')).toBeVisible({ timeout: 2000 });
+      await expect(page.locator('.terminal-wrapper.active')).toBeVisible();
 
       // Now sidebar should be visible and expanded
-      await expect(page.locator('.sidebar:not(.collapsed)')).toBeVisible({ timeout: 2000 });
+      await expect(page.locator('.sidebar:not(.collapsed)')).toBeVisible();
 
       // ⌘⇧B should collapse sidebar
       await page.keyboard.press('Meta+Shift+B');
-      await expect(page.locator('.sidebar.collapsed')).toBeVisible({ timeout: 2000 });
+      await expect(page.locator('.sidebar.collapsed')).toBeVisible();
 
       // ⌘⇧B should expand sidebar
       await page.keyboard.press('Meta+Shift+B');
-      await expect(page.locator('.sidebar:not(.collapsed)')).toBeVisible({ timeout: 2000 });
+      await expect(page.locator('.sidebar:not(.collapsed)')).toBeVisible();
     });
   });
 
@@ -564,11 +564,11 @@ test.describe('Keyboard Shortcuts', () => {
         directory: '/tmp/test/s1',
       });
 
-      await expect(page.locator('[data-testid="session-s1"]')).toBeVisible({ timeout: 5000 });
+      await expect(page.locator('[data-testid="session-s1"]')).toBeVisible();
 
       // Select the session
       await page.locator('[data-testid="session-s1"]').click();
-      await expect(page.locator('.terminal-wrapper.active')).toBeVisible({ timeout: 2000 });
+      await expect(page.locator('.terminal-wrapper.active')).toBeVisible();
 
       // Note: ⌘B may not open branch picker without actual git repo
       // This test verifies the shortcut is wired up
@@ -592,7 +592,7 @@ test.describe('Keyboard Shortcuts', () => {
         directory: '/tmp/test/s1',
       });
 
-      await expect(page.locator('[data-testid="session-s1"]')).toBeVisible({ timeout: 5000 });
+      await expect(page.locator('[data-testid="session-s1"]')).toBeVisible();
       await page.locator('[data-testid="session-s1"]').click();
 
       // Try to open branch picker
@@ -602,7 +602,7 @@ test.describe('Keyboard Shortcuts', () => {
       const picker = page.locator('.branch-picker-overlay');
       if (await picker.isVisible({ timeout: 1000 }).catch(() => false)) {
         await page.keyboard.press('Escape');
-        await expect(picker).not.toBeVisible({ timeout: 1000 });
+        await expect(picker).not.toBeVisible();
         // Should still be in terminal view, not dashboard
         await expect(page.locator('.terminal-wrapper.active')).toBeVisible();
       }

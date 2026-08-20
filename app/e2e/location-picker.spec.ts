@@ -51,7 +51,7 @@ test.describe('LocationPicker', () => {
       await page.keyboard.press('Meta+t');
 
       // Dialog should be visible
-      await expect(page.locator('.location-picker-overlay')).toBeVisible({ timeout: 2000 });
+      await expect(page.locator('.location-picker-overlay')).toBeVisible();
       await expect(page.locator('.location-picker')).toBeVisible();
       await expect(page.locator('.picker-title')).toHaveText('New Workspace Location');
     });
@@ -63,11 +63,11 @@ test.describe('LocationPicker', () => {
 
       // Open dialog
       await page.keyboard.press('Meta+t');
-      await expect(page.locator('.location-picker-overlay')).toBeVisible({ timeout: 2000 });
+      await expect(page.locator('.location-picker-overlay')).toBeVisible();
 
       // Close with Escape
       await page.keyboard.press('Escape');
-      await expect(page.locator('.location-picker-overlay')).not.toBeVisible({ timeout: 2000 });
+      await expect(page.locator('.location-picker-overlay')).not.toBeVisible();
     });
 
     test('remembers selected agent between openings', async ({ page, daemon }) => {
@@ -77,7 +77,7 @@ test.describe('LocationPicker', () => {
 
       // Open dialog and switch to any available non-disabled agent
       await page.keyboard.press('Meta+t');
-      await expect(page.locator('.location-picker-overlay')).toBeVisible({ timeout: 2000 });
+      await expect(page.locator('.location-picker-overlay')).toBeVisible();
       const enabledAgents = page.locator('.agent-option:not(:disabled)');
       const enabledCount = await enabledAgents.count();
       if (enabledCount === 0) {
@@ -91,9 +91,9 @@ test.describe('LocationPicker', () => {
 
       // Close and reopen to verify persistence
       await page.keyboard.press('Escape');
-      await expect(page.locator('.location-picker-overlay')).not.toBeVisible({ timeout: 2000 });
+      await expect(page.locator('.location-picker-overlay')).not.toBeVisible();
       await page.keyboard.press('Meta+t');
-      await expect(page.locator('.location-picker-overlay')).toBeVisible({ timeout: 2000 });
+      await expect(page.locator('.location-picker-overlay')).toBeVisible();
       await expect(page.locator('.agent-option', { hasText: agentName })).toHaveClass(/active/);
     });
   });
@@ -106,7 +106,7 @@ test.describe('LocationPicker', () => {
 
       // Open dialog
       await page.keyboard.press('Meta+t');
-      await expect(page.locator('.location-picker-overlay')).toBeVisible({ timeout: 2000 });
+      await expect(page.locator('.location-picker-overlay')).toBeVisible();
 
       // Type to filter (if there are any recent locations)
       const recentSection = page.locator('.picker-section-title').filter({ hasText: 'RECENT' });
@@ -134,7 +134,7 @@ test.describe('LocationPicker', () => {
 
       // Open dialog
       await page.keyboard.press('Meta+t');
-      await expect(page.locator('.location-picker-overlay')).toBeVisible({ timeout: 2000 });
+      await expect(page.locator('.location-picker-overlay')).toBeVisible();
 
       // Type a path that should trigger suggestions
       await page.keyboard.type('~/');
@@ -163,7 +163,7 @@ test.describe('LocationPicker', () => {
 
       // Open dialog
       await page.keyboard.press('Meta+t');
-      await expect(page.locator('.location-picker-overlay')).toBeVisible({ timeout: 2000 });
+      await expect(page.locator('.location-picker-overlay')).toBeVisible();
 
       // Type ~/Library/ to get a predictable set of directories, then search for a substring
       // Most Macs have directories like "Application Support" in ~/Library
@@ -208,7 +208,7 @@ test.describe('LocationPicker', () => {
 
       // Open dialog
       await page.keyboard.press('Meta+t');
-      await expect(page.locator('.location-picker-overlay')).toBeVisible({ timeout: 2000 });
+      await expect(page.locator('.location-picker-overlay')).toBeVisible();
 
       // Type path to get suggestions
       await page.keyboard.type('~/');
@@ -243,7 +243,7 @@ test.describe('LocationPicker', () => {
 
       // Open dialog
       await page.keyboard.press('Meta+t');
-      await expect(page.locator('.location-picker-overlay')).toBeVisible({ timeout: 2000 });
+      await expect(page.locator('.location-picker-overlay')).toBeVisible();
 
       // Type something that won't match anything
       await page.keyboard.type('/xyz_nonexistent_path_12345');
@@ -253,7 +253,7 @@ test.describe('LocationPicker', () => {
 
       // Should show empty state
       const emptyState = page.locator('.picker-empty');
-      await expect(emptyState).toBeVisible({ timeout: 2000 });
+      await expect(emptyState).toBeVisible();
       await expect(emptyState).toContainText('No matches');
     });
   });
@@ -269,20 +269,20 @@ test.describe('LocationPicker', () => {
 
         for (const typedPath of [repo.worktrees[0].path, `${repo.worktrees[0].path}/`]) {
           await page.keyboard.press('Meta+t');
-          await expect(page.locator('.location-picker-overlay')).toBeVisible({ timeout: 2000 });
+          await expect(page.locator('.location-picker-overlay')).toBeVisible();
 
           const input = page.locator('[data-testid="location-picker-path-input"]');
           await input.focus();
           await page.keyboard.type(typedPath);
           await page.keyboard.press('Enter');
 
-          await expect(page.locator('[data-testid="repo-options"]')).toBeVisible({ timeout: 5000 });
+          await expect(page.locator('[data-testid="repo-options"]')).toBeVisible();
           await expect(page.locator('[data-testid="repo-option-1"]')).toHaveClass(/selected/);
 
           await page.keyboard.press('Escape');
-          await expect(page.locator('[data-testid="location-picker-path-input"]')).toBeVisible({ timeout: 2000 });
+          await expect(page.locator('[data-testid="location-picker-path-input"]')).toBeVisible();
           await page.keyboard.press('Escape');
-          await expect(page.locator('.location-picker-overlay')).not.toBeVisible({ timeout: 2000 });
+          await expect(page.locator('.location-picker-overlay')).not.toBeVisible();
         }
       } finally {
         repo.cleanup();
@@ -297,14 +297,14 @@ test.describe('LocationPicker', () => {
         await page.goto('/');
         await page.waitForSelector('.dashboard');
         await page.keyboard.press('Meta+t');
-        await expect(page.locator('.location-picker-overlay')).toBeVisible({ timeout: 2000 });
+        await expect(page.locator('.location-picker-overlay')).toBeVisible();
 
         const input = page.locator('[data-testid="location-picker-path-input"]');
         await input.focus();
         await page.keyboard.type(repo.repoPath);
         await page.keyboard.press('Enter');
 
-        await expect(page.locator('[data-testid="repo-options"]')).toBeVisible({ timeout: 5000 });
+        await expect(page.locator('[data-testid="repo-options"]')).toBeVisible();
         // The repo root lands on the create form; step into the destination list.
         await page.keyboard.press('ArrowDown');
         await expect(page.locator('[data-testid="repo-option-0"]')).toHaveClass(/selected/);
@@ -313,8 +313,8 @@ test.describe('LocationPicker', () => {
         await expect(page.locator('[data-testid="repo-option-0"]')).toHaveClass(/selected/);
 
         await page.keyboard.press('Enter');
-        await expect(page.locator('.location-picker-overlay')).not.toBeVisible({ timeout: 5000 });
-        await expect(page.locator('.session-name', { hasText: 'exsin' }).first()).toBeVisible({ timeout: 10000 });
+        await expect(page.locator('.location-picker-overlay')).not.toBeVisible();
+        await expect(page.locator('.session-name', { hasText: 'exsin' }).first()).toBeVisible();
         await expect(page.locator('.session-name', { hasText: 'exsin--feat-images' })).toHaveCount(0);
       } finally {
         repo.cleanup();
@@ -329,16 +329,16 @@ test.describe('LocationPicker', () => {
         await page.goto('/');
         await page.waitForSelector('.dashboard');
         await page.keyboard.press('Meta+t');
-        await expect(page.locator('.location-picker-overlay')).toBeVisible({ timeout: 2000 });
+        await expect(page.locator('.location-picker-overlay')).toBeVisible();
 
         const input = page.locator('[data-testid="location-picker-path-input"]');
         await input.focus();
         await page.keyboard.type(repo.worktrees[0].path);
         await page.keyboard.press('Enter');
 
-        await expect(page.locator('[data-testid="repo-options"]')).toBeVisible({ timeout: 5000 });
+        await expect(page.locator('[data-testid="repo-options"]')).toBeVisible();
         await page.locator('[data-testid="repo-new-worktree-form"]').click();
-        await expect(page.locator('[data-testid="repo-new-worktree-input"]')).toBeVisible({ timeout: 2000 });
+        await expect(page.locator('[data-testid="repo-new-worktree-input"]')).toBeVisible();
         await expect(page.getByText('Start from feat-images')).toBeVisible();
 
         await page.locator('[data-testid="repo-new-worktree-input"]').focus();
@@ -346,8 +346,8 @@ test.describe('LocationPicker', () => {
         await page.keyboard.type('feat-more');
         await page.keyboard.press('Enter');
 
-        await expect(page.locator('.location-picker-overlay')).not.toBeVisible({ timeout: 10000 });
-        await expect(page.locator('.session-name', { hasText: 'exsin--feat-more' }).first()).toBeVisible({ timeout: 10000 });
+        await expect(page.locator('.location-picker-overlay')).not.toBeVisible();
+        await expect(page.locator('.session-name', { hasText: 'exsin--feat-more' }).first()).toBeVisible();
       } finally {
         repo.cleanup();
       }
@@ -361,14 +361,14 @@ test.describe('LocationPicker', () => {
         await page.goto('/');
         await page.waitForSelector('.dashboard');
         await page.keyboard.press('Meta+t');
-        await expect(page.locator('.location-picker-overlay')).toBeVisible({ timeout: 2000 });
+        await expect(page.locator('.location-picker-overlay')).toBeVisible();
 
         const input = page.locator('[data-testid="location-picker-path-input"]');
         await input.focus();
         await page.keyboard.type(repo.repoPath);
         await page.keyboard.press('Enter');
 
-        await expect(page.locator('[data-testid="repo-options"]')).toBeVisible({ timeout: 5000 });
+        await expect(page.locator('[data-testid="repo-options"]')).toBeVisible();
         const nameField = page.locator('[data-testid="repo-new-worktree-input"]');
         await expect(nameField).toBeFocused();
         const generated = await nameField.inputValue();
@@ -376,8 +376,8 @@ test.describe('LocationPicker', () => {
 
         await page.keyboard.press('Enter');
 
-        await expect(page.locator('.location-picker-overlay')).not.toBeVisible({ timeout: 10000 });
-        await expect(page.locator('.session-name', { hasText: `exsin--${generated}` }).first()).toBeVisible({ timeout: 10000 });
+        await expect(page.locator('.location-picker-overlay')).not.toBeVisible();
+        await expect(page.locator('.session-name', { hasText: `exsin--${generated}` }).first()).toBeVisible();
       } finally {
         repo.cleanup();
       }
@@ -391,20 +391,20 @@ test.describe('LocationPicker', () => {
         await page.goto('/');
         await page.waitForSelector('.dashboard');
         await page.keyboard.press('Meta+t');
-        await expect(page.locator('.location-picker-overlay')).toBeVisible({ timeout: 2000 });
+        await expect(page.locator('.location-picker-overlay')).toBeVisible();
 
         const input = page.locator('[data-testid="location-picker-path-input"]');
         await input.focus();
         await page.keyboard.type(repo.worktrees[1].path);
         await page.keyboard.press('Enter');
 
-        await expect(page.locator('[data-testid="repo-options"]')).toBeVisible({ timeout: 5000 });
+        await expect(page.locator('[data-testid="repo-options"]')).toBeVisible();
         await expect(page.locator('[data-testid="repo-option-2"]')).toHaveClass(/selected/);
 
         await page.locator('[data-testid="repo-options"]').press('D');
         await page.locator('[data-testid="repo-options"]').press('y');
 
-        await expect(page.locator('[data-testid="repo-options"]')).toBeVisible({ timeout: 5000 });
+        await expect(page.locator('[data-testid="repo-options"]')).toBeVisible();
         await expect(page.locator('[data-testid="repo-option-1"]')).toHaveClass(/selected/);
       } finally {
         repo.cleanup();
@@ -427,15 +427,15 @@ test.describe('LocationPicker', () => {
         await page.waitForSelector('.dashboard');
 
         await page.keyboard.press('Meta+t');
-        await expect(page.locator('.location-picker-overlay')).toBeVisible({ timeout: 2000 });
+        await expect(page.locator('.location-picker-overlay')).toBeVisible();
 
         const input = page.locator('[data-testid="location-picker-path-input"]');
         await input.focus();
         await page.keyboard.type(`${projectDir}/`);
         await page.keyboard.press('Enter');
 
-        await expect(page.locator('.location-picker-overlay')).not.toBeVisible({ timeout: 5000 });
-        await expect(page.locator('.session-name', { hasText: 'project-with-hidden-child' }).first()).toBeVisible({ timeout: 10000 });
+        await expect(page.locator('.location-picker-overlay')).not.toBeVisible();
+        await expect(page.locator('.session-name', { hasText: 'project-with-hidden-child' }).first()).toBeVisible();
         await expect(page.locator('.session-name', { hasText: '.claude' })).toHaveCount(0);
       } finally {
         fs.rmSync(parentDir, { recursive: true, force: true });

@@ -26,9 +26,9 @@ test.describe('Session restore and reconnect harness', () => {
     });
 
     await page.goto('/');
-    await expect(page.locator('.dashboard')).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('.dashboard')).toBeVisible();
 
-    await expect(page.locator('[data-testid="session-restore-s1"][data-state="working"]')).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('[data-testid="session-restore-s1"][data-state="working"]')).toBeVisible();
     await expect(page.locator('[data-testid="session-restore-s2"][data-state="waiting_input"]')).toBeVisible();
     await expect(page.locator('[data-testid="session-restore-s3"][data-state="idle"]')).toBeVisible();
     await expect(page.locator('[data-testid="session-restore-s1"]')).toHaveCount(1);
@@ -36,13 +36,13 @@ test.describe('Session restore and reconnect harness', () => {
     await expect(page.locator('[data-testid="session-restore-s3"]')).toHaveCount(1);
 
     await page.locator('[data-testid="session-restore-s1"]').click();
-    await expect(page.locator('[data-testid="sidebar-session-restore-s1"][data-state="working"]')).toHaveClass(/selected/, { timeout: 10000 });
+    await expect(page.locator('[data-testid="sidebar-session-restore-s1"][data-state="working"]')).toHaveClass(/selected/);
     await expect(page.locator('[data-testid="sidebar-session-restore-s2"][data-state="waiting_input"]')).not.toHaveClass(/selected/);
 
     await page.reload();
 
-    await expect(page.locator('.dashboard')).toBeVisible({ timeout: 10000 });
-    await expect(page.locator('[data-testid="session-restore-s1"][data-state="working"]')).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('.dashboard')).toBeVisible();
+    await expect(page.locator('[data-testid="session-restore-s1"][data-state="working"]')).toBeVisible();
     await expect(page.locator('[data-testid="session-restore-s2"][data-state="waiting_input"]')).toBeVisible();
     await expect(page.locator('[data-testid="session-restore-s3"][data-state="idle"]')).toBeVisible();
     await expect(page.locator('[data-testid="session-restore-s1"]')).toHaveCount(1);
@@ -50,7 +50,7 @@ test.describe('Session restore and reconnect harness', () => {
     await expect(page.locator('[data-testid="session-restore-s3"]')).toHaveCount(1);
 
     await page.locator('[data-testid="session-restore-s1"]').click();
-    await expect(page.locator('[data-testid="sidebar-session-restore-s1"][data-state="working"]')).toHaveClass(/selected/, { timeout: 10000 });
+    await expect(page.locator('[data-testid="sidebar-session-restore-s1"][data-state="working"]')).toHaveClass(/selected/);
     await expect(page.locator('[data-testid="sidebar-session-restore-s2"][data-state="waiting_input"]')).not.toHaveClass(/selected/);
   });
 
@@ -66,8 +66,8 @@ test.describe('Session restore and reconnect harness', () => {
     });
 
     await page.goto('/');
-    await expect(page.locator('.dashboard')).toBeVisible({ timeout: 10000 });
-    await expect(page.locator('[data-testid="session-reconnect-s1"][data-state="working"]')).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('.dashboard')).toBeVisible();
+    await expect(page.locator('[data-testid="session-reconnect-s1"][data-state="working"]')).toBeVisible();
     await expect(page.locator('[data-testid="session-reconnect-s1"]')).toHaveCount(1);
     await page.locator('[data-testid="session-reconnect-s1"]').click();
     await expect(page.locator('[data-testid="sidebar-session-reconnect-s1"][data-state="working"]')).toHaveClass(/selected/);
@@ -77,7 +77,7 @@ test.describe('Session restore and reconnect harness', () => {
 
     // The injected row was never launched, so nothing on disk can restore its
     // conversation: startup recovery reaps it along with its pane.
-    await expect(page.locator('[data-testid="session-reconnect-s1"]')).toHaveCount(0, { timeout: 15000 });
+    await expect(page.locator('[data-testid="session-reconnect-s1"]')).toHaveCount(0);
     await expect(page.locator('[data-testid="sidebar-session-reconnect-s1"]')).toHaveCount(0);
 
     await daemon.injectSession({
@@ -86,7 +86,7 @@ test.describe('Session restore and reconnect harness', () => {
       state: 'idle',
       directory: '/tmp/reconnect/s2',
     });
-    await expect(page.locator('[data-testid="session-reconnect-s2"][data-state="idle"]')).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('[data-testid="session-reconnect-s2"][data-state="idle"]')).toBeVisible();
     await expect(page.locator('[data-testid="session-reconnect-s2"]')).toHaveCount(1);
   });
 });
