@@ -89,7 +89,12 @@ describe('GardenPanel seed reader drill', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Open as tile' }));
     expect(onOpenAsTile).toHaveBeenCalledWith('s-plan11');
 
-    fireEvent.click(screen.getByRole('button', { name: '/repo/evidence.md' }));
+    // An artifact row is the object, not the path: the kind is named in words
+    // and the file is named by its file name, with the directory beside it.
+    const artifact = screen.getByRole('button', { name: /evidence\.md/ });
+    expect(artifact).toHaveTextContent('markdown');
+    expect(artifact).toHaveTextContent('/repo');
+    fireEvent.click(artifact);
     expect(onOpenMarkdownArtifact).toHaveBeenCalledWith('/repo/evidence.md');
   });
 

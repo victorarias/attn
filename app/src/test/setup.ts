@@ -1,5 +1,6 @@
 import '@testing-library/jest-dom/vitest';
-import { vi } from 'vitest';
+import { beforeEach, vi } from 'vitest';
+import { gardenScrollMemory, useGardenWalk } from '../store/gardenWalk';
 import { WHATS_NEW_ID, WHATS_NEW_STORAGE_KEY } from '../hooks/useWhatsNew';
 
 // Mock Tauri APIs that components might use
@@ -80,3 +81,12 @@ if (typeof window !== 'undefined') {
   // clear localStorage and assert the gating themselves.
   window.localStorage.setItem(WHATS_NEW_STORAGE_KEY, WHATS_NEW_ID);
 }
+
+// The garden walk outlives a mount on purpose — the dock and the fullscreen
+// surface are the same walk at two sizes, and closing either one keeps your
+// place. That makes it module state, so a test that drilled somewhere would
+// hand its depth to the next one.
+beforeEach(() => {
+  useGardenWalk.setState({ trail: [] });
+  gardenScrollMemory.clear();
+});

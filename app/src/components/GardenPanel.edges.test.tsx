@@ -24,10 +24,10 @@ function seed(overrides: Partial<Seed> & { id: string; title: string }): Seed {
   };
 }
 
-// Readiness is the daemon's answer — it knows which tender sessions are still
-// alive — so the panel renders `ready` rather than recomputing it. What the
-// panel does own is the reverse direction of an edge: edges are stored on the
-// seed they point from, so "who blocks me" only exists by reading the garden.
+// A row says what is exceptional about a seed and nothing else: most seeds are
+// takeable, so being takeable earns no word and being held up does. What the
+// panel owns is the reverse direction of an edge — edges are stored on the seed
+// they point from, so "who blocks me" only exists by reading the whole garden.
 describe('GardenPanel edges', () => {
   const blocker = seed({ id: 's-aaa111', title: 'the blocker', ready: true });
   const blocked = seed({
@@ -52,11 +52,13 @@ describe('GardenPanel edges', () => {
     ];
   }
 
-  it('marks the ready seed and says how many block the others', () => {
+  it('says how many block a seed, and says nothing about one that is free', () => {
     render(<GardenPanel isOpen onClose={vi.fn()} seedsTotal={3} seeds={chain('planted')} />);
 
-    expect(screen.getByText('ready')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Open the plot under the crown' }));
+    expect(screen.getByRole('button', { name: /the blocker/ })).toBeInTheDocument();
+    expect(screen.queryByText('ready')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /the crown/ }));
     expect(screen.getByText('blocked by 1')).toBeInTheDocument();
   });
 
@@ -66,7 +68,7 @@ describe('GardenPanel edges', () => {
     const { rerender } = render(
       <GardenPanel isOpen onClose={vi.fn()} seedsTotal={3} seeds={chain('planted')} />,
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Open the plot under the crown' }));
+    fireEvent.click(screen.getByRole('button', { name: /the crown/ }));
     expect(screen.getByText('blocked by 1')).toBeInTheDocument();
 
     rerender(<GardenPanel isOpen onClose={vi.fn()} seedsTotal={3} seeds={chain('harvested')} />);
@@ -79,10 +81,10 @@ describe('GardenPanel edges', () => {
       <GardenPanel isOpen onClose={vi.fn()} seedsTotal={3} seeds={chain('planted')} />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Open the plot under the crown' }));
-    fireEvent.click(screen.getByText('the blocked one'));
+    fireEvent.click(screen.getByRole('button', { name: /the crown/ }));
+    fireEvent.click(screen.getByRole('button', { name: /the blocked one/ }));
 
-    const relations = container.querySelector('.garden-seed__relations');
+    const relations = container.querySelector('.garden-relations');
     expect(relations?.textContent).toContain('part of');
     expect(relations?.textContent).toContain('the crown');
     expect(relations?.textContent).toContain('blocked by');
@@ -104,7 +106,7 @@ describe('GardenPanel edges', () => {
     };
     render(<GardenPanel isOpen onClose={vi.fn()} seedsTotal={3} seeds={[blocked, away, withPlot]} />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Open the plot under the crown' }));
+    fireEvent.click(screen.getByRole('button', { name: /the crown/ }));
 
     expect(screen.queryByText('blocker elsewhere')).not.toBeInTheDocument();
     expect(screen.getByText('blocked by 1')).toBeInTheDocument();

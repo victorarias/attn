@@ -6,7 +6,8 @@ import type {
 import { Markdown } from './Markdown';
 import { MarkdownReader, type MarkdownAnnotationsSendHandle } from './MarkdownReader';
 import { seedMarkdownSource } from './MarkdownReader/documentSource';
-import { artifactKey, artifactLabel, type SeedDocumentNote } from './seedArtifacts';
+import { SeedArtifactRows } from './SeedArtifactRows';
+import { type SeedDocumentNote } from './seedArtifacts';
 import './SeedDocumentView.css';
 
 /** The one read model shared by the panel drill and the docked seed tile. */
@@ -33,44 +34,6 @@ export interface SeedDocumentViewProps {
 function formatTimestamp(iso: string): string {
   const date = new Date(iso);
   return Number.isNaN(date.getTime()) ? iso : date.toLocaleString();
-}
-
-function SeedArtifacts({
-  artifacts,
-  onOpenMarkdownArtifact,
-  headingId,
-}: {
-  artifacts: readonly SeedArtifactReference[];
-  onOpenMarkdownArtifact?: (path: string) => void;
-  headingId: string;
-}) {
-  if (artifacts.length === 0) return null;
-
-  return (
-    <section className="seed-document__artifacts" aria-labelledby={headingId}>
-      <h3 id={headingId}>Artifacts</h3>
-      <ul>
-        {artifacts.map((artifact) => {
-          const key = artifactKey(artifact);
-          const label = artifactLabel(artifact);
-          if (artifact.kind === 'markdown_file' && artifact.path && onOpenMarkdownArtifact) {
-            const path = artifact.path;
-            return (
-              <li key={key}>
-                <button type="button" onClick={() => onOpenMarkdownArtifact(path)}>
-                  {label}
-                </button>
-              </li>
-            );
-          }
-          if (artifact.url) {
-            return <li key={key}><a href={artifact.url}>{label}</a></li>;
-          }
-          return <li key={key}>{label}</li>;
-        })}
-      </ul>
-    </section>
-  );
 }
 
 export function SeedDocumentView({
@@ -106,11 +69,12 @@ export function SeedDocumentView({
         <p className="seed-document__empty-body">No body — the title is the whole seed.</p>
       )}
 
-      <SeedArtifacts
-        artifacts={artifacts}
-        onOpenMarkdownArtifact={onOpenMarkdownArtifact}
-        headingId={artifactsHeadingId}
-      />
+      {artifacts.length > 0 && (
+        <section className="seed-document__artifacts" aria-labelledby={artifactsHeadingId}>
+          <h3 id={artifactsHeadingId}>Artifacts</h3>
+          <SeedArtifactRows artifacts={artifacts} onOpenMarkdownArtifact={onOpenMarkdownArtifact} />
+        </section>
+      )}
 
       <section className="seed-document__ledger" aria-labelledby={ledgerHeadingId}>
         <h3 id={ledgerHeadingId}>Ledger</h3>

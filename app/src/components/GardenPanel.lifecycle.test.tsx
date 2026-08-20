@@ -39,7 +39,7 @@ describe('GardenPanel lifecycle', () => {
     render(<GardenPanel isOpen onClose={vi.fn()} seedsTotal={1} seeds={[growing]} />);
 
     expect(screen.getByText('growing')).toBeInTheDocument();
-    expect(screen.getByText('tended by Trellis')).toBeInTheDocument();
+    expect(screen.getByText(/tended by Trellis/)).toBeInTheDocument();
   });
 
   // A session id is not a pretty name, but "somebody holds this" is the fact the
@@ -53,7 +53,7 @@ describe('GardenPanel lifecycle', () => {
     });
     render(<GardenPanel isOpen onClose={vi.fn()} seedsTotal={1} seeds={[growing]} />);
 
-    expect(screen.getByText('tended by sess-b')).toBeInTheDocument();
+    expect(screen.getByText(/tended by sess-b/)).toBeInTheDocument();
   });
 
   it('says nothing about a tender when nobody holds the seed', () => {
@@ -76,7 +76,10 @@ describe('GardenPanel lifecycle', () => {
     const { rerender } = render(
       <GardenPanel isOpen onClose={vi.fn()} seedsTotal={1} seeds={[planted]} />,
     );
-    expect(screen.getByText('planted')).toBeInTheDocument();
+    // Nothing says "planted": most seeds are, so the word would be on almost
+    // every row and would mark nothing. The row is there, and says nothing.
+    expect(screen.getByRole('button', { name: /a whole life/ })).toBeInTheDocument();
+    expect(screen.queryByText('planted')).not.toBeInTheDocument();
 
     rerender(
       <GardenPanel
@@ -87,7 +90,7 @@ describe('GardenPanel lifecycle', () => {
       />,
     );
     expect(screen.getByText('growing')).toBeInTheDocument();
-    expect(screen.getByText('tended by Trellis')).toBeInTheDocument();
+    expect(screen.getByText(/tended by Trellis/)).toBeInTheDocument();
 
     rerender(
       <GardenPanel
@@ -98,10 +101,11 @@ describe('GardenPanel lifecycle', () => {
       />,
     );
     // Harvest ends the seed's time in the default listing: closed seeds sit
-    // behind the counted toggle rather than in the list.
-    expect(screen.queryByText('harvested')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '1 closed' }));
-    expect(screen.getByText('harvested')).toBeInTheDocument();
+    // behind the counted toggle rather than in the list. Opened, the row says
+    // "done" — the word the reader scans for is the outcome, not the verb.
+    expect(screen.queryByRole('button', { name: /a whole life/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /1 closed/ }));
+    expect(screen.getByText('done')).toBeInTheDocument();
     expect(screen.queryByText(/tended by/)).not.toBeInTheDocument();
   });
 
@@ -114,9 +118,9 @@ describe('GardenPanel lifecycle', () => {
     });
     render(<GardenPanel isOpen onClose={vi.fn()} seedsTotal={1} seeds={[harvested]} />);
 
-    fireEvent.click(screen.getByRole('button', { name: '1 closed' }));
+    fireEvent.click(screen.getByRole('button', { name: /1 closed/ }));
     expect(screen.queryByText('shipped it')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByText('finished'));
+    fireEvent.click(screen.getByRole('button', { name: /finished/ }));
     expect(screen.getByText('shipped it')).toBeInTheDocument();
   });
 
@@ -129,9 +133,9 @@ describe('GardenPanel lifecycle', () => {
 
     expect(screen.getByText(/Nothing open here\. 2 closed seeds are/)).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: '2 closed' }));
-    expect(screen.getByText('all wrapped')).toBeInTheDocument();
-    expect(screen.getByText('went nowhere')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'hide 2 closed' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /2 closed/ }));
+    expect(screen.getByRole('button', { name: /all wrapped/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /went nowhere/ })).toBeInTheDocument();
+    expect(screen.queryByText(/Nothing open here/)).not.toBeInTheDocument();
   });
 });

@@ -66,31 +66,36 @@ describe('GardenPanel navigation', () => {
     expect(screen.getByText('crown got capped away')).toBeInTheDocument();
   });
 
-  // A crown row's whole job is saying whether its plot is draining and where it
-  // is stuck, without opening anything.
-  it('shows a crown its plot progress and no plot on an ordinary seed', () => {
+  // A crown row carries the count, because that is what a reader scans a list
+  // for; the sentence behind it belongs on the crown's own page, where there is
+  // room to say where the plot is stuck.
+  it('counts a crown s plot on its row and spells it out on its page', () => {
     render(<GardenPanel isOpen onClose={vi.fn()} seedsTotal={4} seeds={all} />);
 
+    expect(screen.getByRole('button', { name: /ship the thing/ })).toHaveTextContent('1/3');
+    expect(screen.getByRole('button', { name: /unrelated work/ })).not.toHaveTextContent('/');
+    expect(screen.queryByText(/1\/3 done/)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /ship the thing/ }));
     expect(screen.getByText('1/3 done · 1 growing · 1 ready')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /Open the plot under unrelated work/ })).not.toBeInTheDocument();
   });
 
   it('drills into a plot and climbs back out', () => {
     render(<GardenPanel isOpen onClose={vi.fn()} seedsTotal={4} seeds={all} />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Open the plot under ship the thing' }));
+    fireEvent.click(screen.getByRole('button', { name: /ship the thing/ }));
 
-    expect(screen.getByText('second step')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /second step/ })).toBeInTheDocument();
     // Scoped: the plot is what is on screen, and the rest of the garden is not.
-    expect(screen.queryByText('unrelated work')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /unrelated work/ })).not.toBeInTheDocument();
     // The harvested child sits behind the closed toggle, in the plot too.
-    expect(screen.queryByText('first step')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '1 closed' }));
-    expect(screen.getByText('first step')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /first step/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /1 closed/ }));
+    expect(screen.getByRole('button', { name: /first step/ })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Garden' }));
 
-    expect(screen.getByText('unrelated work')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /unrelated work/ })).toBeInTheDocument();
   });
 
   // Root to leaf: a plot inside a plot walks in the same way, and every level of
@@ -105,17 +110,18 @@ describe('GardenPanel navigation', () => {
     const leaf = childOf('s-mid111', { id: 's-leaf11', title: 'the actual work' });
     render(<GardenPanel isOpen onClose={vi.fn()} seedsTotal={3} seeds={[outer, middle, leaf]} />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Open the plot under the epic' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Open the plot under a slice' }));
+    fireEvent.click(screen.getByRole('button', { name: /the epic/ }));
+    fireEvent.click(screen.getByRole('button', { name: /a slice/ }));
 
-    expect(screen.getByText('the actual work')).toBeInTheDocument();
-    // The middle plot is behind you now: it heads the trail rather than sitting
-    // in the listing.
-    expect(screen.queryByRole('button', { name: 'Open the plot under a slice' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /the actual work/ })).toBeInTheDocument();
+    // The middle plot is the place you are in, so it is the page's title and a
+    // step of the trail — never also a row in the listing.
+    expect(screen.queryByRole('button', { name: /^a slice/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'a slice' })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Garden' }));
 
-    expect(screen.getByText('the epic')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /the epic/ })).toBeInTheDocument();
     // At root there is nowhere back to: the trail is gone.
     expect(screen.queryByRole('button', { name: 'Garden' })).not.toBeInTheDocument();
   });
@@ -125,12 +131,12 @@ describe('GardenPanel navigation', () => {
   it('climbs out on its own when the crown it is inside disappears', () => {
     const { rerender } = render(<GardenPanel isOpen onClose={vi.fn()} seedsTotal={4} seeds={all} />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Open the plot under ship the thing' }));
-    expect(screen.getByText('second step')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /ship the thing/ }));
+    expect(screen.getByRole('button', { name: /second step/ })).toBeInTheDocument();
 
     rerender(<GardenPanel isOpen onClose={vi.fn()} seedsTotal={1} seeds={[elsewhere]} />);
 
-    expect(screen.getByText('unrelated work')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /unrelated work/ })).toBeInTheDocument();
   });
 
   // Crossing plots: following work sideways must not go back through the whole
@@ -146,14 +152,16 @@ describe('GardenPanel navigation', () => {
       <GardenPanel isOpen onClose={vi.fn()} seedsTotal={4} seeds={[shipIt, linked, other, elsewhere]} />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Open the plot under ship the thing' }));
-    fireEvent.click(screen.getByText('holds the next plot up'));
+    fireEvent.click(screen.getByRole('button', { name: /ship the thing/ }));
+    fireEvent.click(screen.getByRole('button', { name: /holds the next plot up/ }));
     fireEvent.click(screen.getByRole('button', { name: 'the next plot' }));
 
-    // Inside the crossed-into plot: its crown heads the trail, and the plot it
-    // was reached from is one click back.
-    expect(screen.getByRole('button', { name: 'the next plot' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'ship the thing' })).toBeEnabled();
+    // Inside the crossed-into plot. The trail is the way you came, not the way
+    // the garden is filed — so it names the plot you crossed out of, and every
+    // step of it is a way back.
+    expect(screen.getByRole('heading', { name: 'the next plot' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Garden' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'ship the thing' })).toBeInTheDocument();
   });
 
   // The push is capped. A list that ends at the cap without saying so reads as
@@ -179,21 +187,28 @@ describe('GardenPanel navigation', () => {
 
     const bare = crown('s-crown9', 'nothing in it yet');
     rerender(<GardenPanel isOpen onClose={vi.fn()} seedsTotal={1} seeds={[bare]} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Open the plot under nothing in it yet' }));
+    fireEvent.click(screen.getByRole('button', { name: /nothing in it yet/ }));
 
     expect(screen.getByText(/Nothing planted in this plot yet/)).toBeInTheDocument();
     expect(screen.getByText('attn seed plant "what this is" --part-of s-crown9')).toBeInTheDocument();
   });
 
-  it('opens one seed to its body without hiding the rest', () => {
+  // Reading a seed is drilling into it: one target per row, and what is in there
+  // is whatever is in there. The reader no longer has to know whether they want
+  // the body or the plot before they know what the seed holds.
+  it('opens a seed to its own page, and the trail is the way back', () => {
     const withBody = seed({ id: 's-body11', title: 'has a body', body: 'the plan itself' });
     render(<GardenPanel isOpen onClose={vi.fn()} seedsTotal={2} seeds={[withBody, elsewhere]} />);
 
     expect(screen.queryByText('the plan itself')).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByText('has a body'));
+    fireEvent.click(screen.getByRole('button', { name: /has a body/ }));
 
+    expect(screen.getByRole('heading', { name: 'has a body' })).toBeInTheDocument();
     expect(screen.getByText('the plan itself')).toBeInTheDocument();
-    expect(screen.getByText('unrelated work')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /unrelated work/ })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Garden' }));
+    expect(screen.getByRole('button', { name: /unrelated work/ })).toBeInTheDocument();
   });
 });

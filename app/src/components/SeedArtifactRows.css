@@ -1,0 +1,106 @@
+/*
+   Artifact rows read as a small table: a kind gutter the eye can run down, the
+   identity in body type, where it lives behind it. No borders, no chips — the
+   alignment does the work a box would have done. */
+
+.seed-artifacts {
+  display: flex;
+  flex-direction: column;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.seed-artifact > button,
+.seed-artifact > a,
+.seed-artifact {
+  align-items: baseline;
+  color: var(--color-text-primary);
+  display: flex;
+  gap: 10px;
+  min-width: 0;
+  text-decoration: none;
+  width: 100%;
+}
+
+.seed-artifact > button,
+.seed-artifact > a {
+  background: none;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font: inherit;
+  margin: 0 -8px;
+  padding: 5px 8px;
+  text-align: left;
+  width: calc(100% + 16px);
+}
+
+.seed-artifact:not(:has(> button)):not(:has(> a)) {
+  padding: 5px 0;
+}
+
+.seed-artifact > button:hover,
+.seed-artifact > a:hover {
+  background: var(--color-bg-elevated);
+}
+
+.seed-artifact > button:focus-visible,
+.seed-artifact > a:focus-visible {
+  background: var(--color-bg-elevated);
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
+/* The gutter. Fixed width so the kinds stack into a column the eye reads once
+   instead of a label it re-reads per row. */
+.seed-artifact__kind {
+  color: var(--color-text-muted);
+  flex: none;
+  font-size: var(--font-size-sm);
+  letter-spacing: 0.04em;
+  width: 84px;
+}
+
+.seed-artifact__primary {
+  flex: none;
+  max-width: 60%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.seed-artifact__secondary {
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-sm);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The one mark that distinguishes following a link from opening a document:
+   this one leaves attn. */
+.seed-artifact__leaves {
+  color: var(--color-text-muted);
+  flex: none;
+  font-size: var(--font-size-sm);
+  margin-left: auto;
+}
+
+.seed-artifact.is-gone {
+  color: var(--color-text-muted);
+}
+
+.seed-artifact.is-gone .seed-artifact__primary {
+  text-decoration: line-through;
+  text-decoration-color: var(--color-text-dimmed);
+}
+
+.seed-artifact__gone {
+  color: var(--color-error);
+  flex: none;
+  font-size: var(--font-size-sm);
+  margin-left: auto;
+  opacity: 0.85;
+}
