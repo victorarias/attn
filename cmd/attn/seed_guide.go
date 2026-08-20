@@ -44,6 +44,10 @@ WRITING A BODY
   Scope and autonomy bounds: what is deferred, and what is a real blocker
   versus a call the tender can make.
 
+  A body may say "ship till done": that is an instruction to work end to end
+  on your own, following the stop conditions and requirements until they are
+  met — not to stop and check in along the way.
+
   When you plant something you discovered, say what it fell out of — the work
   you were doing and how you hit it. A discovered seed with no origin reads as
   noise to whoever finds it next.
