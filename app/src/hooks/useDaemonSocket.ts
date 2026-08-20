@@ -282,7 +282,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-export const PROTOCOL_VERSION = '263';
+export const PROTOCOL_VERSION = '264';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 // Identifies this app process to the daemon across its own reconnects, so a
@@ -1975,6 +1975,33 @@ export function useDaemonSocket({
             } else {
               pending.reject(new Error(data.error || 'Seed document read failed'));
             }
+            break;
+          }
+
+          // The garden board's two writes. Both are correlated exactly like
+          // seed_document_get above; the garden push that follows a successful
+          // move is what redraws every other client.
+          case 'seed_transition_result': {
+            const requestId = data.request_id;
+            if (typeof requestId !== 'string') break;
+            const key = `seed_transition:${requestId}`;
+            const pending = pendingActionsRef.current.get(key);
+            if (!pending) break;
+            pendingActionsRef.current.delete(key);
+            if (data.success && data.seed) pending.resolve(data.seed);
+            else pending.reject(new Error(data.error || 'The move was refused'));
+            break;
+          }
+
+          case 'seed_note_result': {
+            const requestId = data.request_id;
+            if (typeof requestId !== 'string') break;
+            const key = `seed_note:${requestId}`;
+            const pending = pendingActionsRef.current.get(key);
+            if (!pending) break;
+            pendingActionsRef.current.delete(key);
+            if (data.success) pending.resolve(data.note);
+            else pending.reject(new Error(data.error || 'The note was refused'));
             break;
           }
 
@@ -4028,6 +4055,63 @@ export function useDaemonSocket({
     });
   }, [nextRequestID]);
 
+  // Move a seed: tend | park | harvest | wither | replant. The daemon owns
+  // what is legal from where the seed actually is, so a refusal comes back as
+  // its own sentence and the caller renders it rather than pre-judging.
+  const sendSeedTransition = useCallback(
+    (seedId: string, verb: string, reason?: string): Promise<Seed> => {
+      return new Promise((resolve, reject) => {
+        const ws = wsRef.current;
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+          reject(new Error('WebSocket not connected'));
+          return;
+        }
+        const requestId = nextRequestID('seed_transition');
+        const key = `seed_transition:${requestId}`;
+        pendingActionsRef.current.set(key, { resolve, reject });
+        ws.send(
+          JSON.stringify({
+            cmd: 'seed_transition',
+            request_id: requestId,
+            seed_id: seedId,
+            verb,
+            ...(reason ? { reason } : {}),
+          }),
+        );
+        setTimeout(() => {
+          if (pendingActionsRef.current.has(key)) {
+            pendingActionsRef.current.delete(key);
+            reject(new Error('The move timed out'));
+          }
+        }, 10000);
+      });
+    },
+    [nextRequestID],
+  );
+
+  // Write on a seed's log. The board uses it for the moves that refuse a
+  // reason — park and replant record none, and the daemon's own refusal says
+  // the log is where that sentence goes.
+  const sendSeedNote = useCallback((seedId: string, body: string): Promise<void> => {
+    return new Promise((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+      const requestId = nextRequestID('seed_note');
+      const key = `seed_note:${requestId}`;
+      pendingActionsRef.current.set(key, { resolve: () => resolve(), reject });
+      ws.send(JSON.stringify({ cmd: 'seed_note', request_id: requestId, seed_id: seedId, body }));
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(key)) {
+          pendingActionsRef.current.delete(key);
+          reject(new Error('The note timed out'));
+        }
+      }, 10000);
+    });
+  }, [nextRequestID]);
+
   const sendSeedDocumentGet = useCallback((seedId: string): Promise<SeedDocument> => {
     return new Promise((resolve, reject) => {
       const ws = wsRef.current;
@@ -5753,6 +5837,8 @@ export function useDaemonSocket({
     sendOpenMarkdown,
     sendOpenSeed,
     sendSeedDocumentGet,
+    sendSeedTransition,
+    sendSeedNote,
     sendRuntimeInput: sendPtyInput,
     sendTerminalPointerActivity,
     sendSetClientPresence,

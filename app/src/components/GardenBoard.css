@@ -1,0 +1,803 @@
+/* GardenBoard.css — the garden as columns.
+   Token-only. Hierarchy is type, spacing and alignment: no card borders, no
+   column rules, no fills that are not saying something. */
+
+.garden-board {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  height: 100%;
+  padding: 16px;
+  color: var(--color-text-primary);
+  background: var(--color-bg-panel);
+  font-size: var(--font-size-md);
+  /* The board re-derives the garden's own scale exactly as .garden-panel does,
+     so both views answer the same size control. */
+  --font-size-xs: calc(9px * var(--garden-scale));
+  --font-size-sm: calc(11px * var(--garden-scale));
+  --font-size-md: calc(13px * var(--garden-scale));
+  --font-size: calc(14px * var(--garden-scale));
+  --font-size-lg: calc(18px * var(--garden-scale));
+  --font-size-xl: calc(24px * var(--garden-scale));
+}
+
+/* Header — the panel's, to the pixel, so switching views moves nothing. */
+.garden-board__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--color-border);
+  padding-bottom: 8px;
+}
+
+.garden-board__kicker {
+  font-size: var(--font-size-xl);
+  font-weight: 600;
+}
+
+.garden-board__header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.garden-board__total {
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.garden-board__close {
+  background: transparent;
+  border: none;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font-size: var(--font-size-md);
+  line-height: 1;
+  padding: 4px;
+}
+
+.garden-board__close:hover {
+  color: var(--color-text-primary);
+}
+
+/* The view switch. Two words and the one that is on; a segmented control with
+   a frame around it would be the loudest thing on the surface. */
+.garden-view-switch {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.garden-view-switch button {
+  background: transparent;
+  border: none;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  font-size: var(--font-size-sm);
+  padding: 2px 0;
+}
+
+.garden-view-switch button:hover {
+  color: var(--color-text-secondary);
+}
+
+.garden-view-switch button[aria-pressed='true'] {
+  color: var(--color-text-primary);
+  box-shadow: inset 0 -1px 0 var(--accent);
+}
+
+/* Where you are. Same trail as the list, so drilling reads the same in both. */
+.garden-board__trail {
+  align-items: baseline;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.garden-board__trail-segment {
+  align-items: baseline;
+  display: flex;
+  gap: 4px;
+  min-width: 0;
+}
+
+.garden-board__trail-step {
+  background: transparent;
+  border: none;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font-size: var(--font-size-sm);
+  padding: 0;
+}
+
+.garden-board__trail-step:hover:not(:disabled) {
+  color: var(--color-text-primary);
+}
+
+.garden-board__trail-step:disabled {
+  color: var(--color-text-primary);
+  cursor: default;
+}
+
+.garden-board__trail-sep {
+  color: var(--color-text-dimmed);
+  font-size: var(--font-size-sm);
+}
+
+.garden-board__trail-id {
+  color: var(--color-text-muted);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--font-size-sm);
+  font-variant-numeric: tabular-nums;
+  margin-left: 8px;
+}
+
+.garden-board__state,
+.garden-board__capped {
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-sm);
+  margin: 0;
+}
+
+.garden-board__state code {
+  background: var(--color-bg-elevated);
+  border-radius: 4px;
+  color: var(--color-text-secondary);
+  padding: 2px 5px;
+}
+
+.garden-board__error {
+  align-items: baseline;
+  color: var(--color-error);
+  display: flex;
+  font-size: var(--font-size-sm);
+  gap: 8px;
+  margin: 0;
+}
+
+.garden-board__error button {
+  background: transparent;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  padding: 0;
+}
+
+/* ------------------------------------------------------------------ columns */
+
+.garden-board__columns {
+  display: flex;
+  flex: 1 1 auto;
+  gap: 28px;
+  min-height: 0;
+}
+
+.garden-board__column {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  position: relative;
+}
+
+.garden-board__column.is-collapsed {
+  flex: 0 0 auto;
+  min-width: 132px;
+}
+
+/* While a card is in the air, the columns that cannot take it step back. The
+   board never greys a control that was never offered — this state exists only
+   during a drag. */
+.garden-board__columns.is-dragging .garden-board__column.is-inert {
+  opacity: 0.4;
+}
+
+/* A drag is a press that kept going; without this the press selects the title
+   it started on. */
+.garden-board__columns.is-dragging {
+  cursor: grabbing;
+  user-select: none;
+}
+
+.garden-board__columns.is-dragging .garden-card__body {
+  cursor: grabbing;
+}
+
+.garden-board__head {
+  align-items: baseline;
+  border-bottom: 1px solid var(--color-border-subtle);
+  display: flex;
+  gap: 8px;
+  padding-bottom: 6px;
+}
+
+.garden-board__label {
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  letter-spacing: 0.09em;
+  margin: 0;
+  text-transform: uppercase;
+}
+
+.garden-board__count {
+  color: var(--color-text-secondary);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--font-size-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.garden-board__reveal {
+  background: transparent;
+  border: none;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  font-size: var(--font-size-sm);
+  margin-left: auto;
+  padding: 0;
+}
+
+.garden-board__reveal:hover {
+  color: var(--color-text-secondary);
+}
+
+.garden-board__body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+  overflow-y: auto;
+  position: relative;
+}
+
+/* While the zones are up they cover the cards, so there is nothing left to
+   scroll — and the 3px rise below is enough to flash a scrollbar into the
+   scroller, whose arrival narrows the content box and resizes the zone under
+   the hand mid-gesture. */
+.garden-board__column.is-hovered .garden-board__body {
+  overflow-y: hidden;
+}
+
+.garden-board__cards {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+/* The line inside Ready between what can be picked up and what cannot. A rule
+   and a count: any more would be a second column header. */
+.garden-board__split {
+  align-items: baseline;
+  color: var(--color-text-dimmed);
+  display: flex;
+  font-size: var(--font-size-sm);
+  gap: 8px;
+  margin: 8px 0 3px;
+  padding: 0 8px;
+}
+
+.garden-board__split::after {
+  background: var(--color-border-subtle);
+  content: '';
+  flex: 1 1 auto;
+  height: 1px;
+}
+
+.garden-board__empty {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+  line-height: 1.5;
+  margin: 2px 0 0;
+  padding-right: 12px;
+}
+
+.garden-board__summary {
+  color: var(--color-text-tertiary);
+  display: flex;
+  flex-direction: column;
+  font-size: var(--font-size-sm);
+  gap: 2px;
+  margin: 2px 0 0;
+}
+
+.garden-board__summary .is-withered {
+  color: var(--color-text-muted);
+}
+
+/* -------------------------------------------------------------------- cards */
+
+.garden-card {
+  border-radius: 5px;
+  position: relative;
+}
+
+.garden-card__body {
+  background: transparent;
+  border: none;
+  border-radius: 5px;
+  color: inherit;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  /* A constant right gutter for the drill chevron and the ⏎ hint. Reserved on
+     every card, not only the ones showing them, so selecting a card never
+     reflows the ids and ages under it. */
+  padding: 5px 26px 5px 8px;
+  text-align: left;
+  width: 100%;
+}
+
+.garden-card__body:hover {
+  background: var(--color-bg-elevated);
+}
+
+.garden-card.is-selected .garden-card__body {
+  background: var(--color-bg-elevated);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.garden-card__body:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.garden-card__title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.garden-card.is-harvested .garden-card__title,
+.garden-card.is-withered .garden-card__title {
+  color: var(--color-text-tertiary);
+}
+
+.garden-card__meta {
+  align-items: baseline;
+  display: flex;
+  font-size: var(--font-size-sm);
+  gap: 8px;
+  min-width: 0;
+}
+
+.garden-card__meta > :first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.garden-card__id {
+  color: var(--color-text-muted);
+  flex: none;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-variant-numeric: tabular-nums;
+  margin-left: auto;
+}
+
+.garden-card__age {
+  color: var(--color-text-dimmed);
+  flex: none;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-variant-numeric: tabular-nums;
+  min-width: 2.4em;
+  text-align: right;
+}
+
+.garden-card__ready {
+  color: var(--accent);
+}
+
+.garden-card__held,
+.garden-card__plot {
+  color: var(--color-text-muted);
+}
+
+.garden-card__tender {
+  color: var(--color-text-tertiary);
+}
+
+/* A tender whose session is gone is the one thing on this board somebody has
+   to act on: the seed reads as claimed and nobody is holding it. */
+.garden-card__tender.is-gone {
+  color: var(--color-warning);
+}
+
+.garden-card__gone {
+  color: var(--color-warning);
+}
+
+.garden-card__closed {
+  color: var(--color-text-muted);
+}
+
+.garden-card__closed.is-withered {
+  color: var(--color-text-dimmed);
+}
+
+.garden-card__drill {
+  background: transparent;
+  border: none;
+  color: var(--color-text-dimmed);
+  cursor: pointer;
+  font-size: var(--font-size-md);
+  line-height: 1;
+  padding: 0 6px;
+  position: absolute;
+  right: 2px;
+  top: 5px;
+}
+
+.garden-card:hover .garden-card__drill,
+.garden-card.is-selected .garden-card__drill {
+  color: var(--color-text-secondary);
+}
+
+.garden-card__more {
+  background: transparent;
+  border: none;
+  color: var(--color-text-dimmed);
+  cursor: pointer;
+  font-size: var(--font-size-sm);
+  line-height: 1;
+  padding: 0 4px;
+  pointer-events: none;
+  position: absolute;
+  right: 4px;
+  bottom: 5px;
+}
+
+.garden-card.is-crown .garden-card__more {
+  display: none;
+}
+
+/* The verb menu — the key path for every drop zone on the board, and the whole
+   pointer path for a card you would rather not drag. */
+.garden-card__menu {
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  left: 8px;
+  min-width: 168px;
+  padding: 4px;
+  position: absolute;
+  top: calc(100% - 4px);
+  z-index: 2;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .garden-card__menu {
+    animation: garden-board-rise 140ms ease-out;
+  }
+}
+
+.garden-card__menu button {
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  display: flex;
+  font-size: var(--font-size-sm);
+  gap: 2px;
+  padding: 5px 8px;
+  text-align: left;
+}
+
+.garden-card__menu button:hover,
+.garden-card__menu button:focus-visible {
+  background: var(--color-bg-button);
+  color: var(--color-text-primary);
+  outline: none;
+}
+
+.garden-card__menu-empty {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+  line-height: 1.5;
+  margin: 0;
+  padding: 5px 8px;
+}
+
+.garden-card__menu-hint {
+  color: var(--color-text-dimmed);
+  font-size: var(--font-size-sm);
+  position: absolute;
+  right: 6px;
+  top: 6px;
+}
+
+/* --------------------------------------------------------------- the carry */
+
+/* The card in the hand. Positioned at the cursor and nudged clear of it, so the
+   drop point stays visible; never under the pointer, which would hit-test it
+   instead of the zone below. */
+.garden-board__carry {
+  align-items: baseline;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-hover);
+  border-radius: 6px;
+  display: flex;
+  gap: 10px;
+  left: 0;
+  max-width: 320px;
+  padding: 5px 10px;
+  pointer-events: none;
+  position: fixed;
+  top: 0;
+  z-index: 20;
+}
+
+.garden-board__carry-title {
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.garden-board__carry-id {
+  color: var(--color-text-muted);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--font-size-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+/* -------------------------------------------------------------------- zones */
+
+.garden-board__zones {
+  /* Opaque: the zones replace the column's contents while a card is over it.
+     Letting the cards show through put two lines of type in the same place. */
+  background: var(--color-bg-panel);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  inset: 0;
+  position: absolute;
+  z-index: 3;
+}
+
+.garden-board__zone {
+  align-items: center;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 6px;
+  color: var(--color-text-secondary);
+  cursor: grabbing;
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  gap: 2px;
+  /* The label sits at the top of its zone, not in the middle of it: with two
+     zones the split is where the reader looks, and a column-tall box with a
+     centred label puts the words nowhere near the hand. */
+  justify-content: flex-start;
+  min-height: 56px;
+  padding-top: 9px;
+}
+
+.garden-board__zone.is-over {
+  background: var(--accent-glow);
+  border-color: var(--accent);
+  border-style: solid;
+  color: var(--color-text-primary);
+}
+
+.garden-board__zone-verb {
+  font-size: var(--font-size-md);
+}
+
+.garden-board__zone-id {
+  color: var(--color-text-muted);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--font-size-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .garden-board__zones {
+    animation: garden-board-rise 140ms ease-out;
+  }
+
+  .garden-board__zone {
+    transition: background 140ms ease-out, border-color 140ms ease-out, color 140ms ease-out;
+  }
+}
+
+@keyframes garden-board-rise {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* ----------------------------------------------------------------- composer */
+
+.garden-compose {
+  align-items: baseline;
+  background: var(--color-bg-elevated);
+  border-radius: 6px;
+  display: flex;
+  flex: none;
+  gap: 8px;
+  padding: 7px 8px;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .garden-compose {
+    animation: garden-board-rise 140ms ease-out;
+  }
+}
+
+.garden-compose__verb {
+  color: var(--accent);
+  flex: none;
+  font-size: var(--font-size-sm);
+}
+
+.garden-compose__id {
+  color: var(--color-text-muted);
+  flex: none;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--font-size-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.garden-compose__input {
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-text-primary);
+  flex: 1 1 auto;
+  font-family: inherit;
+  font-size: var(--font-size-sm);
+  min-width: 0;
+  outline: none;
+  padding: 1px 0 2px;
+}
+
+.garden-compose__input:focus {
+  border-bottom-color: var(--accent);
+}
+
+.garden-compose__input::placeholder {
+  color: var(--color-text-dimmed);
+}
+
+.garden-compose__keys {
+  display: flex;
+  flex: none;
+  gap: 4px;
+}
+
+.garden-compose__keys kbd,
+.garden-board kbd {
+  background: var(--color-bg-button);
+  border-radius: 3px;
+  color: var(--color-text-muted);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--font-size-xs);
+  padding: 1px 4px;
+}
+
+.garden-compose__where {
+  color: var(--color-text-dimmed);
+  flex: none;
+  font-size: var(--font-size-sm);
+}
+
+/* -------------------------------------------------------------------- sheet */
+
+.garden-sheet {
+  align-items: center;
+  background: var(--color-bg-overlay);
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  position: absolute;
+  z-index: 10;
+}
+
+.garden-sheet__panel {
+  background: var(--color-bg-panel);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 440px;
+  padding: 16px;
+  width: 100%;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .garden-sheet__panel {
+    animation: garden-board-rise 160ms ease-out;
+  }
+}
+
+.garden-sheet__panel header {
+  align-items: baseline;
+  display: flex;
+  justify-content: space-between;
+}
+
+.garden-sheet__panel header button {
+  background: transparent;
+  border: none;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font-size: var(--font-size-md);
+  line-height: 1;
+  padding: 0 2px;
+}
+
+.garden-sheet__kicker {
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-sm);
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.garden-sheet__title {
+  font-size: var(--font-size);
+  margin: 0;
+}
+
+.garden-sheet__rows {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+}
+
+.garden-sheet__rows > div {
+  display: flex;
+  gap: 12px;
+}
+
+.garden-sheet__rows dt {
+  color: var(--color-text-muted);
+  flex: none;
+  font-size: var(--font-size-sm);
+  width: 46px;
+}
+
+.garden-sheet__rows dd {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  margin: 0;
+}
+
+.garden-sheet__rows dd.is-mono {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-variant-numeric: tabular-nums;
+}
+
+.garden-sheet__command {
+  background: var(--color-bg-elevated);
+  border-radius: 4px;
+  color: var(--color-text-secondary);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--font-size-sm);
+  padding: 6px 8px;
+}
+
+.garden-sheet__note {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+  margin: 0;
+}

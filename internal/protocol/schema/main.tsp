@@ -4602,6 +4602,9 @@ model SeedReadyResult {
 model SeedTransitionMessage {
   "cmd": "seed_transition";
   "source_session_id"?: string;
+  // Set by a WebSocket caller, which correlates the answer by request_id; the
+  // unix-socket callers read the response off their own connection and omit it.
+  "request_id"?: string;
   "seed_id": string;
   // tend | park | harvest | wither | replant.
   "verb": string;
@@ -4609,6 +4612,18 @@ model SeedTransitionMessage {
   "reason"?: string;
   // The crew member asking, recorded as the tender on a claim.
   "member"?: string;
+}
+
+// SeedTransitionResultMessage replies to a WebSocket seed_transition,
+// correlated by request_id. The moved seed rides back so the caller can settle
+// its own optimistic state; the garden push that follows is what everyone else
+// sees.
+model SeedTransitionResultMessage {
+  "event": "seed_transition_result";
+  "request_id": string;
+  "success": boolean;
+  "error"?: string;
+  "seed"?: Seed;
 }
 
 model SeedTransitionResult {
@@ -4653,6 +4668,8 @@ model SeedNote {
 model SeedNoteMessage {
   "cmd": "seed_note";
   "source_session_id"?: string;
+  // Set by a WebSocket caller, as on seed_transition.
+  "request_id"?: string;
   "seed_id": string;
   "body": string;
   "member"?: string;
@@ -4666,6 +4683,16 @@ model SeedNoteMessage {
 
 model SeedNoteResult {
   "note": SeedNote;
+}
+
+// SeedNoteResultMessage replies to a WebSocket seed_note, correlated by
+// request_id.
+model SeedNoteResultMessage {
+  "event": "seed_note_result";
+  "request_id": string;
+  "success": boolean;
+  "error"?: string;
+  "note"?: SeedNote;
 }
 
 // The whole log, newest first — what `show`'s bounded list points at.
@@ -6379,6 +6406,8 @@ alias DaemonEvent =
   | GardenSeedsUpdatedMessage
   | SeedResumeResultMessage
   | SeedDocumentGetResultMessage
+  | SeedTransitionResultMessage
+  | SeedNoteResultMessage
   | CrewUpdatedMessage
   | CrewWakeResultMessage
   | CrewSleepResultMessage

@@ -1,0 +1,21 @@
+kind: added
+area: garden
+change: >
+  A board view over the garden, opened from the same place as the list. Four
+  columns computed from the seeds the daemon already pushes — Ready, Growing,
+  Parked, Closed — with no stored board state, no ordering, and no column field
+  on a seed. Dragging a card splits the target column into one labelled zone per
+  verb the garden would actually accept from where that card is; there is no
+  zone for a move the daemon would refuse, and dropping asks for the note the
+  CLI would have demanded before performing the real lifecycle verb. A crown is
+  a card with a per-state count badge; clicking it re-boards its children and
+  grows the trail, recursively. Arrows walk cards and columns, Enter opens a
+  card's verbs, and Escape climbs the trail one plot at a time before leaving
+  the garden.
+notes: >
+  Design prototype, behind a list/board switch in the garden surface and not
+  covered by tests. Where the two views finally live — one surface with a
+  switch, or two destinations sharing the trail — is deliberately left open.
+  docs/plans/2026-08-20-garden-kanban-board-prototype.md has the reasoning,
+  plus what building the drag zones turned up about the garden itself: there is
+  no verb out of Parked back to Ready, and nothing releases a claim.

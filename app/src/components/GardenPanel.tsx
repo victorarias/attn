@@ -70,6 +70,9 @@ interface GardenPanelProps {
   checkArtifactPath?: (path: string) => Promise<boolean>;
   /** How much of the walk to draw. The dock stacks; fullscreen columns. */
   layout?: 'stack' | 'columns';
+  /** The list/board switch. Owned by the surface: both views show the same one,
+   *  in the same place, so switching moves nothing. */
+  viewToggle?: React.ReactNode;
 }
 
 function formatPlantedAt(iso: string): string {
@@ -480,6 +483,7 @@ export function GardenPanel({
   onResumeSeed,
   checkArtifactPath,
   layout = 'stack',
+  viewToggle,
 }: GardenPanelProps) {
   // The places walked into, root last. Empty is the garden itself.
   const trail = useGardenWalk((walk) => walk.trail);
@@ -988,6 +992,7 @@ export function GardenPanel({
           </>
         )}
       </nav>
+      {viewToggle}
       {closedToggle && (
         // The way in and the way out are the same button. It writes `is:any`
         // into the query rather than keeping a flag beside it, so the line of
