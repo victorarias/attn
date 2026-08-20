@@ -835,12 +835,15 @@ session options:
   --source-session <id>      source session (defaults to ATTN_SESSION_ID)
   --yolo                     bypass agent approval prompts
   --plot <crown>             dispatch the delegate at an existing seed instead of
-                             planting a new one. Aimed at a crown it launches
-                             knowing that plot, and a flag-free "attn seed ready"
-                             inside it answers with the plot's ready seeds. It
-                             is scope, not a fence or an assignment: who holds
-                             what stays the per-seed tender, and --all steps
-                             back out to the whole garden.
+                             planting a new one. The delegate becomes that seed's
+                             tender, and the dispatch refuses before creating
+                             anything if a live session already holds it. Aimed
+                             at a crown it launches knowing that plot, and a
+                             flag-free "attn seed ready" inside it answers with
+                             the plot's ready seeds. Beyond that seed it is
+                             scope, not a fence: who holds each child stays that
+                             seed's tender, and --all steps back out to the
+                             whole garden.
 	--allow-worktree-reuse     explicitly allow another active session to share the worktree
 
 inspection:

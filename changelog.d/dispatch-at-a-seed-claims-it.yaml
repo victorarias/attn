@@ -1,0 +1,11 @@
+kind: fixed
+area: garden
+change: >
+  Dispatching a delegation at an existing seed (attn delegate --plot
+  <seed-id>) now makes the delegate that seed's tender, which is what the
+  delegate's own launch prompt has always told it. A tender whose session
+  no longer exists no longer holds the seed against the dispatch — the
+  same liveness rule attn seed ready reads — so replacing a deleted
+  agent rebinds the work instead of leaving it claimed by a ghost. A seed
+  a live session is tending refuses the dispatch by name, before any
+  worktree, workspace or agent is created.

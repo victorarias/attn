@@ -511,13 +511,19 @@ every attn-launched agent starts knowing the garden's count. The garden is one
 space: it has no workspace dimension at all, and plots are its only grouping
 (ruled 2026-08-13).
 
-**Dispatch-at-plot** aims a delegation at a crown (`attn delegate --plot
-<crown>`). It is scope inference and nothing more: inside that session a
-flag-free `ready` answers with the plot, and its launch guidance starts from
-the crown — the plan in the crown's body, the plot's ready seeds, the freshest
-handoff on each. It is not a fence and not an assignment. The delegate may tend
-or plant anything (`--all` steps back out to the garden), several agents may
-work one plot at once, and who holds what is always the per-seed tender.
+**Dispatch-at-plot** aims a delegation at an existing seed (`attn delegate
+--plot <crown>`). The delegate becomes that seed's tender — its launch prompt
+says so, so the claim has to match — and the dispatch refuses before creating
+anything when a live session already holds it. A tender whose session the
+daemon no longer knows does not hold it (the same liveness `ready` reads), and
+the delegating session's own claim is a hand-over, not a conflict.
+
+Beyond that one seed it is scope inference: inside that session a flag-free
+`ready` answers with the plot, and its launch guidance starts from the crown —
+the plan in the crown's body, the plot's ready seeds, the freshest handoff on
+each. It is not a fence over the plot. The delegate may tend or plant anything
+(`--all` steps back out to the garden), several agents may work one plot at
+once, and who holds each of its children is always that seed's own tender.
 
 **Stale** is a seed claiming attention it is not getting: open, with no log
 movement — no note, no move, no edge — for a window (`attn seed ls --stale`,

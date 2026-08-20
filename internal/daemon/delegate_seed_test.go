@@ -107,8 +107,9 @@ func TestDelegationPlantsASeedTendedByItsDelegate(t *testing.T) {
 	}
 }
 
-// A delegation aimed at a crown reports to that crown. Nothing is planted, and
-// nothing is claimed — a plot's work is its children, and tending stays per-seed.
+// A delegation aimed at a crown reports to that crown and holds it. Nothing is
+// planted — the seed already exists — and the delegate is its tender, which is
+// what its launch prompt tells it.
 func TestDelegationAtACrownBindsItWithoutPlanting(t *testing.T) {
 	d, backend, sourceSessionID := newGardenDelegationDaemon(t)
 	consumeDelegatedPrompt(t, backend)
@@ -140,8 +141,142 @@ func TestDelegationAtACrownBindsItWithoutPlanting(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read the crown: %v", err)
 	}
-	if seed.TenderSession != "" {
-		t.Fatalf("the crown was claimed by %q; a plot dispatch is scope, not a claim", seed.TenderSession)
+	if seed.TenderSession != result.SessionID {
+		t.Fatalf("the crown is tended by %q, want the delegate %q", seed.TenderSession, result.SessionID)
+	}
+	if seed.Status != garden.StatusGrowing {
+		t.Fatalf("the crown is %s, want growing once a delegate holds it", seed.Status)
+	}
+}
+
+// The bug this fix exists for: a seed whose tender's session was deleted was
+// still recorded as held, and the dispatch bound the new delegate to the seed
+// while leaving the claim on the ghost. Liveness decides — the same predicate
+// `ready` reads — so the dispatch takes the seed over.
+func TestDelegationAtASeedHeldByADeadSessionRebindsIt(t *testing.T) {
+	d, backend, sourceSessionID := newGardenDelegationDaemon(t)
+	consumeDelegatedPrompt(t, backend)
+	seed := plantForDelegation(t, d, sourceSessionID, "Held by a ghost")
+	tendAs(t, d, seed.ID, "gone-session")
+
+	result, err := d.delegate(&protocol.DelegateMessage{
+		Cmd:             protocol.CmdDelegate,
+		SourceSessionID: sourceSessionID,
+		Brief:           "take it over",
+		Plot:            protocol.Ptr(seed.ID),
+		Agent:           protocol.Ptr("codex"),
+	})
+	if err != nil {
+		t.Fatalf("delegate(): %v", err)
+	}
+	read, _, err := d.readSeed(seed.ID)
+	if err != nil {
+		t.Fatalf("read the seed: %v", err)
+	}
+	if read.TenderSession != result.SessionID {
+		t.Fatalf("tender = %q, want the new delegate %q", read.TenderSession, result.SessionID)
+	}
+}
+
+// A seed a live session is working is not up for grabs. The refusal lands before
+// any worktree, workspace or session exists — the worst outcome is a launched
+// agent that does not hold the work it was launched for.
+func TestDelegationAtASeedHeldByALiveSessionRefusesBeforeAnythingIsCreated(t *testing.T) {
+	d, backend, sourceSessionID := newGardenDelegationDaemon(t)
+	consumeDelegatedPrompt(t, backend)
+	seed := plantForDelegation(t, d, sourceSessionID, "Somebody else's work")
+	first, err := d.delegate(&protocol.DelegateMessage{
+		Cmd:             protocol.CmdDelegate,
+		SourceSessionID: sourceSessionID,
+		Brief:           "work it",
+		Plot:            protocol.Ptr(seed.ID),
+		Agent:           protocol.Ptr("codex"),
+	})
+	if err != nil {
+		t.Fatalf("first delegate(): %v", err)
+	}
+	holder := first.SessionID
+
+	sessionsBefore := len(d.store.List(""))
+	_, err = d.delegate(&protocol.DelegateMessage{
+		Cmd:             protocol.CmdDelegate,
+		SourceSessionID: sourceSessionID,
+		Brief:           "take it over",
+		Plot:            protocol.Ptr(seed.ID),
+		Agent:           protocol.Ptr("codex"),
+	})
+	if err == nil {
+		t.Fatalf("the dispatch took a seed held by a live session")
+	}
+	if !strings.Contains(err.Error(), seed.ID) || !strings.Contains(err.Error(), holder) {
+		t.Fatalf("the refusal names neither the seed nor its tender: %v", err)
+	}
+	if got := len(d.store.List("")); got != sessionsBefore {
+		t.Fatalf("the refused dispatch created %d session(s)", got-sessionsBefore)
+	}
+	read, _, err := d.readSeed(seed.ID)
+	if err != nil {
+		t.Fatalf("read the seed: %v", err)
+	}
+	if read.TenderSession != holder {
+		t.Fatalf("tender = %q, want the live holder %q", read.TenderSession, holder)
+	}
+}
+
+// Dispatching at a seed you hold yourself is handing your own work over, not
+// stealing it, so it is never the refusal above.
+func TestDelegationAtASeedTheDelegatorHoldsHandsItOver(t *testing.T) {
+	d, backend, sourceSessionID := newGardenDelegationDaemon(t)
+	consumeDelegatedPrompt(t, backend)
+	seed := plantForDelegation(t, d, sourceSessionID, "Mine until now")
+	tendAs(t, d, seed.ID, sourceSessionID)
+
+	result, err := d.delegate(&protocol.DelegateMessage{
+		Cmd:             protocol.CmdDelegate,
+		SourceSessionID: sourceSessionID,
+		Brief:           "here, you take it",
+		Plot:            protocol.Ptr(seed.ID),
+		Agent:           protocol.Ptr("codex"),
+	})
+	if err != nil {
+		t.Fatalf("delegate(): %v", err)
+	}
+	read, _, err := d.readSeed(seed.ID)
+	if err != nil {
+		t.Fatalf("read the seed: %v", err)
+	}
+	if read.TenderSession != result.SessionID {
+		t.Fatalf("tender = %q, want the delegate %q", read.TenderSession, result.SessionID)
+	}
+}
+
+// A closed seed has no open work to dispatch at, and the refusal says how to
+// reopen it rather than launching an agent at finished work.
+func TestDelegationAtAClosedSeedRefuses(t *testing.T) {
+	d, backend, sourceSessionID := newGardenDelegationDaemon(t)
+	consumeDelegatedPrompt(t, backend)
+	seed := plantForDelegation(t, d, sourceSessionID, "Already done")
+	if _, _, err := d.applySeedTransition(seed.ID, garden.VerbHarvest, garden.Tender{Session: sourceSessionID}, "done"); err != nil {
+		t.Fatalf("harvest: %v", err)
+	}
+
+	_, err := d.delegate(&protocol.DelegateMessage{
+		Cmd:             protocol.CmdDelegate,
+		SourceSessionID: sourceSessionID,
+		Brief:           "work it",
+		Plot:            protocol.Ptr(seed.ID),
+		Agent:           protocol.Ptr("codex"),
+	})
+	if err == nil || !strings.Contains(err.Error(), "replant") {
+		t.Fatalf("dispatch at a harvested seed: %v, want a refusal naming replant", err)
+	}
+}
+
+// tendAs claims a seed for an arbitrary session id, through the real move.
+func tendAs(t *testing.T, d *Daemon, seedID, sessionID string) {
+	t.Helper()
+	if _, _, err := d.applySeedTransition(seedID, garden.VerbTend, garden.Tender{Session: sessionID}, ""); err != nil {
+		t.Fatalf("tend %s as %s: %v", seedID, sessionID, err)
 	}
 }
 
