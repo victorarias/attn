@@ -168,8 +168,7 @@ commands:
   guide
         print the craft of keeping the garden worth reading: writing a body,
         where a seed belongs, edit versus replant, a seed whose tender is
-        gone, and how to pick up further work. The rules are already in your
-        launch guidance; this is the judgment behind them.
+        gone, and how to pick up further work.
 
   export <id> [--out <path>] [--json]
         write the seed's body to markdown, stamped as generated from the seed —
