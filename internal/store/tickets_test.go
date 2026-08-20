@@ -650,3 +650,41 @@ func TestSubmitTicketAttachIsAtomicAndIdempotent(t *testing.T) {
 		t.Fatalf("ticket = %+v, attachments=%d", ticket, attachments)
 	}
 }
+
+// CountStrandedTickets counts exactly the mid-flight work the garden cutover
+// left behind: crashed and failed tickets still on the board. A done ticket is
+// finished work, an open one is not stranded yet, and an archived one has been
+// seen — none of them belong in the number a notice prints.
+func TestCountStrandedTickets(t *testing.T) {
+	s := New()
+	t.Cleanup(func() { _ = s.Close() })
+
+	if got, err := s.CountStrandedTickets(); err != nil || got != 0 {
+		t.Fatalf("empty board: got %d, %v; want 0, nil", got, err)
+	}
+
+	mk := func(id string, status TicketStatus) {
+		t.Helper()
+		if _, err := s.CreateTicket(Ticket{ID: id, Title: id, Status: status}, "chief", ticketBase); err != nil {
+			t.Fatalf("CreateTicket %s: %v", id, err)
+		}
+	}
+	mk("crashed-one", TicketStatusCrashed)
+	mk("crashed-two", TicketStatusCrashed)
+	mk("failed-one", TicketStatusFailed)
+	mk("done-one", TicketStatusDone)
+	mk("working-one", TicketStatusWorking)
+	mk("todo-one", TicketStatusTodo)
+	mk("crashed-archived", TicketStatusCrashed)
+	if err := s.ArchiveTicket("crashed-archived", ticketBase); err != nil {
+		t.Fatalf("ArchiveTicket: %v", err)
+	}
+
+	got, err := s.CountStrandedTickets()
+	if err != nil {
+		t.Fatalf("CountStrandedTickets: %v", err)
+	}
+	if got != 3 {
+		t.Fatalf("stranded count = %d, want 3 (two crashed, one failed; archived and non-terminal excluded)", got)
+	}
+}

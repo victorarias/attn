@@ -1424,3 +1424,32 @@ func parseTicketTime(s string) time.Time {
 	}
 	return t
 }
+
+// CountStrandedTickets counts the mid-flight work the garden cutover left
+// behind: tickets that ended crashed or failed and are still on the board.
+//
+// They are the one part of the ticket era nobody converted. The cutover moved
+// the unbound todo column into the garden and left in-flight tickets to drain
+// themselves, but a session that dies stamps its ticket crashed on a surface
+// the garden era gives no reason to visit — so the work reads as gone. This
+// count is what the garden's surfaces point at (`attn ticket list`).
+//
+// Archived tickets are excluded: archiving is the deliberate "I have seen
+// this", and the notice has to be able to reach zero.
+func (s *Store) CountStrandedTickets() (int, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if s.db == nil {
+		return 0, nil
+	}
+	count := 0
+	err := s.db.QueryRow(
+		`SELECT COUNT(*) FROM tickets WHERE archived_at = '' AND status IN (?, ?)`,
+		string(TicketStatusCrashed), string(TicketStatusFailed),
+	).Scan(&count)
+	if err != nil {
+		return 0, err
+	}
+	return count, nil
+}

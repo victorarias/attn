@@ -11,9 +11,12 @@ interface DaemonStore {
   // to the workspace it shows, so switching workspaces needs no round trip.
   // `seedsTotal` is how many the garden holds; it exceeds seeds.length only when
   // the garden outgrew one push, and then the panel says what it is missing.
+  // `strandedTickets` counts the crashed/failed tickets the garden cutover left
+  // on the retired board; 0 means none and nothing is drawn.
   seeds: Seed[];
   seedsTotal: number;
-  setSeeds: (seeds: Seed[], total: number) => void;
+  strandedTickets: number;
+  setSeeds: (seeds: Seed[], total: number, strandedTickets: number) => void;
 
   // The crew: every registered member, awake or asleep. Permanent — a member is
   // in the sidebar whether or not it is living a day right now.
@@ -57,7 +60,8 @@ export const useDaemonStore = create<DaemonStore>((set, get) => ({
 
   seeds: [],
   seedsTotal: 0,
-  setSeeds: (seeds, total) => set({ seeds, seedsTotal: total }),
+  strandedTickets: 0,
+  setSeeds: (seeds, total, strandedTickets) => set({ seeds, seedsTotal: total, strandedTickets }),
 
   crew: [],
   setCrew: (crew) => set({ crew }),

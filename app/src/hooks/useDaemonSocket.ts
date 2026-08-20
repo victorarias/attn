@@ -282,7 +282,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-export const PROTOCOL_VERSION = '262';
+export const PROTOCOL_VERSION = '263';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 // Identifies this app process to the daemon across its own reconnects, so a
@@ -657,7 +657,10 @@ interface UseDaemonSocketOptions {
   // `total` is how many seeds the garden holds; it exceeds `seeds.length` only
   // when the garden outgrew one push, and the panel says so rather than ending
   // silently at the cap.
-  onSeedsUpdate?: (seeds: Seed[], total: number) => void;
+  // `strandedTickets` is how many crashed/failed tickets the garden cutover left
+  // unarchived on the retired board — 0 when there are none, and then the panel
+  // shows nothing at all.
+  onSeedsUpdate?: (seeds: Seed[], total: number, strandedTickets: number) => void;
   // Fired with this daemon's whole app registry on initial_state and on every
   // apps_updated broadcast. A version flip moves an app's content hash, which is
   // how a docked tile learns its bundle URL moved — there is no other signal.
@@ -1614,6 +1617,7 @@ export function useDaemonSocket({
             callbacksRef.current.onSeedsUpdate?.(
               data.seeds || [],
               data.seeds_total ?? (data.seeds || []).length,
+              data.stranded_tickets ?? 0,
             );
             callbacksRef.current.onAppsUpdate?.(data.apps || []);
             callbacksRef.current.onCrewUpdate?.(data.crew || []);
@@ -1786,6 +1790,7 @@ export function useDaemonSocket({
             callbacksRef.current.onSeedsUpdate?.(
               data.seeds || [],
               data.total ?? (data.seeds || []).length,
+              data.stranded_tickets ?? 0,
             );
             break;
 

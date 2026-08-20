@@ -3524,6 +3524,9 @@ type GardenSeedsUpdatedMessage struct {
 	// Seeds corresponds to the JSON schema field "seeds".
 	Seeds []Seed `json:"seeds"`
 
+	// StrandedTickets corresponds to the JSON schema field "stranded_tickets".
+	StrandedTickets *int `json:"stranded_tickets,omitempty,omitzero"`
+
 	// Total corresponds to the JSON schema field "total".
 	Total int `json:"total"`
 }
@@ -3945,6 +3948,9 @@ type InitialStateMessage struct {
 
 	// SourceFingerprint corresponds to the JSON schema field "source_fingerprint".
 	SourceFingerprint *string `json:"source_fingerprint,omitempty,omitzero"`
+
+	// StrandedTickets corresponds to the JSON schema field "stranded_tickets".
+	StrandedTickets *int `json:"stranded_tickets,omitempty,omitzero"`
 
 	// Warnings corresponds to the JSON schema field "warnings".
 	Warnings []DaemonWarning `json:"warnings,omitempty,omitzero"`
@@ -6490,6 +6496,9 @@ type SeedListResult struct {
 
 	// StaleWindowSeconds corresponds to the JSON schema field "stale_window_seconds".
 	StaleWindowSeconds *int `json:"stale_window_seconds,omitempty,omitzero"`
+
+	// StrandedTickets corresponds to the JSON schema field "stranded_tickets".
+	StrandedTickets *int `json:"stranded_tickets,omitempty,omitzero"`
 
 	// Total corresponds to the JSON schema field "total".
 	Total int `json:"total"`

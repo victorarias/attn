@@ -198,6 +198,13 @@ var wireFixtures = map[string]wireFixture{
 	},
 
 	// The garden: every fact re-pushes the whole list.
+	// The board renders nowhere, but a crash or a revive moves the stranded-ticket
+	// count the garden push carries, so this one ticket fact re-pushes the garden.
+	FactTicketStatusChanged: {
+		events:  []string{protocol.EventGardenSeedsUpdated},
+		subject: func(*wireWorld) string { return "tk-1" },
+	},
+
 	FactGardenPlanted:    {events: []string{protocol.EventGardenSeedsUpdated}},
 	FactGardenBodyEdited: {events: []string{protocol.EventGardenSeedsUpdated}},
 	FactGardenTended:     {events: []string{protocol.EventGardenSeedsUpdated}},
@@ -343,7 +350,6 @@ var factsWithoutWire = map[string]string{
 	FactDocumentCollectionRedeclared: "same consumer again; a redeclare that drops a queried field ends live queries at redeclare time",
 	FactAppRuntimeChanged:            "supervision state is read back from the supervisor (`attn app runtime status`), never from a copy",
 	FactTicketCreated:                ticketFactsHaveNoClient,
-	FactTicketStatusChanged:          ticketFactsHaveNoClient,
 	FactTicketCommented:              ticketFactsHaveNoClient,
 	FactTicketAssigned:               ticketFactsHaveNoClient,
 	FactTicketAttached:               ticketFactsHaveNoClient,

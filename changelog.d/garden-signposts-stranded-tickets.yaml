@@ -1,0 +1,10 @@
+kind: fixed
+area: garden
+change: >
+  Work that crashed before the garden is visible from the garden again. The
+  ticket cutover converted the backlog into seeds and left in-flight tickets on
+  the old board, where a dead session's ticket is stamped crashed — a surface
+  the garden gives nobody a reason to open, so that work read as gone. Now
+  `attn seed ls` and the garden panel carry a line while any crashed or failed
+  ticket is still unarchived: how many there are, and that `attn ticket list`
+  still shows them. A garden with none looks exactly as it did.

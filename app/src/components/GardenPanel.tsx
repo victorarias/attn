@@ -44,6 +44,12 @@ interface GardenPanelProps {
   // garden outgrew one push, and then the panel says so: a list that ends at a
   // cap without saying it reads as the whole garden.
   seedsTotal: number;
+  // How many crashed/failed tickets the garden cutover left unarchived on the
+  // retired ticket board. The board renders nowhere in the garden era, so a
+  // stranded ticket reads as work that vanished; the panel points at the one
+  // command that still shows it. 0 or absent draws nothing — a healthy garden
+  // gets no notice.
+  strandedTickets?: number;
   /** Read the seed body and its whole ledger for the expanded drill. */
   fetchSeedDocument?: (seedId: string) => Promise<SeedDocument>;
   /** Dock the seed's annotated reading surface. */
@@ -214,6 +220,7 @@ export function GardenPanel({
   onClose,
   seeds,
   seedsTotal,
+  strandedTickets = 0,
   fetchSeedDocument,
   onOpenAsTile,
   onOpenMarkdownArtifact,
@@ -639,6 +646,14 @@ export function GardenPanel({
           {filtering
             ? `Search covers the newest ${seeds.length} of ${seedsTotal} seeds.`
             : `The garden holds ${seedsTotal} seeds; this panel has the newest ${seeds.length}.`}
+        </p>
+      )}
+
+      {strandedTickets > 0 && (
+        <p className="garden-panel__stranded" data-testid="garden-stranded-tickets">
+          {strandedTickets} crashed or failed {strandedTickets === 1 ? 'ticket' : 'tickets'} from before
+          the garden {strandedTickets === 1 ? 'is' : 'are'} still on the retired ticket board:{' '}
+          <code>attn ticket list</code>
         </p>
       )}
 

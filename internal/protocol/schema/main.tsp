@@ -2972,6 +2972,10 @@ model InitialStateMessage {
   // as well as on garden_seeds_updated so a client that connects to an
   // over-large garden knows it is short before anything moves.
   seeds_total?: int32;
+  // How many crashed/failed tickets are still unarchived on the retired ticket
+  // board. Carried beside the garden so the panel can point at work the
+  // cutover stranded; absent or 0 means none and the panel stays quiet.
+  stranded_tickets?: int32;
   // Every app registered on THIS daemon, with the views it offers. It is what
   // the dock picker lists and what a mounted app tile resolves its bundle URL
   // from. Local only: an app's bundle is an HTTP artifact on the daemon holding
@@ -4439,6 +4443,9 @@ model SeedListResult {
   // The window a stale listing applied, echoed so the output can name the rule
   // it judged by. Absent on a plain listing.
   "stale_window_seconds"?: int32;
+  // How many crashed/failed tickets the garden cutover left unarchived on the
+  // retired board. Absent or 0 means none, and the listing says nothing.
+  "stranded_tickets"?: int32;
 }
 
 model SeedShowMessage {
@@ -4693,6 +4700,9 @@ model GardenSeedsUpdatedMessage {
   // How many seeds the garden holds. Equal to `seeds`'s length until the
   // garden outgrows one push, and then the receipt that says so.
   total: int32;
+  // Unarchived crashed/failed tickets left on the retired board, re-counted
+  // with every garden push. Absent or 0 means none.
+  stranded_tickets?: int32;
 }
 
 // ============================================================================

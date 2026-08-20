@@ -815,6 +815,7 @@ func (d *Daemon) sendInitialState(client *wsClient) {
 		Warnings:          d.getWarnings(),
 		Seeds:             state.Seeds,
 		SeedsTotal:        protocol.Ptr(d.countSeedsForBroadcast()),
+		StrandedTickets:   d.strandedTicketsField(),
 		Apps:              state.Apps,
 		Crew:              state.Crew,
 	}

@@ -250,6 +250,13 @@ replaced it and exits nonzero. Three things survive, on purpose:
 Unbound backlog todos were converted to seeds at the cutover, each carrying its
 description as the seed's body and a log note naming the ticket it came from.
 
+A **stranded ticket** is what the cutover left over: an unarchived ticket that
+ended crashed or failed. Nothing converted it and nobody is coming back to it,
+so it sits on a board the garden era gives no reason to open. While any exist,
+the garden's own surfaces — `attn seed ls` and the garden panel — carry a notice
+with the count and point at `attn ticket list`. Zero stranded tickets, no
+notice.
+
 ## The raw tier
 
 Machine-internal capture under `.attn/raw/`, the keeper's **input**, never

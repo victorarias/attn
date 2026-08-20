@@ -375,9 +375,10 @@ func (d *Daemon) projectGardenSeeds() {
 			return
 		}
 		d.broadcastMessage(&protocol.GardenSeedsUpdatedMessage{
-			Event: protocol.EventGardenSeedsUpdated,
-			Seeds: seeds,
-			Total: total,
+			Event:           protocol.EventGardenSeedsUpdated,
+			Seeds:           seeds,
+			Total:           total,
+			StrandedTickets: d.strandedTicketsField(),
 		})
 	})
 }
@@ -625,6 +626,7 @@ func (d *Daemon) handleSeedList(conn net.Conn, msg *protocol.SeedListMessage) {
 		result.StaleWindowSeconds = protocol.Ptr(int(window / time.Second))
 	}
 	result.Seeds = read.wire(seeds)
+	result.StrandedTickets = d.strandedTicketsField()
 	d.sendGardenResponse(conn, protocol.Response{Ok: true, SeedListResult: result})
 }
 

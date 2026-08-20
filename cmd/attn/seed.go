@@ -410,9 +410,10 @@ func runSeedList(args []string) {
 	if len(result.Seeds) == 0 {
 		if *f.stale {
 			fmt.Println("none — every open seed has moved inside the window")
-			return
+		} else {
+			fmt.Println("the garden is empty — `attn seed plant \"what this is\"` puts something in it")
 		}
-		fmt.Println("the garden is empty — `attn seed plant \"what this is\"` puts something in it")
+		printStrandedTicketNotice(os.Stdout, result.StrandedTickets)
 		return
 	}
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
@@ -427,6 +428,27 @@ func runSeedList(args []string) {
 		fmt.Printf("\nshowing the newest %d of %d seeds — one read is capped at %d. The %d not shown are the oldest; `attn seed show <id>` still reaches any of them.\n",
 			len(result.Seeds), result.Total, len(result.Seeds), result.Total-len(result.Seeds))
 	}
+	printStrandedTicketNotice(os.Stdout, result.StrandedTickets)
+}
+
+// printStrandedTicketNotice is the garden's pointer at the work the ticket
+// cutover left behind: tickets that crashed or failed and never got converted,
+// on a board the garden era gives nobody a reason to open. Without it a user
+// reads the garden as the whole of her work and concludes the rest is gone.
+//
+// Nothing is printed when the count is zero or absent, which is the healthy
+// garden and must stay silent. The count is the daemon's own, never truncated:
+// a vague "some" is not something anyone can act on.
+func printStrandedTicketNotice(w io.Writer, count *int) {
+	n := protocol.Deref(count)
+	if n <= 0 {
+		return
+	}
+	noun := "tickets"
+	if n == 1 {
+		noun = "ticket"
+	}
+	fmt.Fprintf(w, "\n%d crashed or failed %s from before the garden, still on the retired ticket board: `attn ticket list`\n", n, noun)
 }
 
 // staleWindowLabel says the window the daemon actually applied, which is the

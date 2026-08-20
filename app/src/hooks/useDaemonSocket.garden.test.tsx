@@ -129,6 +129,7 @@ describe('useDaemonSocket garden', () => {
     expect(onSeedsUpdate).toHaveBeenCalledWith(
       [expect.objectContaining({ id: 's-aaa111', title: 'already planted' })],
       1,
+      0,
     );
   });
 
@@ -146,6 +147,7 @@ describe('useDaemonSocket garden', () => {
     expect(onSeedsUpdate).toHaveBeenLastCalledWith(
       [expect.objectContaining({ id: 's-bbb222' }), expect.objectContaining({ id: 's-aaa111' })],
       2,
+      0,
     );
   });
 
@@ -155,7 +157,7 @@ describe('useDaemonSocket garden', () => {
   it('reads a garden-less daemon as an empty garden', async () => {
     const { onSeedsUpdate } = await renderWithGarden();
 
-    expect(onSeedsUpdate).toHaveBeenCalledWith([], 0);
+    expect(onSeedsUpdate).toHaveBeenCalledWith([], 0, 0);
   });
 
   // The push is bounded. When the garden outgrows one push the total is what
@@ -175,6 +177,7 @@ describe('useDaemonSocket garden', () => {
     expect(onSeedsUpdate).toHaveBeenLastCalledWith(
       [expect.objectContaining({ id: 's-bbb222' })],
       1421,
+      0,
     );
   });
 
@@ -190,6 +193,53 @@ describe('useDaemonSocket garden', () => {
     expect(onSeedsUpdate).toHaveBeenLastCalledWith(
       [expect.objectContaining({ id: 's-ccc333' })],
       1,
+      0,
     );
+  });
+
+  // The stranded-ticket count rides the same two pushes as the garden itself:
+  // the panel's notice is the only thing pointing at work the ticket cutover
+  // left behind, so a callback that drops the count hides it again.
+  it('carries the stranded-ticket count from initial_state and from every push', async () => {
+    const onSeedsUpdate = vi.fn();
+    renderHook(() =>
+      useDaemonSocket({
+        onSessionsUpdate: vi.fn(),
+        onWorkspacesUpdate: vi.fn(),
+        onPRsUpdate: vi.fn(),
+        onReposUpdate: vi.fn(),
+        onAuthorsUpdate: vi.fn(),
+        onSeedsUpdate,
+        wsUrl: 'ws://localhost:9999/ws',
+      }),
+    );
+    const ws = await waitForOpenSocket();
+    act(() => {
+      ws.emit({
+        event: 'initial_state',
+        protocol_version: PROTOCOL_VERSION,
+        sessions: [],
+        workspaces: [],
+        prs: [],
+        repos: [],
+        authors: [],
+        settings: {},
+        seeds: [],
+        stranded_tickets: 3,
+      });
+    });
+    expect(onSeedsUpdate).toHaveBeenLastCalledWith([], 0, 3);
+
+    act(() => {
+      ws.emit({ event: 'garden_seeds_updated', seeds: [], total: 0, stranded_tickets: 2 });
+    });
+    expect(onSeedsUpdate).toHaveBeenLastCalledWith([], 0, 2);
+
+    // A daemon that sends no count has nothing stranded to report, which is the
+    // same answer as a drained board: no notice.
+    act(() => {
+      ws.emit({ event: 'garden_seeds_updated', seeds: [], total: 0 });
+    });
+    expect(onSeedsUpdate).toHaveBeenLastCalledWith([], 0, 0);
   });
 });

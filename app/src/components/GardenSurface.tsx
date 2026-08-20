@@ -9,6 +9,7 @@ export interface GardenSurfaceProps {
   isOpen: boolean;
   seeds: Seed[];
   seedsTotal: number;
+  strandedTickets?: number;
   fetchSeedDocument?: (seedId: string) => Promise<SeedDocument>;
   onOpenAsTile?: (seedId: string) => void;
   onOpenMarkdownArtifact?: (path: string) => void;
@@ -28,6 +29,7 @@ export function GardenSurface({
   isOpen,
   seeds,
   seedsTotal,
+  strandedTickets,
   fetchSeedDocument,
   onOpenAsTile,
   onOpenMarkdownArtifact,
@@ -51,6 +53,7 @@ export function GardenSurface({
             isOpen
             seeds={seeds}
             seedsTotal={seedsTotal}
+            strandedTickets={strandedTickets}
             fetchSeedDocument={fetchSeedDocument}
             onOpenAsTile={onOpenAsTile}
             onOpenMarkdownArtifact={onOpenMarkdownArtifact}

@@ -88,6 +88,17 @@
   margin: 0 0 8px;
 }
 
+.garden-panel__stranded {
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-sm);
+  margin: 0 0 8px;
+}
+
+.garden-panel__stranded code {
+  font-family: var(--font-mono);
+  color: var(--color-text-secondary);
+}
+
 .garden-panel__list {
   display: flex;
   flex-direction: column;

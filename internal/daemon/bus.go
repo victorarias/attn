@@ -385,6 +385,15 @@ func buildWireProjections() []projection {
 			},
 		},
 		{
+			// A ticket status change is the only live move in or out of the
+			// stranded count the garden push carries: attn stamps crashed when a
+			// session dies mid-flight, and a revive takes it back out. The board
+			// itself still renders nowhere — this re-pushes the garden, not a
+			// ticket.
+			filter: bus.Filter{FactTicketStatusChanged},
+			apply:  func(d *Daemon, _ bus.Event) { d.projectGardenSeeds() },
+		},
+		{
 			filter: bus.Filter{FactSessionPTYResized},
 			apply:  func(d *Daemon, ev bus.Event) { d.projectSessionPTYResized(ev) },
 		},

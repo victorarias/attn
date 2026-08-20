@@ -3694,9 +3694,10 @@ export interface FSWriteResultMessageResult {
 }
 
 export interface GardenSeedsUpdatedMessage {
-    event: GardenSeedsUpdatedMessageEvent;
-    seeds: SeedElement[];
-    total: number;
+    event:             GardenSeedsUpdatedMessageEvent;
+    seeds:             SeedElement[];
+    stranded_tickets?: number;
+    total:             number;
     [property: string]: any;
 }
 
@@ -4174,6 +4175,7 @@ export interface InitialStateMessage {
     sessions?:           SessionObject[];
     settings?:           { [key: string]: string };
     source_fingerprint?: string;
+    stranded_tickets?:   number;
     warnings?:           WarningElement[];
     workspaces?:         WorkspaceElement[];
     [property: string]: any;
@@ -6253,6 +6255,7 @@ export interface SeedLinkResultObject {
 export interface SeedListResultObject {
     seeds:                 SeedElement[];
     stale_window_seconds?: number;
+    stranded_tickets?:     number;
     total:                 number;
     [property: string]: any;
 }
@@ -6740,6 +6743,7 @@ export enum SeedListMessageCmd {
 export interface SeedListResult {
     seeds:                 SeedElement[];
     stale_window_seconds?: number;
+    stranded_tickets?:     number;
     total:                 number;
     [property: string]: any;
 }
@@ -15468,6 +15472,7 @@ const typeMap: any = {
     "GardenSeedsUpdatedMessage": o([
         { json: "event", js: "event", typ: r("GardenSeedsUpdatedMessageEvent") },
         { json: "seeds", js: "seeds", typ: a(r("SeedElement")) },
+        { json: "stranded_tickets", js: "stranded_tickets", typ: u(undefined, 0) },
         { json: "total", js: "total", typ: 0 },
     ], "any"),
     "SeedElement": o([
@@ -15765,6 +15770,7 @@ const typeMap: any = {
         { json: "sessions", js: "sessions", typ: u(undefined, a(r("SessionObject"))) },
         { json: "settings", js: "settings", typ: u(undefined, m("")) },
         { json: "source_fingerprint", js: "source_fingerprint", typ: u(undefined, "") },
+        { json: "stranded_tickets", js: "stranded_tickets", typ: u(undefined, 0) },
         { json: "warnings", js: "warnings", typ: u(undefined, a(r("WarningElement"))) },
         { json: "workspaces", js: "workspaces", typ: u(undefined, a(r("WorkspaceElement"))) },
     ], "any"),
@@ -17068,6 +17074,7 @@ const typeMap: any = {
     "SeedListResultObject": o([
         { json: "seeds", js: "seeds", typ: a(r("SeedElement")) },
         { json: "stale_window_seconds", js: "stale_window_seconds", typ: u(undefined, 0) },
+        { json: "stranded_tickets", js: "stranded_tickets", typ: u(undefined, 0) },
         { json: "total", js: "total", typ: 0 },
     ], "any"),
     "SeedNoteResultObject": o([
@@ -17403,6 +17410,7 @@ const typeMap: any = {
     "SeedListResult": o([
         { json: "seeds", js: "seeds", typ: a(r("SeedElement")) },
         { json: "stale_window_seconds", js: "stale_window_seconds", typ: u(undefined, 0) },
+        { json: "stranded_tickets", js: "stranded_tickets", typ: u(undefined, 0) },
         { json: "total", js: "total", typ: 0 },
     ], "any"),
     "SeedNote": o([
