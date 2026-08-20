@@ -5,7 +5,6 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
-	"syscall"
 	"testing"
 	"time"
 )
@@ -25,13 +24,7 @@ import (
 func TestDaemonAnswersCPRAndDA1FromReadLoop(t *testing.T) {
 	const cols, rows = 80, 24
 
-	fds, err := syscall.Socketpair(syscall.AF_UNIX, syscall.SOCK_STREAM, 0)
-	if err != nil {
-		t.Fatalf("socketpair: %v", err)
-	}
-	ptmx := os.NewFile(uintptr(fds[0]), "ptmx")
-	peer := os.NewFile(uintptr(fds[1]), "peer")
-	t.Cleanup(func() { _ = ptmx.Close(); _ = peer.Close() })
+	ptmx, peer := newPollableSocketpair(t)
 
 	gt := newTestGhostty(t, cols, rows)
 	s := &Session{
@@ -86,13 +79,7 @@ func TestDaemonAnswersCPRAndDA1FromReadLoop(t *testing.T) {
 func TestTerminalQueryRepliesPreserveChunkOrder(t *testing.T) {
 	const cols, rows = 80, 24
 
-	fds, err := syscall.Socketpair(syscall.AF_UNIX, syscall.SOCK_STREAM, 0)
-	if err != nil {
-		t.Fatalf("socketpair: %v", err)
-	}
-	ptmx := os.NewFile(uintptr(fds[0]), "ptmx")
-	peer := os.NewFile(uintptr(fds[1]), "peer")
-	t.Cleanup(func() { _ = ptmx.Close(); _ = peer.Close() })
+	ptmx, peer := newPollableSocketpair(t)
 
 	gt := newTestGhostty(t, cols, rows)
 	s := &Session{

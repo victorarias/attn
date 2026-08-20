@@ -44,6 +44,10 @@ var infoSnapshotHook func()
 // allocated but before the chunk is applied under replayMu. nil in production.
 var readLoopSeqGapHook func()
 
+// colorSchemeReplyHook is a test-only seam fired after a DSR 996 reply is
+// written. nil in production.
+var colorSchemeReplyHook func()
+
 type sessionSubscriber struct {
 	id     string
 	send   func(data []byte, seq uint32) bool
@@ -340,6 +344,9 @@ func (s *Session) readLoop(onExit func(exitCode int, signal string), logf func(s
 				data := chunk[:boundary]
 				queries := detectTerminalQueries(data)
 
+				// A reply makes preceding input observable to the child, so apply
+				// its mode changes before any concurrent theme update can race in.
+				s.trackColorSchemeReports(data)
 				// The worker is the single, always-on responder for CPR, DA1,
 				// and OSC 10/11/12 — race-free regardless of frontend
 				// attach/replay timing; the frontend answers none of these.
@@ -348,8 +355,10 @@ func (s *Session) readLoop(onExit func(exitCode int, signal string), logf func(s
 				}
 				if queries.colorScheme > 0 {
 					s.writeColorSchemeResponses(queries.colorScheme, logf)
+					if colorSchemeReplyHook != nil {
+						colorSchemeReplyHook()
+					}
 				}
-				s.trackColorSchemeReports(data)
 
 				seq := s.seqCounter.Add(1)
 				if readLoopSeqGapHook != nil {
