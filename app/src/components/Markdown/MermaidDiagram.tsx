@@ -315,18 +315,24 @@ function RenderedMermaidDiagram({
 
   return (
     <div className={`markdown-mermaid-frame ${isOversized ? 'markdown-mermaid-frame--oversized' : ''}`.trim()}>
-      {isOversized && (
-        <div className="markdown-mermaid-toolbar" data-md-chrome="1">
-          <span className="markdown-mermaid-status">Large diagram · 100%</span>
-          <button
-            type="button"
-            className="markdown-mermaid-focus-button"
-            onClick={(event) => openFocus(event.currentTarget)}
-          >
-            Focus diagram
-          </button>
-        </div>
-      )}
+      {/* Every diagram gets the header, not only an oversized one: the frame is
+          what tells the reader this is a picture rather than prose, and a
+          picture that only sometimes has an edge is the unpolished case. */}
+      <div className="markdown-mermaid-toolbar" data-md-chrome="1">
+        <span className="markdown-mermaid-label">diagram</span>
+        {isOversized && (
+          <span className="markdown-mermaid-actions">
+            <span className="markdown-mermaid-status">Large diagram · 100%</span>
+            <button
+              type="button"
+              className="markdown-mermaid-focus-button"
+              onClick={(event) => openFocus(event.currentTarget)}
+            >
+              Focus diagram
+            </button>
+          </span>
+        )}
+      </div>
       {viewport}
       {focusState && size && (
         <DiagramFocusView

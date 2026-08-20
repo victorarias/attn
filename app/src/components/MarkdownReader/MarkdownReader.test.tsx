@@ -351,10 +351,11 @@ describe('MarkdownReader large Mermaid diagrams', () => {
     expect(document.querySelectorAll('[data-testid="mermaid-svg"]')).toHaveLength(1);
     expect(container.querySelector('.markdown-mermaid-placeholder')).toBeInTheDocument();
     expect(dialog).toHaveAttribute('data-md-chrome', '1');
-    expect(screen.getByRole('button', { name: 'Focus diagram' }).parentElement).toHaveAttribute(
-      'data-md-chrome',
-      '1',
-    );
+    // What matters is that the whole toolbar sits inside a chrome subtree the
+    // anchoring walker skips, not which element directly holds the button.
+    expect(
+      screen.getByRole('button', { name: 'Focus diagram' }).closest('[data-md-chrome="1"]'),
+    ).not.toBeNull();
 
     fireEvent.keyDown(dialog, { key: '+' });
     expect(screen.getByText('110%')).toBeInTheDocument();

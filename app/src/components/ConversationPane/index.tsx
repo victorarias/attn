@@ -11,7 +11,7 @@ import { useDaemonApi } from '../../contexts/DaemonApiContext';
 import type { ResolvedTheme } from '../../hooks/useTheme';
 import type { UISessionState } from '../../types/sessionState';
 import { ToolCard } from './ToolCard';
-import { Markdown, ReaderDiagramPresentation } from '../Markdown';
+import { Markdown, ReaderPresentation } from '../Markdown';
 import { MarkdownBoundary } from '../Markdown/MarkdownBoundary';
 import './ConversationPane.css';
 
@@ -302,7 +302,7 @@ export function ConversationPane({ sessionId, paneActive, sessionState, resolved
                   {/* A transcript is read, not glanced at: a diagram too wide for
                       the column gets the reader's own size detection, focus view
                       and zoom rather than being silently squeezed. */}
-                  <ReaderDiagramPresentation>
+                  <ReaderPresentation>
                   <Markdown
                     className="conversation-message-text"
                     breaks={item.role === 'user'}
@@ -311,7 +311,7 @@ export function ConversationPane({ sessionId, paneActive, sessionState, resolved
                   >
                     {item.text}
                   </Markdown>
-                  </ReaderDiagramPresentation>
+                  </ReaderPresentation>
                 </MarkdownBoundary>
               </div>
             );

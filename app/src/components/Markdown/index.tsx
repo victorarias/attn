@@ -2,6 +2,7 @@ import { createContext, memo, useContext, useMemo, type ReactNode } from 'react'
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkBreaks from 'remark-breaks';
 import remarkGfm from 'remark-gfm';
+import { CodeFrame } from './CodeFrame';
 import { MermaidDiagram } from './MermaidDiagram';
 import { useShikiHighlight } from './shiki';
 import { PENDING_DIAGRAM_LANGUAGE, prepareStreamingMarkdown, splitStreamingMarkdown } from './streaming';
@@ -12,20 +13,34 @@ import { PENDING_DIAGRAM_LANGUAGE, prepareStreamingMarkdown, splitStreamingMarkd
 // onDiagramLayoutChange reference (e.g. PresentTour after an items-version
 // bump) never remounts an in-flight MermaidDiagram.
 const DiagramLayoutChangeContext = createContext<(() => void) | undefined>(undefined);
-const DiagramPresentationContext = createContext<'static' | 'reader'>('static');
+// Chrome a long-form reading surface wants and a ticket description does not:
+// framed code blocks, framed diagrams, and progressive controls for an
+// oversized one. 'static' is the plain rendering every other markdown surface
+// in attn already had.
+const MarkdownPresentationContext = createContext<'static' | 'reader'>('static');
 // True only inside the tail document of a message still being written. Its text
 // can still change meaning, so anything whose cost is paid per render — today,
 // syntax highlighting — waits until the settled half catches up.
 const VolatileTextContext = createContext(false);
 
-/** Opts a full document reader into progressive controls for oversized diagrams. */
-export function ReaderDiagramPresentation({ children }: { children: ReactNode }) {
+/** Opts a long-form reading surface into the framed-block chrome. */
+export function ReaderPresentation({ children }: { children: ReactNode }) {
   return (
-    <DiagramPresentationContext.Provider value="reader">
+    <MarkdownPresentationContext.Provider value="reader">
       {children}
-    </DiagramPresentationContext.Provider>
+    </MarkdownPresentationContext.Provider>
   );
 }
+
+// react-markdown renders the <pre> for a fence, so the frame has to be here;
+// CodeRenderer only ever gets the <code> inside it.
+const PreRenderer: Components['pre'] = ({ children, className, ...props }) => {
+  const presentation = useContext(MarkdownPresentationContext);
+  if (presentation !== 'reader') {
+    return <pre className={className} {...props}>{children}</pre>;
+  }
+  return <CodeFrame className={className}>{children}</CodeFrame>;
+};
 
 // Diagrams are drawn, not highlighted, and inline code carries no language.
 function highlightableLanguage(className: string | undefined): string | undefined {
@@ -41,7 +56,7 @@ function highlightableLanguage(className: string | undefined): string | undefine
 // component identity) instead of forking diagram rendering.
 export const CodeRenderer: Components['code'] = ({ className, children, ...props }) => {
   const onDiagramLayoutChange = useContext(DiagramLayoutChangeContext);
-  const presentation = useContext(DiagramPresentationContext);
+  const presentation = useContext(MarkdownPresentationContext);
   const volatile = useContext(VolatileTextContext);
   // Hooks run before any of the early returns below can skip them. Inline code
   // has no language and is by far the most common `code` element in a
@@ -86,7 +101,7 @@ export const CodeRenderer: Components['code'] = ({ className, children, ...props
   );
 };
 
-const defaultComponents: Components = { code: CodeRenderer };
+const defaultComponents: Components = { code: CodeRenderer, pre: PreRenderer };
 
 /**
  * One markdown document, re-rendered only when its source text changes.

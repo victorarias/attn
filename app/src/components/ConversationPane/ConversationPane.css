@@ -4,6 +4,25 @@
   height: 100%;
   min-height: 0;
   background: var(--color-bg-editor);
+
+  /* A transcript is a document, not chrome. attn's --font-size-* scale is cut
+     for a dense tool surface — sidebar, dock, tool cards — where 11px body is
+     right; a reader holding 2,500 words of prose is a different job, and
+     inheriting the chrome scale is why this pane read small. These are the
+     measures t3code's chat surface uses (the closest shipped thing to this
+     one): 14px body at 1.65, 13px code, 11px meta. --ui-scale still multiplies
+     through, so scaling the interface scales the reading column with it. */
+  --md-reading-size: calc(14px * var(--ui-scale));
+  --md-reading-line: 1.65;
+  --md-code-size: calc(13px * var(--ui-scale));
+  --md-meta-size: calc(11px * var(--ui-scale));
+
+  /* One frame for every block that is not prose — code, diagrams, tables.
+     Reading is easier when the eye can tell at a glance what is text and what
+     is an object, and a shared border/radius/background is what says so. */
+  --md-frame-radius: 10px;
+  --md-frame-border: color-mix(in srgb, var(--color-border) 70%, transparent);
+  --md-frame-bg: color-mix(in srgb, var(--color-bg-input) 60%, transparent);
 }
 
 .conversation-pane-messages {
@@ -140,15 +159,17 @@
 }
 
 .conversation-message-role {
-  color: var(--color-text-secondary);
-  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+  font-size: var(--md-meta-size);
+  font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.06em;
 }
 
 .conversation-message-text {
   color: var(--color-text-primary);
-  font-size: var(--font-size-sm);
+  font-size: var(--md-reading-size);
+  line-height: var(--md-reading-line);
   word-break: break-word;
 }
 
@@ -160,13 +181,13 @@
 
 /* Every rule below is theme-token only — the pane sits in the same light and
    dark themes as the ticket and reader surfaces and must not invent its own
-   colors. */
+   colors. Block spacing is in em so it tracks the reading size: a fixed 8px
+   gutter that looked right at 11px body is cramped at 14px. */
 .conversation-message-text > :first-child { margin-top: 0; }
 .conversation-message-text > :last-child { margin-bottom: 0; }
 
 .conversation-message-text p {
-  margin: 0 0 8px 0;
-  line-height: 1.55;
+  margin: 0 0 0.7em 0;
 }
 
 .conversation-message-text h1,
@@ -175,56 +196,71 @@
 .conversation-message-text h4,
 .conversation-message-text h5,
 .conversation-message-text h6 {
-  margin: 16px 0 6px 0;
+  margin: 1.5em 0 0.5em 0;
   font-weight: 600;
   line-height: 1.3;
   color: var(--color-text-primary);
 }
 
-.conversation-message-text h1 { font-size: var(--font-size-lg); }
-.conversation-message-text h2 { font-size: var(--font-size-md); }
-.conversation-message-text h3,
+/* Sized against the reading measure rather than the chrome scale, so the
+   hierarchy holds at any --ui-scale. */
+.conversation-message-text h1 { font-size: 1.45em; }
+.conversation-message-text h2 { font-size: 1.25em; }
+.conversation-message-text h3 { font-size: 1.1em; }
 .conversation-message-text h4,
 .conversation-message-text h5,
-.conversation-message-text h6 { font-size: var(--font-size-sm); }
+.conversation-message-text h6 { font-size: 1em; }
+.conversation-message-text h6 { color: var(--color-text-secondary); }
 
 .conversation-message-text ul,
 .conversation-message-text ol {
-  margin: 0 0 8px 0;
-  padding-left: 20px;
+  margin: 0 0 0.7em 0;
+  padding-left: 1.5em;
 }
 
-.conversation-message-text li { margin: 2px 0; }
+.conversation-message-text li { margin: 0.2em 0; }
 .conversation-message-text li > p { margin: 0; }
 
 .conversation-message-text blockquote {
-  margin: 0 0 8px 0;
-  padding-left: 10px;
+  margin: 0 0 0.7em 0;
+  padding-left: 0.9em;
   border-left: 2px solid var(--color-border);
   color: var(--color-text-secondary);
 }
 
-.conversation-message-text code {
+/* Inline code is bordered and sits a touch below the prose size so it reads as
+   a token inside the sentence rather than a hole punched in it. */
+.conversation-message-text :not(pre) > code {
   font-family: 'JetBrains Mono', 'SF Mono', Monaco, Menlo, monospace;
-  font-size: var(--font-size-xs);
-  padding: 0.1em 0.3em;
-  border-radius: 3px;
-  background: var(--color-bg-input);
+  font-size: 0.85em;
+  padding: 0.1em 0.35em;
+  border: 1px solid var(--md-frame-border);
+  border-radius: 5px;
+  background: var(--md-frame-bg);
 }
 
+/* A bare <pre> only reaches this rule on a surface without the code frame
+   (an error fallback, the pending-diagram box). Framed blocks hand their
+   border and background to .markdown-code-frame and leave the pre flat. */
 .conversation-message-text pre {
-  margin: 0 0 8px 0;
-  padding: 8px 10px;
-  border-radius: 4px;
-  background: var(--color-bg-input);
+  margin: 0 0 0.7em 0;
+  padding: 0.7em 0.8em;
+  border: 1px solid var(--md-frame-border);
+  border-radius: var(--md-frame-radius);
+  background: var(--md-frame-bg);
+  font-size: var(--md-code-size);
+  line-height: 1.5;
   /* A code block wider than the pane scrolls inside itself; the transcript
      never scrolls sideways. */
   overflow-x: auto;
+  scrollbar-width: thin;
 }
 
 .conversation-message-text pre code {
   padding: 0;
+  border: none;
   background: none;
+  font-size: inherit;
 }
 
 /* Shiki dual-theme: every span carries --shiki-light and --shiki-dark and the
@@ -256,25 +292,31 @@
   opacity: 0.65;
 }
 
+/* Row separators, no cell grid: a full border grid turns a three-column table
+   into graph paper and competes with the framed blocks around it. */
 .conversation-message-text table {
-  margin: 0 0 8px 0;
+  margin: 0 0 0.7em 0;
   border-collapse: collapse;
   display: block;
   width: max-content;
   max-width: 100%;
   overflow-x: auto;
+  scrollbar-width: thin;
+  font-size: 0.9em;
 }
 
 .conversation-message-text th,
 .conversation-message-text td {
-  border: 1px solid var(--color-border);
-  padding: 4px 8px;
+  border: 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-border) 60%, transparent);
+  padding: 0.45em 0.75em;
   text-align: left;
 }
 
 .conversation-message-text th {
-  background: var(--color-bg-input);
+  background: none;
   font-weight: 600;
+  white-space: nowrap;
 }
 
 .conversation-message-text a {
@@ -285,14 +327,32 @@
 .conversation-message-text a:hover { text-decoration: underline; }
 
 .conversation-message-text hr {
-  margin: 12px 0;
+  margin: 1.5em 0;
   border: 0;
   border-top: 1px solid var(--color-border);
 }
 
 .conversation-message-text img { max-width: 100%; }
 
+/* The user's turn is a bubble, the agent's is the page. A transcript this long
+   needs a way to see where a question ended and the answer began without
+   reading either, and a shape does that faster than a label — which is why the
+   role kicker goes away here. Right-aligned and capped short of the column so
+   the two turns cannot be mistaken for one flow of prose. */
+.conversation-message--user {
+  align-items: flex-end;
+}
+
+.conversation-message--user .conversation-message-role {
+  display: none;
+}
+
 .conversation-message--user .conversation-message-text {
+  max-width: 80%;
+  padding: 0.6em 0.85em;
+  border: 1px solid var(--md-frame-border);
+  border-radius: 14px;
+  background: var(--md-frame-bg);
   color: var(--color-text-secondary);
 }
 

@@ -12,7 +12,6 @@
  *   ATTN_PROFILE=<name> node app/scripts/real-app-harness/nisse-markdown-demo.mjs
  *   ... --theme light          # relaunch in the light theme first
  *   ... --recording md-long    # the 27,540-char reply instead of the tour
- *   ... --keep-open            # leave the app up when the replay ends (default)
  *
  * The app is left running on purpose: scroll back through the transcript, or
  * scroll away mid-replay and watch the view hold still.
