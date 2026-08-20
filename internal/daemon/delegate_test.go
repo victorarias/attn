@@ -596,7 +596,7 @@ func TestDelegateThreadsModelAndEffortIntoSpawn(t *testing.T) {
 	}
 }
 
-func TestDelegateThreadsModelAndEffortIntoPluginDriver(t *testing.T) {
+func TestDelegateDefaultsEffortIntoPluginDriver(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	backend := &fakeSpawnBackend{}
 	_, sourceSessionID, _ := setupDelegationSource(t, d, backend)
@@ -629,8 +629,8 @@ func TestDelegateThreadsModelAndEffortIntoPluginDriver(t *testing.T) {
 				t.Errorf("decode plugin spawn params: %v", err)
 				return
 			}
-			if got.Model != "spotify-glm/zai-org/GLM-5.2-FP8" || got.Effort != "low" {
-				t.Errorf("plugin spawn pins=%q/%q, want selected model/low", got.Model, got.Effort)
+			if got.Model != "spotify-glm/zai-org/GLM-5.2-FP8" || got.Effort != "medium" {
+				t.Errorf("plugin spawn pins=%q/%q, want selected model/medium", got.Model, got.Effort)
 			}
 			respondPluginRequest(t, client, request, pluginDriverSpawnResult{Argv: []string{"fixture"}})
 			return
@@ -643,16 +643,13 @@ func TestDelegateThreadsModelAndEffortIntoPluginDriver(t *testing.T) {
 		Brief:           "Use the selected OpenCode variant.",
 		Agent:           protocol.Ptr("fixture"),
 		Model:           protocol.Ptr("spotify-glm/zai-org/GLM-5.2-FP8"),
-		Effort:          protocol.Ptr("LOW"),
 	}); err != nil {
 		t.Fatalf("delegate() error=%v", err)
 	}
 	<-requestDone
 }
 
-// A delegation without pins must not inherit any: the spawned agent keeps its
-// own defaults (empty model/effort all the way down).
-func TestDelegateWithoutModelEffortLeavesAgentDefaults(t *testing.T) {
+func TestDelegateDefaultsEffortForSupportedAgent(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	backend := &fakeSpawnBackend{}
 	_, sourceSessionID, _ := setupDelegationSource(t, d, backend)
@@ -661,14 +658,35 @@ func TestDelegateWithoutModelEffortLeavesAgentDefaults(t *testing.T) {
 	if _, err := d.delegate(&protocol.DelegateMessage{
 		Cmd:             protocol.CmdDelegate,
 		SourceSessionID: sourceSessionID,
-		Brief:           "Run with agent defaults.",
+		Brief:           "Run with the default effort.",
 		Agent:           protocol.Ptr("claude"),
+		Model:           protocol.Ptr("opus"),
 	}); err != nil {
 		t.Fatalf("delegate() error = %v", err)
 	}
 	spawn, ok := backend.LastSpawn()
-	if !ok || spawn.Model != "" || spawn.Effort != "" {
-		t.Fatalf("spawn model/effort = %q/%q, want both empty", spawn.Model, spawn.Effort)
+	if !ok || spawn.Model != "opus" || spawn.Effort != "medium" {
+		t.Fatalf("spawn model/effort = %q/%q, want opus/medium", spawn.Model, spawn.Effort)
+	}
+}
+
+func TestDelegateDoesNotDefaultEffortForUnsupportedAgent(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	backend := &fakeSpawnBackend{}
+	_, sourceSessionID, _ := setupDelegationSource(t, d, backend)
+	consumeDelegatedPrompt(t, backend)
+
+	if _, err := d.delegate(&protocol.DelegateMessage{
+		Cmd:             protocol.CmdDelegate,
+		SourceSessionID: sourceSessionID,
+		Brief:           "Run without an unsupported effort pin.",
+		Agent:           protocol.Ptr("copilot"),
+	}); err != nil {
+		t.Fatalf("delegate() error = %v", err)
+	}
+	spawn, ok := backend.LastSpawn()
+	if !ok || spawn.Effort != "" {
+		t.Fatalf("spawn effort = %q, want empty", spawn.Effort)
 	}
 }
 

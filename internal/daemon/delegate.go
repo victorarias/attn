@@ -164,6 +164,22 @@ func (d *Daemon) validateDelegationModelEffort(agent, model, effort string) erro
 	return nil
 }
 
+func (d *Daemon) defaultDelegationEffort(agent, effort string) string {
+	if effort != "" {
+		return effort
+	}
+	if pluginDriver, ok := d.ensurePluginRegistry().driver(agent); ok {
+		if pluginDriver.Capabilities["effort_pin"] {
+			return "medium"
+		}
+		return ""
+	}
+	if agentdriver.EffectiveCapabilities(agentdriver.Get(agent)).HasEffortPin {
+		return "medium"
+	}
+	return ""
+}
+
 func delegationPlacement(msg *protocol.DelegateMessage) string {
 	placement := strings.TrimSpace(strings.ToLower(protocol.Deref(msg.Placement)))
 	if placement != "" {
@@ -654,6 +670,7 @@ func (d *Daemon) delegateOperation(msg *protocol.DelegateMessage, operationID, r
 	if err := d.validateDelegationModelEffort(agent, model, effort); err != nil {
 		return nil, err
 	}
+	effort = d.defaultDelegationEffort(agent, effort)
 	// The crown is resolved before any worktree or runtime side effect: a
 	// delegation aimed at nothing should refuse, not launch unaimed.
 	if err := d.validateDispatchCrown(strings.TrimSpace(protocol.Deref(msg.Plot))); err != nil {
