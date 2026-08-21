@@ -1,0 +1,10 @@
+kind: fixed
+area: daemon
+change: >
+  A CI-only fix: TestDispatchLeavesAParkedRuntimeParked waited on the
+  supervisor's parked phase before pinning "one outage, one notification", but
+  the supervisor publishes the phase before its OnGiveUp sink finishes writing
+  the notification, so a loaded runner could read the store mid-write and see
+  zero. The test now waits for the notification itself — the same signal the
+  sibling park-visibility test already uses — and the one-notification pin is
+  unchanged.
