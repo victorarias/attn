@@ -97,17 +97,18 @@ var ticketSignposts = map[string]ticketSignpost{
 	"subscribe": {
 		Lead: "following somebody else's work",
 		Moves: [][2]string{
+			{"watch it", `attn seed watch <seed-id>`},
 			{"read the log", `attn seed notes <seed-id>`},
 			{"read the seed", `attn seed show <seed-id>`},
 		},
-		Note: "The garden has no subscription: a seed's log is read when you want it, never pushed.",
+		Note: "A watch rings on lifecycle moves; notes stay quiet unless their author uses --ring.",
 	},
 	"unsubscribe": {
 		Lead: "unfollowing somebody else's work",
 		Moves: [][2]string{
-			{"read the log", `attn seed notes <seed-id>`},
+			{"stop watching", `attn seed unwatch <seed-id>`},
 		},
-		Note: "The garden has no subscription to leave; stop reading the log.",
+		Note: "Unwatch removes an explicit watch; a delegation's dispatcher watch follows the dispatch relationship.",
 	},
 }
 

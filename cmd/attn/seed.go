@@ -53,6 +53,8 @@ func runSeed() {
 		runSeedTransition(os.Args[2], args)
 	case "note":
 		runSeedNote(args)
+	case "watch", "unwatch":
+		runSeedWatch(os.Args[2], args)
 	case "attach", "detach":
 		runSeedArtifact(os.Args[2], args)
 	case "notes":
@@ -118,6 +120,10 @@ commands:
         every edge that touches it in both directions, its body, and the newest
         notes on its log.
 
+  watch <id> | unwatch <id>
+        ring this session when the seed or anything in its plot moves. A watch
+        survives through the session's day; unwatch is the way out.
+
   edit <id> -m <body>
         replace the seed's markdown body without moving its state or claim.
         - reads stdin; an explicit empty -m clears the body.
@@ -145,11 +151,12 @@ commands:
         reopen a harvested or withered seed. A closed seed reopens before it
         moves again.
 
-  note <id> -m "<what happened>" [--handoff]
+  note <id> -m "<what happened>" [--handoff] [--ring]
         append to the seed's log — what happened and what you learned, for
         whoever tends it next. - reads stdin. --handoff addresses it to your
         successor on this seed: show renders the freshest one first and tend
         prints it on the claim, so it is read before any work.
+        --ring tells watchers to look; ordinary notes stay quiet.
 
   attach <id> (--path <file> [--repo <repo>] | --notebook <id> | --url <u>) [-m "<why>"]
         associate a document with the seed. Where the document lives does not
@@ -181,6 +188,7 @@ flags:
   --window <d>       the stale window, like 72h or 14d (ls --stale)
   -f <path>          the plot payload to read (plot; default stdin)
   --handoff          write a note to whoever tends the seed next (note)
+  --ring             ring watchers after this note lands (note)
   --path <file>      a markdown document at this path (attach, detach)
   --repo <name>      the repository that path lives in (attach, detach)
   --notebook <id>    a Notebook document (attach, detach)
@@ -248,6 +256,7 @@ type seedFlags struct {
 	out      *string
 	limit    *int
 	handoff  *bool
+	ring     *bool
 	path     *string
 	repo     *string
 	notebook *string
@@ -277,6 +286,7 @@ func newSeedFlags(verb string) *seedFlags {
 		out:      fs.String("out", "", "file to write (- for stdout)"),
 		limit:    fs.Int("limit", 0, "how many log entries to read"),
 		handoff:  fs.Bool("handoff", false, "write this note to whoever tends the seed next"),
+		ring:     fs.Bool("ring", false, "ring the seed's watchers after this note lands"),
 		path:     fs.String("path", "", "a markdown document at this path"),
 		repo:     fs.String("repo", "", "the repository the path lives in"),
 		notebook: fs.String("notebook", "", "a Notebook document, by its id"),
@@ -569,7 +579,7 @@ func runSeedShow(args []string) {
 	if len(positionals) != 1 {
 		seedFail("show", fmt.Errorf("needs exactly one seed id, got %d: attn seed show s-7k3f9m", len(positionals)))
 	}
-	result, err := seedClient().SeedShow(positionals[0])
+	result, err := seedClient().SeedShow(f.sessionID(), positionals[0])
 	if err != nil {
 		seedFail("show", err)
 	}
@@ -647,7 +657,7 @@ func fprintArtifacts(w io.Writer, artifacts []protocol.SeedArtifactReference) {
 // continuity note under the body is a note nobody reads.
 func fprintSeedShow(w io.Writer, result *protocol.SeedShowResult) {
 	fprintHandoff(w, result.Handoff)
-	fprintSeed(w, result.Seed)
+	fprintSeed(w, result.Seed, result.Watching)
 	if len(result.Relations) > 0 {
 		fmt.Fprintln(w)
 		fprintRelations(w, result.Relations)
@@ -804,7 +814,7 @@ func readyScopeName(result *protocol.SeedReadyResult) string {
 	return "in the garden"
 }
 
-func fprintSeed(out io.Writer, seed protocol.Seed) {
+func fprintSeed(out io.Writer, seed protocol.Seed, watching ...bool) {
 	w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
 	fmt.Fprintf(w, "%s\t%s\n", seed.ID, seed.Title)
 	fmt.Fprintf(w, "status\t%s\n", seed.Status)
@@ -829,6 +839,9 @@ func fprintSeed(out io.Writer, seed protocol.Seed) {
 	}
 	if seed.Ready {
 		fmt.Fprintf(w, "ready\tyes\n")
+	}
+	if len(watching) > 0 && watching[0] {
+		fmt.Fprintf(w, "watching\tyes\n")
 	}
 	w.Flush()
 	if body := strings.TrimRight(seed.Body, "\n"); body != "" {
@@ -919,7 +932,7 @@ func runSeedNote(args []string) {
 		seedFail("note", fmt.Errorf(`needs exactly one seed id, got %d: attn seed note s-7k3f9m -m "what happened"`, len(positionals)))
 	}
 	result, err := seedClient().SeedNote(
-		f.sessionID(), positionals[0], f.text("note"), strings.TrimSpace(*f.member), f.noteKind(), nil)
+		f.sessionID(), positionals[0], f.text("note"), strings.TrimSpace(*f.member), f.noteKind(), *f.ring, nil)
 	if err != nil {
 		seedFail("note", err)
 	}
@@ -932,6 +945,35 @@ func runSeedNote(args []string) {
 		return
 	}
 	fmt.Printf("noted on %s\n", result.Note.SeedID)
+}
+
+func runSeedWatch(verb string, args []string) {
+	f := newSeedFlags(verb)
+	positionals := f.parse(verb, args)
+	if len(positionals) != 1 {
+		seedFail(verb, fmt.Errorf("needs exactly one seed id, got %d: attn seed %s s-7k3f9m", len(positionals), verb))
+	}
+	result, err := seedClient().SeedWatch(f.sessionID(), positionals[0], verb == "unwatch")
+	if err != nil {
+		seedFail(verb, err)
+	}
+	if *f.json {
+		writeJSON(result)
+		return
+	}
+	if result.Watching {
+		if result.Changed {
+			fmt.Printf("watching %s — its activity and anything below it will ring this session\n", result.SeedID)
+		} else {
+			fmt.Printf("already watching %s\n", result.SeedID)
+		}
+		return
+	}
+	if result.Changed {
+		fmt.Printf("stopped watching %s\n", result.SeedID)
+	} else {
+		fmt.Printf("not watching %s\n", result.SeedID)
+	}
 }
 
 // runSeedArtifact writes one attach or detach. The reference is assembled from
@@ -955,7 +997,7 @@ func runSeedArtifact(verb string, args []string) {
 	// The body is optional here alone: the daemon renders one from the reference
 	// when the caller had nothing to add, so the log reads as prose either way.
 	result, err := seedClient().SeedNote(
-		f.sessionID(), positionals[0], f.text(verb), strings.TrimSpace(*f.member), kind, artifact)
+		f.sessionID(), positionals[0], f.text(verb), strings.TrimSpace(*f.member), kind, false, artifact)
 	if err != nil {
 		seedFail(verb, err)
 	}
@@ -1023,7 +1065,7 @@ func runSeedNotes(args []string) {
 	if len(positionals) != 1 {
 		seedFail("notes", fmt.Errorf("needs exactly one seed id, got %d: attn seed notes s-7k3f9m", len(positionals)))
 	}
-	result, err := seedClient().SeedNotes(positionals[0], *f.limit)
+	result, err := seedClient().SeedNotes(f.sessionID(), positionals[0], *f.limit)
 	if err != nil {
 		seedFail("notes", err)
 	}
@@ -1072,7 +1114,7 @@ func runSeedExport(args []string) {
 	if len(positionals) != 1 {
 		seedFail("export", fmt.Errorf("needs exactly one seed id, got %d: attn seed export s-7k3f9m", len(positionals)))
 	}
-	result, err := seedClient().SeedShow(positionals[0])
+	result, err := seedClient().SeedShow(f.sessionID(), positionals[0])
 	if err != nil {
 		seedFail("export", err)
 	}

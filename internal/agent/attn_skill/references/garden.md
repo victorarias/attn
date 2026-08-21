@@ -26,6 +26,17 @@ reference is the rules and the judgment.
 `attn seed plot -f <payload.json>` plants a whole crown and its children in one
 move.
 
+## Rings and watches
+
+Lifecycle moves ring the sessions with a stake in the seed. Notes stay quiet
+unless you add `--ring`: ring when somebody needs to look, and let ordinary
+progress accumulate silently on the log. `attn seed watch <id>` gives this
+session a stake; watching a crown covers everything in its plot. `attn seed
+unwatch <id>` is the way out.
+
+A bell carries only the seed and what moved, so read it with `attn seed show`;
+`show` or `notes` resets the bell for the next meaningful move.
+
 ## Writing a seed's body
 
 A seed's body is the brief — the literal prompt a delegate receives when it is

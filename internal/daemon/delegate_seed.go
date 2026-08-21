@@ -69,9 +69,10 @@ func (d *Daemon) bindDelegatedSeed(sessionID, plannerSessionID, brief, name, cro
 	} else if err := d.tendDispatchedSeed(sessionID, plannerSessionID, seedID); err != nil {
 		return "", err
 	}
-	if err := d.recordGardenDispatch(sessionID, seedID, cwd, agent, fromChief); err != nil {
+	if err := d.recordGardenDispatch(sessionID, seedID, plannerSessionID, cwd, agent, fromChief); err != nil {
 		return "", fmt.Errorf("bind %s to session %s: %w", seedID, sessionID, err)
 	}
+	d.ringSeedActivity(seedID, gardenRingEvents[garden.VerbTend], sessionID, plannerSessionID)
 	return seedID, nil
 }
 

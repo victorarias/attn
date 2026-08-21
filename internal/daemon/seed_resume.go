@@ -158,7 +158,7 @@ func (d *Daemon) resumeSeed(seedID string) (*seedResumeOutcome, error) {
 		return nil, rollback.fail(fmt.Errorf("resume session was not persisted"))
 	}
 	if seedFallback {
-		if err := d.recordGardenDispatch(sessionID, seed.ID, directory, agent, false); err != nil {
+		if err := d.recordGardenDispatch(sessionID, seed.ID, "", directory, agent, false); err != nil {
 			d.logf("resume: reopened %s but could not bind its fallback session %s: %v", seed.ID, sessionID, err)
 		} else {
 			d.rememberDispatchResume(sessionID, resumeID)

@@ -709,10 +709,14 @@ func (d *Daemon) handleSeedShow(conn net.Conn, msg *protocol.SeedShowMessage) {
 	if progress, ok := read.progress(seed.ID); ok {
 		wire.PlotProgress = progress
 	}
+	sessionID := strings.TrimSpace(protocol.Deref(msg.SourceSessionID))
+	watching := d.seedWatching(sessionID, seed.ID)
+	d.consumeSeedBell(sessionID, seed.ID)
 	d.sendGardenResponse(conn, protocol.Response{
 		Ok: true,
 		SeedShowResult: &protocol.SeedShowResult{
 			Seed:       wire,
+			Watching:   watching,
 			Notes:      notes,
 			NotesTotal: total,
 			Relations:  gardenRelations(read, seed.ID),
@@ -1127,13 +1131,14 @@ func (d *Daemon) dispatchesCollection() (*docstore.CollectionSchema, error) {
 // directory and agent a resume would relaunch it from. Last write wins on
 // purpose: a session reports to one seed, and re-dispatching a recovered
 // session at a new crown is a re-aim, not a conflict.
-func (d *Daemon) recordGardenDispatch(sessionID, crown, cwd, agent string, fromChief bool) error {
+func (d *Daemon) recordGardenDispatch(sessionID, crown, dispatcherSession, cwd, agent string, fromChief bool) error {
 	schema, err := d.dispatchesCollection()
 	if err != nil {
 		return err
 	}
 	body, err := garden.Dispatch{
-		SessionID: sessionID, Crown: crown, Cwd: cwd, Agent: agent, FromChief: fromChief,
+		SessionID: sessionID, Crown: crown, DispatcherSession: dispatcherSession,
+		Cwd: cwd, Agent: agent, FromChief: fromChief,
 	}.Encode()
 	if err != nil {
 		return err
@@ -1486,6 +1491,7 @@ func (d *Daemon) handleSeedTransition(conn net.Conn, msg *protocol.SeedTransitio
 	// place that still tracks this work has it, and a caller that harvests and
 	// then reads the board must not see the ticket mid-flight.
 	d.mirrorSeedMoveOntoTicket(sessionID, seed.ID, verb, protocol.Deref(msg.Reason))
+	d.ringSeedActivity(seed.ID, gardenRingEvents[verb], sessionID)
 	d.sendGardenResponse(conn, protocol.Response{Ok: true, SeedTransitionResult: result})
 }
 
@@ -1572,6 +1578,9 @@ func (d *Daemon) handleSeedNote(conn net.Conn, msg *protocol.SeedNoteMessage) {
 	}
 	// Mirrored before the response, for the reason handleSeedTransition states.
 	d.mirrorSeedNoteOntoTicket(authorSession, msg.SeedID, note.Body)
+	if protocol.Deref(msg.Ring) {
+		d.ringSeedActivity(msg.SeedID, "note", authorSession)
+	}
 	d.sendGardenResponse(conn, protocol.Response{
 		Ok:             true,
 		SeedNoteResult: &protocol.SeedNoteResult{Note: note},
@@ -1715,6 +1724,7 @@ func (d *Daemon) handleSeedNotes(conn net.Conn, msg *protocol.SeedNotesMessage) 
 		d.sendGardenError(conn, "notes", err)
 		return
 	}
+	d.consumeSeedBell(protocol.Deref(msg.SourceSessionID), seed.ID)
 	d.sendGardenResponse(conn, protocol.Response{
 		Ok:              true,
 		SeedNotesResult: &protocol.SeedNotesResult{Notes: notes, Total: total},

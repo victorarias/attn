@@ -4451,11 +4451,18 @@ model SeedListResult {
 
 model SeedShowMessage {
   "cmd": "seed_show";
+  // The reading session. When present, showing the seed consumes its pending
+  // bell for this reader and reports whether the reader explicitly watches it.
+  "source_session_id"?: string;
   "seed_id": string;
 }
 
 model SeedShowResult {
   "seed": Seed;
+  // This session explicitly watches this seed. Automatic dispatch watches are
+  // intentionally not rendered: they are part of the dispatch relationship,
+  // not a subscription the session can remove.
+  "watching": boolean;
   // The newest entries on the seed's log, and how many it holds. Notes ride
   // the read the tender already runs: a log nobody is told to look at is the
   // unread bulletin board this surface replaces. The list is bounded, so
@@ -4676,6 +4683,9 @@ model SeedNoteMessage {
   // Omitted is a plain log entry, so a caller that never heard of kinds
   // writes a note. An unknown kind is refused, naming the whole set.
   "kind"?: string;
+  // Ring the seed's watchers after the note commits. Ordinary notes stay
+  // silent; ringing is the author's explicit request for eyes.
+  "ring"?: boolean;
   // Required on attach and detach, refused on every other kind. When the body
   // is empty the daemon renders one from this reference.
   "artifact"?: SeedArtifactReference;
@@ -4698,6 +4708,8 @@ model SeedNoteResultMessage {
 // The whole log, newest first — what `show`'s bounded list points at.
 model SeedNotesMessage {
   "cmd": "seed_notes";
+  // Reading the log consumes this session's pending bell for the seed.
+  "source_session_id"?: string;
   "seed_id": string;
   "limit"?: int32;
 }
@@ -4705,6 +4717,22 @@ model SeedNotesMessage {
 model SeedNotesResult {
   "notes": SeedNote[];
   "total": int32;
+}
+
+// Add or remove one session's explicit watch on a seed. The watch survives
+// daemon restarts and session state changes; unwatch is the exact way out.
+model SeedWatchMessage {
+  "cmd": "seed_watch";
+  "source_session_id": string;
+  "seed_id": string;
+  "unwatch"?: boolean;
+}
+
+model SeedWatchResult {
+  "seed_id": string;
+  "watching": boolean;
+  // False when the subscription was already exactly as requested.
+  "changed": boolean;
 }
 
 // Reopen the agent that tends a seed. The tender is the delegate the seed was
@@ -5530,6 +5558,7 @@ model Response {
   seed_transition_result?: SeedTransitionResult;
   seed_note_result?: SeedNoteResult;
   seed_notes_result?: SeedNotesResult;
+  seed_watch_result?: SeedWatchResult;
   seed_link_result?: SeedLinkResult;
   seed_ready_result?: SeedReadyResult;
   doc_define_result?: DocDefineResult;

@@ -388,7 +388,7 @@ func TestGardenPlot_ThePrimerAndReadyAgreeInsideAPlot(t *testing.T) {
 			{Title: "third step"},
 		},
 	})
-	if err := d.recordGardenDispatch("sess-b", planted.Crown.ID, "", "", false); err != nil {
+	if err := d.recordGardenDispatch("sess-b", planted.Crown.ID, "", "", "", false); err != nil {
 		t.Fatalf("recordGardenDispatch: %v", err)
 	}
 

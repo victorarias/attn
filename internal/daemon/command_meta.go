@@ -53,6 +53,7 @@ var CommandMeta = map[string]CommandMetadata{
 	protocol.CmdSeedTransition:             commandMetadata(ScopeHubLocal, false, true),
 	protocol.CmdSeedNote:                   commandMetadata(ScopeHubLocal, false, true),
 	protocol.CmdSeedNotes:                  commandMetadata(ScopeHubLocal, false, true),
+	protocol.CmdSeedWatch:                  commandMetadata(ScopeHubLocal, false, true),
 	protocol.CmdSeedLink:                   commandMetadata(ScopeHubLocal, false, true),
 	protocol.CmdSeedReady:                  commandMetadata(ScopeHubLocal, false, true),
 	protocol.CmdSeedResume:                 commandMetadata(ScopeHubLocal, false, true),

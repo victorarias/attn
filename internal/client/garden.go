@@ -87,8 +87,12 @@ func (c *Client) SeedList(sessionID string, stale bool, staleWindowSeconds int) 
 }
 
 // SeedShow reads one seed and the newest entries on its log.
-func (c *Client) SeedShow(seedID string) (*protocol.SeedShowResult, error) {
-	resp, err := c.send(protocol.SeedShowMessage{Cmd: protocol.CmdSeedShow, SeedID: seedID})
+func (c *Client) SeedShow(sessionID, seedID string) (*protocol.SeedShowResult, error) {
+	msg := protocol.SeedShowMessage{Cmd: protocol.CmdSeedShow, SeedID: seedID}
+	if sessionID != "" {
+		msg.SourceSessionID = protocol.Ptr(sessionID)
+	}
+	resp, err := c.send(msg)
 	if err != nil {
 		return nil, err
 	}
@@ -137,7 +141,7 @@ func (c *Client) SeedTransition(sessionID, seedID, verb, reason, member string) 
 
 // SeedNote appends one entry to a seed's log. An empty kind is the plain
 // entry; `handoff` writes it to whoever tends the seed next.
-func (c *Client) SeedNote(sessionID, seedID, body, member, kind string, artifact *protocol.SeedArtifactReference) (*protocol.SeedNoteResult, error) {
+func (c *Client) SeedNote(sessionID, seedID, body, member, kind string, ring bool, artifact *protocol.SeedArtifactReference) (*protocol.SeedNoteResult, error) {
 	msg := protocol.SeedNoteMessage{Cmd: protocol.CmdSeedNote, SeedID: seedID, Body: body, Artifact: artifact}
 	if sessionID != "" {
 		msg.SourceSessionID = protocol.Ptr(sessionID)
@@ -147,6 +151,9 @@ func (c *Client) SeedNote(sessionID, seedID, body, member, kind string, artifact
 	}
 	if kind != "" {
 		msg.Kind = protocol.Ptr(kind)
+	}
+	if ring {
+		msg.Ring = protocol.Ptr(true)
 	}
 	resp, err := c.send(msg)
 	if err != nil {
@@ -204,8 +211,11 @@ func (c *Client) SeedReady(sessionID, plot string, all bool) (*protocol.SeedRead
 
 // SeedNotes reads a seed's whole log, newest first. limit 0 takes the
 // daemon's bound.
-func (c *Client) SeedNotes(seedID string, limit int) (*protocol.SeedNotesResult, error) {
+func (c *Client) SeedNotes(sessionID, seedID string, limit int) (*protocol.SeedNotesResult, error) {
 	msg := protocol.SeedNotesMessage{Cmd: protocol.CmdSeedNotes, SeedID: seedID}
+	if sessionID != "" {
+		msg.SourceSessionID = protocol.Ptr(sessionID)
+	}
 	if limit > 0 {
 		msg.Limit = protocol.Ptr(limit)
 	}
@@ -217,6 +227,24 @@ func (c *Client) SeedNotes(seedID string, limit int) (*protocol.SeedNotesResult,
 		return nil, fmt.Errorf("the daemon answered without a log")
 	}
 	return resp.SeedNotesResult, nil
+}
+
+// SeedWatch makes one session's explicit watch exactly as requested.
+func (c *Client) SeedWatch(sessionID, seedID string, unwatch bool) (*protocol.SeedWatchResult, error) {
+	msg := protocol.SeedWatchMessage{
+		Cmd: protocol.CmdSeedWatch, SourceSessionID: sessionID, SeedID: seedID,
+	}
+	if unwatch {
+		msg.Unwatch = protocol.Ptr(true)
+	}
+	resp, err := c.send(msg)
+	if err != nil {
+		return nil, err
+	}
+	if resp.SeedWatchResult == nil {
+		return nil, fmt.Errorf("the daemon accepted the watch change but returned no state")
+	}
+	return resp.SeedWatchResult, nil
 }
 
 // SeedPlot plants a whole plot in one move: the crown and its children with
