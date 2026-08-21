@@ -679,8 +679,8 @@ describe("AttnPiSuite: reports nobody could take", () => {
 
     // Nothing is listening yet, so every dial fails and every report is dropped.
     pi.fire("session_start", { type: "session_start", reason: "startup" }, ctx);
-    suite.reportDenial({ tool: "bash", action: "bash: curl example.com", reason: "no", rule: "envelope", at: "now" });
-    suite.reportDenial({ tool: "bash", action: "bash: nc example.com 80", reason: "no", rule: "envelope", at: "now" });
+    suite.reportDenial({ tool: "bash", action: "bash: curl example.com", reason: "no", rule: "static", at: "now" });
+    suite.reportDenial({ tool: "bash", action: "bash: nc example.com 80", reason: "no", rule: "static", at: "now" });
     await new Promise((resolve) => setTimeout(resolve, 60));
 
     const delegate = new RecordingDelegate();

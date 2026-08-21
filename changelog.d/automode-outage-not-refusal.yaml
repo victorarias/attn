@@ -1,0 +1,16 @@
+kind: fixed
+area: pi
+change: >
+  When auto mode cannot reach the model it asks about a tool call, it now says
+  so instead of reading like a refusal. The block is the same either way, but
+  the way out is the opposite: a refusal is lifted by the user's approval,
+  while a call nobody could judge is lifted by retrying and by nothing the user
+  can say — approving only sends it back to the classifier that never
+  answered. Both the agent and the on-screen list of blocked calls used to be
+  told to go get approval regardless, so an outage cost the user a turn and
+  left them believing they had fixed it. An answer that comes back unreadable
+  is treated the same way, because it judged the call no more than an outage
+  did.
+symptom: >
+  A model-endpoint outage looked like auto mode refusing the work, and
+  approving in the conversation appeared to do nothing.

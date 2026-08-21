@@ -142,7 +142,7 @@ export function createAutoMode(options: AutoModeOptions): (pi: AutoModeExtension
   return function autoMode(pi: AutoModeExtensionAPILike): void {
     // The ctx of the call being judged, so the classification's "checking…"
     // feedback appears for exactly as long as a classification runs — and only
-    // when one runs at all, which is the envelope's whole point. pi runs tool
+    // when one runs at all, which is the fast path's whole point. pi runs tool
     // calls in parallel, so both are counted rather than flagged: the last one
     // to finish is what puts the working message back.
     let judging: AutoModeContextLike | undefined;

@@ -1,0 +1,18 @@
+kind: fixed
+area: pi
+change: >
+  Auto mode no longer blocks work a delegation brief already authorized. The
+  classifier reads a rolling window of the conversation, and every message in
+  it was capped at 4,000 characters by keeping its head and its tail and
+  dropping the middle. Every real delegation brief is longer than that (the
+  ones on this machine ran 4,495 to 5,881 characters), and a brief states what
+  the agent may do in its middle — so the sentence granting permission was the
+  part thrown away, while the constraints at either end survived. The
+  classifier then refused the work for want of an authorization it had been
+  handed and could not see. A session's opening message now keeps its own seat
+  in that window and its own, much larger cap, so what the brief authorized
+  arrives whole no matter how long the session runs.
+symptom: >
+  A delegated agent was refused something its brief explicitly allowed —
+  merging an approved PR, pushing its own branch — and said no user message
+  authorized it.

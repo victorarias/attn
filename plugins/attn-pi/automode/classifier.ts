@@ -37,6 +37,13 @@ export type ClassifierVerdict =
        * apart from a model that looked and refused.
        */
       unavailable?: boolean;
+      /**
+       * A model answered and the answer was not a verdict. It ends the layer's
+       * walk like any other answer (shopping for a readable one is shopping
+       * for a different verdict), but no more judged this call than an outage
+       * did, so the model-facing text says so.
+       */
+      unreadable?: boolean;
     }
   | { verdict: "uncertain"; reason?: string; layer?: ClassifierLayer };
 

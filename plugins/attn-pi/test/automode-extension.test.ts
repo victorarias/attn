@@ -16,7 +16,7 @@ function wire(
 }
 
 describe("auto mode extension", () => {
-  test("an envelope call is not blocked", async () => {
+  test("a fast-path call is not blocked", async () => {
     const pi = wire(new StubClassifier());
     expect(await pi.toolCall?.(toolCall("bash", { command: "git status" }), ctx)).toBeUndefined();
   });

@@ -285,18 +285,34 @@ agent unchanged; everything here that says nisse is this agent in particular.
 
 ## Auto mode
 
-`automode/` is pi's permission system: a static safety envelope plus a
-classifier for everything reaching past it, denied conversationally rather
-than through dialogs. Design, receipts and slices:
+`automode/` is pi's permission system: a set of static rules plus a
+classifier for everything those rules cannot place, denied conversationally
+rather than through dialogs. Design, receipts and slices:
 [docs/plans/2026-08-16-pi-auto-mode.md](../../docs/plans/2026-08-16-pi-auto-mode.md).
 
 - **The decision order in `policy.ts` IS the policy.** Anything added to the
-  envelope runs unjudged, so the read-only sets are conservative by
+  static rules runs unjudged, so the read-only sets are conservative by
   construction: a command that can run another command, or reach the network,
   is not in them.
 - **Fail-safe both ways:** a handler that throws blocks the tool, and a call
   auto mode cannot judge is refused, never run. Model output that does not
   read as a verdict is one of those refusals.
+- **A block that nobody judged says so, to both readers.** An unreachable
+  layer and an unreadable answer are not refusals: the way through them is a
+  retry, and the user's approval is powerless because it only re-runs the
+  classification against the same endpoint. `denialToolResult` has a second
+  shape for those, and `denialWidgetLines` drops its approve line when every
+  standing denial is an outage. Handing over the wrong one costs the user a
+  turn and leaves them thinking they fixed it.
+- **The session's opening message keeps its own seat in the classifier's
+  transcript window, and its own cap.** It is the only message that can GRANT
+  anything and the first the budgets squeeze: oldest, so the window cap
+  reaches it, and far longer than a typed message, so the entry cap does too.
+  Measured 2026-08-22: every delegation brief on this machine (4,495-5,881
+  chars) was clamped at 4,000 head-and-tail, and the middle it dropped is
+  where a brief says what the agent is authorized to do. Only a message with
+  nothing before it claims the seat, so the window still renders oldest
+  first.
 - Like `suite/`, the module is duck-typed against pi's shapes rather than
   importing pi, so `bun test` covers the whole extension including its
   `tool_call` wiring. `index.ts` is the only file that knows pi's event names.

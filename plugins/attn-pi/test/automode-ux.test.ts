@@ -29,7 +29,7 @@ describe("auto mode's session surfaces", () => {
     expect(ui.workingMessages).toEqual([classifyingWorkingMessage, undefined]);
   });
 
-  test("an envelope call says nothing: the invisible path stays invisible", async () => {
+  test("a fast-path call says nothing: the invisible path stays invisible", async () => {
     const ui = new FakeUI();
     const pi = wire(new StubClassifier({ verdict: "allow" }));
     expect(await pi.toolCall?.(toolCall("bash", { command: "git status" }), uiContext(ui))).toBeUndefined();
@@ -68,6 +68,27 @@ describe("auto mode's session surfaces", () => {
 
     pi.input?.(userInput("no, leave the branch alone"), uiContext(ui));
     expect(ui.widgets.get(autoModeDenialWidgetKey)).toBeUndefined();
+  });
+
+  test("a widget of outages tells the user approving will not help", async () => {
+    const ui = new FakeUI();
+    const pi = wire(new StubClassifier({ verdict: "deny", unavailable: true, reason: "nothing answered" }));
+    await pi.toolCall?.(push(), uiContext(ui));
+
+    const widget = ui.widgets.get(autoModeDenialWidgetKey);
+    expect(widget?.at(-1)).toContain("Approving will not help");
+    expect(widget?.at(-1)).not.toContain("Approve in your reply");
+  });
+
+  test("one real refusal among outages still points the user at approving", async () => {
+    const ui = new FakeUI();
+    const classifier = new StubClassifier({ verdict: "deny", unavailable: true, reason: "nothing answered" });
+    const pi = wire(classifier);
+    await pi.toolCall?.(push("call-outage"), uiContext(ui));
+    classifier.answerWith({ verdict: "deny", reason: "this rewrites shared history" });
+    await pi.toolCall?.(push("call-refused"), uiContext(ui));
+
+    expect(ui.widgets.get(autoModeDenialWidgetKey)?.at(-1)).toContain("Approve in your reply");
   });
 
   test("the widget lists a bounded number of denials and admits to the rest", async () => {

@@ -1,10 +1,10 @@
-// Where a file path sits relative to auto mode's safety envelope. The
-// envelope is the session's working directory minus the paths that decide
+// Where a file path sits relative to auto mode's static rules. The boundary
+// is the session's working directory minus the paths that decide
 // what agents and shells are allowed to do — editing those from inside a
 // session is how a session widens its own leash.
 //
 // Resolution is lexical (node:path), so a symlink inside the working
-// directory that points outside it resolves as in-envelope.
+// directory that points outside it resolves as in-cwd.
 import { isAbsolute, resolve, sep } from "node:path";
 
 /** Directory names that are protected wherever they appear in a path. */
@@ -40,7 +40,7 @@ export const protectedFiles: readonly string[] = [
 
 export type PathLocation =
   /** Inside the working directory and outside every protected path. */
-  | { location: "in-envelope"; resolved: string }
+  | { location: "in-cwd"; resolved: string }
   /** Resolves outside the working directory. */
   | { location: "outside-cwd"; resolved: string }
   /** Names a protected path, whether or not it is inside the working directory. */
@@ -50,7 +50,7 @@ export function locatePath(cwd: string, path: string): PathLocation {
   const resolved = isAbsolute(path) ? resolve(path) : resolve(cwd, path);
   const protectedBy = protectedSegment(resolved);
   if (protectedBy !== undefined) return { location: "protected", resolved, protectedBy };
-  return { location: isInside(resolve(cwd), resolved) ? "in-envelope" : "outside-cwd", resolved };
+  return { location: isInside(resolve(cwd), resolved) ? "in-cwd" : "outside-cwd", resolved };
 }
 
 export function isInside(cwd: string, resolved: string): boolean {

@@ -127,10 +127,10 @@ describe("config loading", () => {
 
 describe("path location", () => {
   test.each([
-    ["src/main.ts", "in-envelope"],
-    ["./src/main.ts", "in-envelope"],
-    ["/work/repo", "in-envelope"],
-    ["/work/repo/deep/nested/file.txt", "in-envelope"],
+    ["src/main.ts", "in-cwd"],
+    ["./src/main.ts", "in-cwd"],
+    ["/work/repo", "in-cwd"],
+    ["/work/repo/deep/nested/file.txt", "in-cwd"],
     ["../sibling/file.txt", "outside-cwd"],
     ["/etc/hosts", "outside-cwd"],
     ["/work/repo-other/file.txt", "outside-cwd"],
@@ -208,7 +208,7 @@ describe("read-only bash set", () => {
     expect(classifyBashCommand(command).kind).toBe("network");
   });
 
-  test("a plain read-only GET is still network, not envelope", () => {
+  test("a plain read-only GET is still network, not fast path", () => {
     const classification = classifyBashCommand("curl https://example.com");
     expect(classification).toEqual({ kind: "network", command: "curl" });
   });
@@ -243,7 +243,7 @@ describe("static decision tree", () => {
     expect(decision).toEqual({ outcome: "run", rule: "allow-list" });
   });
 
-  test("the allow list beats the envelope for an out-of-cwd write", () => {
+  test("the allow list beats the static rules for an out-of-cwd write", () => {
     const decision = decide({ toolName: "write", input: { path: "/tmp/report.md" } }, { allow: ["write /tmp/*"] });
     expect(decision).toEqual({ outcome: "run", rule: "allow-list" });
   });
@@ -328,7 +328,7 @@ describe("call signatures", () => {
   });
 });
 
-// The invariant behind the envelope: nothing that resolves outside the
+// The invariant behind the static rules: nothing that resolves outside the
 // working directory may run without the classifier having judged it. This
 // walks generated paths rather than a list, because the interesting failures
 // are the ones nobody thought to write down.
@@ -358,7 +358,7 @@ describe("property: a path outside the working directory never runs statically",
         const call: ToolCall = { toolName, input: { path } };
         const decision = decide(call);
         const resolved = locatePath(cwd, path);
-        if (resolved.location === "in-envelope") {
+        if (resolved.location === "in-cwd") {
           expect(isInside(cwd, resolve(cwd, path))).toBe(true);
           continue;
         }

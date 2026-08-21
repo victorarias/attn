@@ -1,4 +1,4 @@
-# Plan: pi auto mode — the safety envelope's autonomy dial
+# Plan: pi auto mode — the static rules' autonomy dial
 
 Rock 4 of [the pi vision](../vision/pi-attn-plugins.md). Superseding the
 [superdraft](2026-08-16-pi-auto-mode-superdraft.md), which holds the design
@@ -10,7 +10,7 @@ receipt below.
 ## What it is
 
 pi has no permission system at all — YOLO by design. Auto mode is a pi
-extension that adds one without adding ceremony: a static **safety envelope**
+extension that adds one without adding ceremony: a set of **static rules**
 (work inside the session's working directory runs free), a **classifier**
 (a cheap model judges everything that reaches further, against the
 conversation's intent), and **conversational approval** (a denied agent asks
@@ -36,7 +36,7 @@ machine's pi auth (opencode-go + openai-codex):
 Conclusions the design leans on:
 
 - **Cost is a non-issue** (hundreds of classified calls/day ≈ under $1).
-- **Latency is the axis.** Nothing beats ~1.7s p50, so the envelope and the
+- **Latency is the axis.** Nothing beats ~1.7s p50, so the static rules and the
   verdict cache carrying the hot path are load-bearing, not optimizations.
 - Defaults (user-overridable settings, never pins): classifier
   `opencode-go/glm-5.3`, layer-2b escalation `opencode-go/qwen3.8-max`.
@@ -75,7 +75,7 @@ In the session (pi side):
   blocked action, the reason, and states that the user's explicit approval
   in conversation permits a retry. A system-prompt addendum (via
   `before_agent_start`) says auto mode is active and how grants work.
-- Custom/unknown tools outside the envelope are denied with a reason naming
+- Custom/unknown tools the static rules cannot place are denied with a reason naming
   the limit (no silent budget).
 
 attn CLI (agent- and human-reachable; every verb has `--json`):
@@ -121,7 +121,7 @@ under the pi config dir; no attn required.
 4. `write`/`edit` resolving inside cwd, outside protected paths (`.git`,
    `.pi`, agent/shell config) → run.
 5. `bash` matching the static read-only set → run. Network never rides the
-   envelope: `curl` and friends always classify, even a plain GET.
+   static rules: `curl` and friends always classify, even a plain GET.
 6. Everything else (bash, out-of-cwd writes; v1's classified surface) →
    classifier. Unknown custom tools → deny with a named limit.
 
@@ -172,7 +172,7 @@ Classifier (layer 2a → 2b):
 
 ## Slices (each a PR; merge to main as they land)
 
-1. **Policy core.** `automode/` decision tree: envelope, path resolution,
+1. **Policy core.** `automode/` decision tree: static rules, path resolution,
    read-only bash matcher, allow/hard-deny lists, verdict types, denial
    text contract. Classifier stubbed behind an interface. Ships dark.
 2. **Classifier.** Prompt, 2a/2b model calls via the registry, verdict
@@ -199,14 +199,14 @@ Classifier (layer 2a → 2b):
 
 - **Unit (bun, per slice).** The decision tree gets exhaustive table tests;
   the s7 corpus doubles as classifier-prompt fixtures with a mocked model.
-  A rapid property beside the path/envelope logic (resolved path inside cwd
-  never classifies; nothing outside the envelope ever silently runs).
+  A rapid property beside the path/cwd logic (resolved path inside cwd
+  never classifies; nothing outside the working directory ever silently runs).
 - **Go tests** for storage, CLI verbs (propose-only semantics), protocol,
   and the bus projection (the projection tables enforce their own fixtures).
 - **Receipt gate.** s7 stays the model-quality gate; rerun it on pi pin
   bumps like the other spike scenarios.
 - **Deterministic harness scenario.** `scenario-pi-automode`: a packaged-app
-  pi session attempts an out-of-envelope call against a **local stub
+  pi session attempts an out-of-cwd call against a **local stub
   provider** (pi's `registerProvider` pointed at a loopback HTTP server) so
   verdicts are deterministic; assert the denial reaches the app, the
   conversational grant unblocks the retry, and the breaker escalates after

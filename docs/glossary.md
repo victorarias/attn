@@ -941,9 +941,9 @@ launch environment is the `ATTN_NISSE_*` block; the plugin that registers it is
 
 ## Auto mode, proposals, and promotion
 
-**Auto mode** is pi's permission system: a static safety envelope (work inside
-the session's working directory runs free), a classifier for everything that
-reaches past it, and denials the agent answers conversationally rather than
+**Auto mode** is pi's permission system: a set of static rules (work inside
+the session's working directory runs free), a classifier for everything those
+rules cannot place, and denials the agent answers conversationally rather than
 through a dialog. Design:
 [docs/plans/2026-08-16-pi-auto-mode.md](plans/2026-08-16-pi-auto-mode.md).
 
@@ -967,7 +967,7 @@ that skips it.
 A **denial** is one call auto mode refused. The session reports it to attn,
 which keeps it in a bounded log, raises a notification naming what was blocked
 and why, and lists it under `attn automode denials`. Every denial says who
-decided — a static envelope rule, the classifier layer that answered
+decided — a static rule, the classifier layer that answered
 (`classifier-2a`, `classifier-2b`), or the circuit breaker. A denial never
 stops the run: the agent is given the reason, and a plain reply approving the
 action is what lets it retry.

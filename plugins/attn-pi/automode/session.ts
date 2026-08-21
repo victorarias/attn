@@ -11,7 +11,7 @@ import type { Classifier } from "./classifier";
 import type { AutoModeConfig } from "./config";
 import { denialToolResult } from "./denial";
 import { decideStatically, describeCall, normalizedIntent, type StaticRule, type ToolCall } from "./policy";
-import { TranscriptWindow, transcriptEntryText } from "./transcript";
+import { TranscriptWindow } from "./transcript";
 
 /** Denials in a row, without an allowed call between them. */
 export const consecutiveDenialLimit = 3;
@@ -81,9 +81,7 @@ export class AutoModeSession {
 
   /** The user said something: their message may be the approval. */
   noteUserInput(text = ""): void {
-    // pi announces one message on two seams (the input event and the prompt
-    // the turn starts with), and the same sentence twice reads as insistence.
-    if (this.transcript.latest("user") !== transcriptEntryText(text)) this.transcript.record("user", text);
+    this.transcript.record("user", text);
     for (const [key, entry] of this.cache) if (entry.verdict === "deny") this.cache.delete(key);
     this.clearCounters();
   }
@@ -137,11 +135,11 @@ export class AutoModeSession {
       transcript: this.transcript.snapshot(),
       signal: options.signal,
     });
-    if (judged.verdict === "deny" && judged.unavailable) {
+    if (judged.verdict === "deny" && judged.unavailable === true) {
       // Nobody judged this call, so there is no verdict to remember: caching
       // one would keep blocking the call after the endpoint is back, until the
       // user happened to speak.
-      return this.denied(call, "classifier-unavailable", judged.reason, { outage: true });
+      return this.denied(call, "classifier-unavailable", judged.reason, { outage: true, judged: false });
     }
     const rule: DecisionRule = judged.layer ? `classifier-${judged.layer}` : "classifier";
     if (judged.verdict === "allow") {
@@ -153,7 +151,12 @@ export class AutoModeSession {
         ? judged.reason
         : `auto mode could not judge this call confidently${judged.reason ? `: ${judged.reason}` : ""}`;
     this.cache.set(intent, { verdict: "deny", reason });
-    return this.denied(call, rule, reason);
+    // An unreadable answer ended the walk, so a model was reached — the rule
+    // still names the layer that answered. What it did not do is judge.
+    return this.denied(call, rule, reason, {
+      outage: false,
+      judged: judged.verdict !== "deny" || judged.unreadable !== true,
+    });
   }
 
   private allowed(rule: DecisionRule): SessionDecision {
@@ -165,7 +168,7 @@ export class AutoModeSession {
     call: ToolCall,
     rule: DecisionRule,
     reason: string,
-    kind: { outage: boolean } = { outage: false },
+    kind: { outage: boolean; judged?: boolean } = { outage: false },
   ): SessionDecision {
     this.consecutiveDenials += 1;
     this.totalDenials += 1;
@@ -174,7 +177,13 @@ export class AutoModeSession {
     // what the breaker then says, not whether it trips.
     if (kind.outage) this.totalOutages += 1;
     const action = describeCall(call);
-    return { outcome: "block", rule, action, reason, toolResult: denialToolResult({ action, reason }) };
+    return {
+      outcome: "block",
+      rule,
+      action,
+      reason,
+      toolResult: denialToolResult({ action, reason, judged: kind.judged ?? true }),
+    };
   }
 }
 

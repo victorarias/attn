@@ -59,8 +59,20 @@ export function denialWidgetLines(denials: readonly AutoModeDenial[]): string[] 
   const lines = [`auto mode blocked ${denials.length} call${denials.length === 1 ? "" : "s"}:`];
   if (hidden > 0) lines.push(`  … ${hidden} earlier`);
   for (const denial of shown) lines.push(`  ${clamp(denial.action)} — ${denial.reason}`);
-  lines.push("  Approve in your reply to let the agent retry.");
+  // Approving is the way through a refusal and does nothing for an outage: it
+  // sends the call back to the classifier that never answered. Telling the
+  // user to approve an outage spends their turn and leaves them thinking they
+  // fixed it.
+  lines.push(
+    denials.every(nothingJudged)
+      ? "  Nothing judged these — the classifier is unreachable. Approving will not help."
+      : "  Approve in your reply to let the agent retry.",
+  );
   return lines;
+}
+
+function nothingJudged(denial: AutoModeDenial): boolean {
+  return denial.rule === "classifier-unavailable";
 }
 
 /**

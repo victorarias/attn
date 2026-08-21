@@ -141,7 +141,7 @@ describe("where the ledger lives", () => {
     expect(locatePath("/work/repo", "/work/repo/attn-automode-denials.jsonl").location).toBe("protected");
     expect(locatePath("/work/repo", "/work/repo/attn-automode.json").location).toBe("protected");
     expect(locatePath("/work/repo", "/work/repo/attn-automode-denials.jsonl.1").location).toBe("protected");
-    expect(locatePath("/work/repo", "/work/repo/notes.md").location).toBe("in-envelope");
+    expect(locatePath("/work/repo", "/work/repo/notes.md").location).toBe("in-cwd");
   });
 });
 

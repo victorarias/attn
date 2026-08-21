@@ -274,6 +274,7 @@ function narrow(parsed: ParsedVerdict, layer: ClassifierLayer): ClassifierVerdic
       verdict: "deny",
       layer,
       reason: parsed.reason === "" ? "the classifier refused this call" : parsed.reason,
+      ...(parsed.unreadable === true ? { unreadable: true } : {}),
     };
   }
   return { verdict: "uncertain", layer, reason: parsed.reason };

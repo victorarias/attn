@@ -44,10 +44,36 @@ describe("denial text contract", () => {
   test("an empty reason says so rather than showing a blank", () => {
     expect(denialToolResult({ action: "write /etc/hosts", reason: "" })).toContain("Reason: (not stated)");
   });
+
+  // A block nobody judged wearing a refusal's words sends the agent to ask for
+  // approval that cannot help: approval only re-runs the classification, and
+  // the classifier is still down.
+  describe("a call nothing could judge", () => {
+    const unjudged = denialToolResult({
+      action: "bash: sed -n 1,200p notes.txt",
+      reason: "auto mode could not reach its classifier model (layer 2a)",
+      judged: false,
+    });
+
+    test("still names the action and the reason", () => {
+      expect(unjudged).toContain("Blocked: bash: sed -n 1,200p notes.txt");
+      expect(unjudged).toContain("Reason: auto mode could not reach its classifier model (layer 2a)");
+    });
+
+    test("says nothing refused the action", () => {
+      expect(unjudged).toContain("could not judge");
+      expect(unjudged).toContain("Nothing refused this action");
+    });
+
+    test("sends the agent to a retry, not to the user for approval", () => {
+      expect(unjudged).toContain("Retrying");
+      expect(unjudged).not.toContain("approval in the conversation lets you retry");
+    });
+  });
 });
 
 describe("session decisions", () => {
-  test("an envelope call never reaches the classifier", async () => {
+  test("a fast-path call never reaches the classifier", async () => {
     const { session, classifier } = sessionWith();
     expect(await session.decide(bash("git status"), { cwd })).toEqual({ outcome: "run", rule: "read-only-bash" });
     expect(classifier.requests).toHaveLength(0);
@@ -131,6 +157,51 @@ describe("verdict cache", () => {
       rule: "classifier-unavailable",
       reason: "auto mode could not reach its classifier model (layer 2a)",
     });
+  });
+
+  test("an outage tells the agent to retry rather than to ask for approval", async () => {
+    const classifier = new StubClassifier({
+      verdict: "deny",
+      layer: "2a",
+      unavailable: true,
+      reason: "auto mode could not reach its classifier model (layer 2a)",
+    });
+    const { session } = sessionWith(classifier);
+    const decision = await session.decide(bash("git push origin main"), { cwd });
+    expect(decision.outcome).toBe("block");
+    if (decision.outcome !== "block") return;
+    expect(decision.toolResult).toContain("could not judge");
+    expect(decision.toolResult).not.toContain("approval in the conversation lets you retry");
+  });
+
+  test("an answer that is not a verdict did not judge the call either", async () => {
+    const classifier = new StubClassifier({
+      verdict: "deny",
+      layer: "2a",
+      unreadable: true,
+      reason: "the classifier answered something this cannot read as a verdict: hello",
+    });
+    const { session } = sessionWith(classifier);
+    const decision = await session.decide(bash("git push origin main"), { cwd });
+    expect(decision.outcome).toBe("block");
+    if (decision.outcome !== "block") return;
+    // A model was reached, so the rule still names the layer that answered.
+    expect(decision.rule).toBe("classifier-2a");
+    expect(decision.toolResult).toContain("could not judge");
+  });
+
+  test("a model that looked and refused still points at the user's approval", async () => {
+    const classifier = new StubClassifier({
+      verdict: "deny",
+      layer: "2a",
+      reason: "force pushes rewrite shared history",
+    });
+    const { session } = sessionWith(classifier);
+    const decision = await session.decide(bash("git push --force origin main"), { cwd });
+    expect(decision.outcome).toBe("block");
+    if (decision.outcome !== "block") return;
+    expect(decision.toolResult).toContain("approval in the conversation lets you retry");
+    expect(decision.toolResult).not.toContain("could not judge");
   });
 
   test("an outage is not cached: the call is judged again once a model answers", async () => {

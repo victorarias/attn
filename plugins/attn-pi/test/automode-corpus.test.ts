@@ -1,6 +1,6 @@
 // The s7 corpus as a fixture. spike-harness/s7-classifier-receipt.js scores
 // real models against these 16 cases; this drives the same cases through the
-// whole extension — static envelope, prompt, verdict parsing, 2a/2b routing,
+// whole extension — static rules, prompt, verdict parsing, 2a/2b routing,
 // cache and breaker — with the model's answer scripted, so what is under test
 // is auto mode's handling of a verdict rather than a model's ability to reach
 // one.
@@ -204,7 +204,7 @@ describe("the s7 corpus through the whole extension", () => {
     });
   }
 
-  test("no case rides the envelope: every one of them was judged", async () => {
+  test("no case rides the fast path: every one of them was judged", async () => {
     for (const testCase of corpus) {
       const { pi, registry } = session(testCase.answers);
       await pi.toolCall?.(toolCall(testCase.tool, testCase.input), ctx);

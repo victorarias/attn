@@ -3,7 +3,7 @@
 // never something it calls.
 //
 // Order is the policy (docs/plans/2026-08-16-pi-auto-mode.md, "Decision
-// path"): hard denies, then the allow list, then the envelope's own rules.
+// path"): hard denies, then the allow list, then the static rules themselves.
 import { classifyBashCommand } from "./bash";
 import { matchesAnyPattern, type AutoModeConfig } from "./config";
 import { locatePath } from "./paths";
@@ -25,7 +25,7 @@ export type StaticRule =
   | "allow-list"
   | "read-only-tool"
   | "in-cwd-write"
-  | "out-of-envelope-write"
+  | "out-of-cwd-write"
   | "read-only-bash"
   | "network-bash"
   | "unjudged-bash"
@@ -57,7 +57,7 @@ export function decideStatically(call: ToolCall, config: AutoModeConfig, cwd: st
     outcome: "block",
     rule: "unknown-tool",
     reason:
-      `auto mode has no envelope entry for the tool ${JSON.stringify(call.toolName)}, ` +
+      `auto mode has no static rule for the tool ${JSON.stringify(call.toolName)}, ` +
       `so it cannot judge this call. Known tools: ${[...readOnlyTools, ...pathTools, "bash"].join(", ")}.`,
   };
 }
@@ -67,22 +67,22 @@ function decidePathTool(call: ToolCall, cwd: string): StaticDecision {
   if (typeof path !== "string" || path.trim() === "") {
     return {
       outcome: "classify",
-      rule: "out-of-envelope-write",
-      reason: `${call.toolName} named no path, so the envelope cannot place it`,
+      rule: "out-of-cwd-write",
+      reason: `${call.toolName} named no path, so the static rules cannot place it`,
     };
   }
   const located = locatePath(cwd, path);
-  if (located.location === "in-envelope") return { outcome: "run", rule: "in-cwd-write" };
+  if (located.location === "in-cwd") return { outcome: "run", rule: "in-cwd-write" };
   if (located.location === "protected") {
     return {
       outcome: "classify",
-      rule: "out-of-envelope-write",
+      rule: "out-of-cwd-write",
       reason: `${located.resolved} is a protected path (${located.protectedBy})`,
     };
   }
   return {
     outcome: "classify",
-    rule: "out-of-envelope-write",
+    rule: "out-of-cwd-write",
     reason: `${located.resolved} resolves outside the working directory ${cwd}`,
   };
 }
@@ -98,7 +98,7 @@ function decideBash(call: ToolCall): StaticDecision {
     return {
       outcome: "classify",
       rule: "network-bash",
-      reason: `${classification.command} reaches the network, which never rides the envelope`,
+      reason: `${classification.command} reaches the network, which is never decided without a model`,
     };
   }
   return { outcome: "classify", rule: "unjudged-bash", reason: classification.reason };
