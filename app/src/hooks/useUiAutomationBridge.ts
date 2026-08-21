@@ -18,6 +18,7 @@ import {
   INACTIVE_MARKDOWN_ANNOTATIONS_STATE,
 } from '../components/MarkdownReader/annotations/annotationsAutomation';
 import { getSettingsAutomationHandle, INACTIVE_SETTINGS_STATE } from '../components/settingsAutomation';
+import { useConversationsStore } from '../store/conversations';
 import { getTerminalPerfSnapshot } from '../utils/terminalPerf';
 import { readWarmWorkspaceLimit } from '../utils/terminalVirtualization';
 import { dumpTerminalGeometry } from '../utils/terminalDiagnosticsLog';
@@ -3275,6 +3276,56 @@ export function useUiAutomationBridge({
       // conversation session shows is the thing under test, and a store that
       // is right while the pane draws nothing is exactly the bug this has to
       // be able to catch.
+      // Puts the transcript where a reader who scrolled back would have it, so
+      // a scenario can assert that an arriving stream does not move them.
+      // SPIKE-ONLY. Replays a recorded envelope stream into a live pane at the
+      // gaps it was recorded at. The nisse host resolves its model through pi's
+      // static catalog (`getModel`), which cannot see a provider declared in an
+      // agent dir, so the harness's stub provider is unreachable from a
+      // conversation session — and a real model would not reproduce a recording
+      // anyway. `applyEnvelope` is exactly what the socket's `agent_event` calls,
+      // so everything the spike is about — store, pane, markdown, scroll — is the
+      // real path. Returns once the replay is scheduled; progress is read with
+      // `conversation_get_state`.
+      case 'conversation_replay_envelopes': {
+        const sessionId = typeof payload.sessionId === 'string' ? payload.sessionId : '';
+        const rows = Array.isArray(payload.envelopes) ? payload.envelopes : [];
+        if (!sessionId || rows.length === 0) {
+          throw new Error('conversation_replay_envelopes requires sessionId and a non-empty envelopes array');
+        }
+        const apply = useConversationsStore.getState().applyEnvelope;
+        void (async () => {
+          for (const entry of rows as Array<Record<string, unknown>>) {
+            const afterMs = typeof entry.afterMs === 'number' ? entry.afterMs : 0;
+            if (afterMs > 0) await new Promise((done) => { window.setTimeout(done, afterMs); });
+            if (typeof entry.kind !== 'string') continue;
+            apply(
+              sessionId,
+              typeof entry.seq === 'number' ? entry.seq : 0,
+              entry.kind,
+              (entry.body ?? {}) as Record<string, unknown>,
+            );
+          }
+        })();
+        return { replaying: rows.length };
+      }
+      case 'conversation_scroll_to': {
+        const sessionId = typeof payload.sessionId === 'string' ? payload.sessionId : '';
+        const root = sessionId
+          ? document.querySelector(`[data-testid="conversation-pane-${sessionId}"]`)
+          : document.querySelector('.conversation-pane');
+        const list = root?.querySelector('[data-testid="conversation-messages"]');
+        if (!(list instanceof HTMLElement)) throw new Error('conversation transcript not found');
+        const fromBottom = typeof payload.fromBottom === 'number' ? payload.fromBottom : null;
+        list.scrollTop = fromBottom === null
+          ? Number(payload.scrollTop ?? 0)
+          : list.scrollHeight - list.clientHeight - fromBottom;
+        list.dispatchEvent(new Event('scroll', { bubbles: true }));
+        return {
+          scrollTop: Math.round(list.scrollTop),
+          fromBottom: Math.round(list.scrollHeight - list.scrollTop - list.clientHeight),
+        };
+      }
       case 'conversation_get_state': {
         const sessionId = typeof payload.sessionId === 'string' ? payload.sessionId : '';
         const root = sessionId
@@ -3287,13 +3338,49 @@ export function useUiAutomationBridge({
         const textarea = input instanceof HTMLTextAreaElement ? input : null;
         const messages = Array.from(root.querySelectorAll('.conversation-message')).map((node) => {
           const element = node as HTMLElement;
+          const rendered = element.querySelector('.conversation-message-text');
           return {
             id: (element.dataset.testid || '').replace('conversation-message-', ''),
             role: element.dataset.role || '',
             streaming: element.dataset.streaming === 'true',
-            text: element.querySelector('.conversation-message-text')?.textContent || '',
+            text: rendered?.textContent || '',
+            // The message text is markdown, drawn as structure. `text` alone
+            // cannot tell a heading from the hashes that made it, so a scenario
+            // asserting the rendering needs the shape it produced.
+            html: rendered?.innerHTML || '',
+            blocks: {
+              headings: rendered?.querySelectorAll('h1, h2, h3, h4, h5, h6').length ?? 0,
+              tables: rendered?.querySelectorAll('table').length ?? 0,
+              codeBlocks: rendered?.querySelectorAll('pre').length ?? 0,
+              listItems: rendered?.querySelectorAll('li').length ?? 0,
+              links: rendered?.querySelectorAll('a[href]').length ?? 0,
+              diagrams: rendered?.querySelectorAll('.markdown-mermaid, .markdown-mermaid-loading').length ?? 0,
+              pendingDiagrams: rendered?.querySelectorAll('[data-testid="markdown-diagram-pending"]').length ?? 0,
+            },
           };
         });
+        // Where the transcript is scrolled. Blocks change height as they close,
+        // so following the stream and reading scrolled-back history are both
+        // measured here rather than inferred from the text.
+        const list = root.querySelector('[data-testid="conversation-messages"]');
+        const scroll = list instanceof HTMLElement
+          ? {
+            scrollTop: Math.round(list.scrollTop),
+            scrollHeight: Math.round(list.scrollHeight),
+            clientHeight: Math.round(list.clientHeight),
+            fromBottom: Math.round(list.scrollHeight - list.scrollTop - list.clientHeight),
+          }
+          : null;
+        // The reading column, measured rather than inferred: a max-width that
+        // silently fails to apply looks exactly like a pane too narrow to show
+        // it. `available` is what the column had to work with.
+        const firstMessage = root.querySelector('.conversation-message');
+        const column = list instanceof HTMLElement && firstMessage instanceof HTMLElement
+          ? {
+            available: Math.round(list.clientWidth),
+            message: Math.round(firstMessage.getBoundingClientRect().width),
+          }
+          : null;
         // What the agent has been sent and has not read yet, in the order the
         // pane shows it. A nudge scenario asserts the whole arc on this: the
         // entry appears here, then leaves as the message it delivered appears
@@ -3343,6 +3430,8 @@ export function useUiAutomationBridge({
         return {
           sessionId,
           messages,
+          scroll,
+          column,
           tools,
           notices,
           queued,

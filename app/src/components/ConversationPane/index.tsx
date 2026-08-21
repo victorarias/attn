@@ -11,6 +11,8 @@ import { useDaemonApi } from '../../contexts/DaemonApiContext';
 import type { ResolvedTheme } from '../../hooks/useTheme';
 import type { UISessionState } from '../../types/sessionState';
 import { ToolCard } from './ToolCard';
+import { Markdown, ReaderPresentation } from '../Markdown';
+import { MarkdownBoundary } from '../Markdown/MarkdownBoundary';
 import './ConversationPane.css';
 
 interface ConversationPaneProps {
@@ -23,6 +25,16 @@ interface ConversationPaneProps {
   sessionState?: UISessionState;
   // Passed through to the diff an edit tool's card draws.
   resolvedTheme?: ResolvedTheme;
+}
+
+/**
+ * Close enough to the bottom to count as reading the live end.
+ *
+ * The tolerance is a line or two of slack, not a threshold anyone tunes: a
+ * reader who stopped a few pixels short of the end is still at the end.
+ */
+function isAtBottom(list: HTMLElement): boolean {
+  return list.scrollHeight - list.scrollTop - list.clientHeight < 80;
 }
 
 /** How much text an item contributes, for the follow-the-stream check. */
@@ -83,15 +95,42 @@ export function ConversationPane({ sessionId, paneActive, sessionState, resolved
 
   // Follow the stream. Only when the reader is already at the bottom: scrolling
   // back to re-read something must not be yanked away by the next delta.
+  //
+  // Whether they are at the bottom is decided by the reader's own scrolling, not
+  // by measuring after the delta landed. Markdown makes a delta grow the
+  // document by a whole block — an opening code fence measured 133px in one
+  // paint, against a tolerance of 80 — so a measurement taken afterwards reads
+  // that growth as the reader having scrolled back, and follow mode never
+  // returns. Appending content does not move scrollTop and fires no scroll
+  // event, so this ref only moves when the reader (or the line below) moves it.
+  const followingRef = useRef(true);
+  const openedRef = useRef(false);
   const lastLength = items.reduce((total, item) => total + itemLength(item), 0);
-  useEffect(() => {
+  useLayoutEffect(() => {
     const list = listRef.current;
     if (!list) return;
-    const distanceFromBottom = list.scrollHeight - list.scrollTop - list.clientHeight;
-    if (distanceFromBottom < 80) {
-      list.scrollTop = list.scrollHeight;
+    if (!openedRef.current && items.length > 0) {
+      openedRef.current = true;
+      // Opening a conversation lands on its newest message. That is one move at
+      // the moment the transcript first exists, not a follow decision — and it
+      // is taken only from the position the pane mounted at, since a scrollTop
+      // already set is someone restoring a reader mid-transcript. Follow mode
+      // is then measured rather than assumed, so their first delta does not
+      // yank them to the bottom before any scroll event has fired.
+      if (list.scrollTop === 0) list.scrollTop = list.scrollHeight;
+      followingRef.current = isAtBottom(list);
+      return;
     }
+    if (followingRef.current) list.scrollTop = list.scrollHeight;
   }, [lastLength, items.length]);
+
+  // A mermaid diagram appears one frame AFTER the text that carried it — its
+  // fence settles, then mermaid draws, and the document grows with no delta to
+  // notice. A follower would be left the diagram's height off the bottom.
+  const followDiagramGrowth = useCallback(() => {
+    const list = listRef.current;
+    if (list && followingRef.current) list.scrollTop = list.scrollHeight;
+  }, []);
 
   // Paging older history in puts content ABOVE what the reader is looking at,
   // and the browser keeps scrollTop — so the page they were reading slides down
@@ -125,6 +164,7 @@ export function ConversationPane({ sessionId, paneActive, sessionState, resolved
     const list = listRef.current;
     if (!list) return;
     anchorRef.current = { key: oldestKey, fromBottom: list.scrollHeight - list.scrollTop };
+    followingRef.current = isAtBottom(list);
     // Fetch before the reader arrives at the top. The threshold is a screen of
     // reading, so on a fast host the page has landed by the time they get there
     // and the conversation just keeps going up.
@@ -275,7 +315,27 @@ export function ConversationPane({ sessionId, paneActive, sessionState, resolved
                 data-streaming={item.streaming ? 'true' : 'false'}
               >
                 <div className="conversation-message-role">{item.role}</div>
-                <div className="conversation-message-text">{item.text}</div>
+                {/* The agent writes markdown; the user writes into a textarea,
+                    where Enter is a line break the way it is in every other
+                    composer in this app. Hence `breaks` on one side only. */}
+                <MarkdownBoundary
+                  key={`md:${item.id}`}
+                  fallback={<div className="conversation-message-text conversation-message-text--raw">{item.text}</div>}
+                >
+                  {/* A transcript is read, not glanced at: a diagram too wide for
+                      the column gets the reader's own size detection, focus view
+                      and zoom rather than being silently squeezed. */}
+                  <ReaderPresentation>
+                  <Markdown
+                    className="conversation-message-text"
+                    breaks={item.role === 'user'}
+                    streaming={item.streaming}
+                    onDiagramLayoutChange={followDiagramGrowth}
+                  >
+                    {item.text}
+                  </Markdown>
+                  </ReaderPresentation>
+                </MarkdownBoundary>
               </div>
             );
           })

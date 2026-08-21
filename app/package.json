@@ -101,6 +101,7 @@
     "real-app:scenario-nisse-revive": "node scripts/real-app-harness/scenario-nisse-revive.mjs",
     "real-app:scenario-nisse-delegate": "node scripts/real-app-harness/scenario-nisse-delegate.mjs",
     "real-app:scenario-nisse-history": "node scripts/real-app-harness/scenario-nisse-history.mjs",
+    "real-app:scenario-nisse-markdown-stream": "node scripts/real-app-harness/scenario-nisse-markdown-stream.mjs",
     "real-app:scenario-pi-automode": "node scripts/real-app-harness/scenario-pi-automode.mjs"
   },
   "dependencies": {
