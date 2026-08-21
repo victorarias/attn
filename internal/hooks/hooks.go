@@ -84,9 +84,10 @@ If neither keyword is present, do NOT run a workflow: use ordinary tools, or bri
 // agent that attn keeps work as seeds and that it can plant one. Planting is
 // USER-TRIGGERED: the agent may surface or propose a seed, but it never plants
 // one on its own initiative. Kept verbatim so that boundary wording is identical
-// across the chief prompt, the non-chief prompt, and the skill reference.
+// across the chief prompt, the non-chief prompt, and the skill reference. The
+// craft behind planting well is behind `attn seed guide`, not here.
 func GardenAwarenessGuidance() string {
-	return "attn keeps work in the garden, as seeds. When the user asks you to capture or track work (even an off-goal thing you noticed and raised with them), plant a seed with `attn seed plant \"<title>\" -m \"<brief>\"` (a body that is self-sufficient on its own: the outcome / what \"done\" looks like, just-enough context, how it is verified, and scope). Suggest planting one when it would help, but plant only when the user asks — never park work in the garden on your own initiative. To leave a note on a seed you were handed the id for but are not tending, append to its log with `attn seed note <seed-id> -m \"<text>\"`. `attn ticket` retired: every write verb now prints the garden command that replaced it, and only `attn ticket show` and `attn ticket list` still read the archived board. The attn skill's garden reference has the how and what makes a good seed."
+	return "attn keeps work in the garden, as seeds. When the user asks you to capture or track work (even an off-goal thing you noticed and raised with them), plant a seed with `attn seed plant \"<title>\" -m \"<brief>\"` (a body that is self-sufficient on its own: the outcome / what \"done\" looks like, just-enough context, how it is verified, and scope). Suggest planting one when it would help, but plant only when the user asks — never park work in the garden on your own initiative. To leave a note on a seed you were handed the id for but are not tending, append to its log with `attn seed note <seed-id> -m \"<text>\"`. `attn ticket` retired: every write verb now prints the garden command that replaced it, and only `attn ticket show` and `attn ticket list` still read the archived board. The attn skill's garden reference has the how and what makes a good seed. `attn seed guide` prints that craft on demand: writing a good body, where a seed belongs, artifacts, and handoffs."
 }
 
 // AgentInstructions composes the launch-time instruction blocks injected as a

@@ -295,6 +295,24 @@ func TestAgentInstructionsComposition(t *testing.T) {
 	}
 }
 
+// The always-on garden block keeps its standing wording and gains only the
+// pointer to the verb that holds the craft.
+func TestGardenAwarenessGuidancePointsAtTheGuide(t *testing.T) {
+	garden := GardenAwarenessGuidance()
+	for _, phrase := range []string{
+		"attn seed plant",
+		"never park work in the garden on your own initiative",
+		"attn seed note",
+		"attn ticket",
+		"garden reference has the how and what makes a good seed",
+		"attn seed guide",
+	} {
+		if !strings.Contains(garden, phrase) {
+			t.Fatalf("garden guidance does not carry %q:\n%s", phrase, garden)
+		}
+	}
+}
+
 func TestGenerateCodexConfigOverrides_InjectsWorkflowGuidanceWhenEnabled(t *testing.T) {
 	off := strings.Join(GenerateCodexConfigOverrides("s", "/sock", "/attn", Launch{WorkspaceContextPath: "/tmp/context.md"}), "\n")
 	if strings.Contains(off, "hypercode") {

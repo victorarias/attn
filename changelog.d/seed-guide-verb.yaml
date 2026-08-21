@@ -1,0 +1,9 @@
+kind: added
+area: garden
+change: >
+  New `attn seed guide` verb prints the craft of tending seeds — writing a
+  body, deliverable types and what "done" is for each, artifacts, handoffs
+  and steering — transplanted from the attn skill's garden and delegated-agent
+  references, which now point at the verb instead of carrying it. The
+  always-on garden guidance keeps its wording and gains one pointer to the
+  verb.

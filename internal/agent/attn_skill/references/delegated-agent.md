@@ -35,17 +35,10 @@ Close it yourself when the outcome is settled:
     attn seed harvest <seed-id> -m "The requested PR merged and no follow-up remains"
     attn seed wither <seed-id> -m "The required API was removed; nobody should pick this up"
 
-Harvest when strong terminal evidence shows the requested outcome is done and no
-review or decision remains — Victor accepted the work, the requested PR merged,
-or an equivalent objective completion signal is clear. A separate confirmation
-ritual is unnecessary when that evidence already exists. If you merely finished
-implementing and acceptance, review, or another decision is still pending, say
-that in a note and leave the seed open.
-
-Keep a note concrete: outcome, evidence, and next action. A note is a small
-payload — put large durable reasoning in an artifact and attach it rather than
-inlining it. Leave your successor a `--handoff` note whenever you park or stop
-mid-thread.
+Harvest timing, note discipline, and artifact handover are craft:
+`attn seed guide` prints it — when the evidence is strong enough to harvest,
+what a concrete note carries, and how to associate a durable document with
+your seed. Run it when one of those calls is yours to make.
 
 Noting does not stop or transfer your session. Continue working unless the task
 is blocked or complete. Untracked delegation — no seed in your prompt — has
@@ -54,25 +47,3 @@ nowhere to report and needs none of this.
 `attn ticket` retired: every write verb prints the garden command that replaced
 it and exits nonzero. Only `attn ticket show` and `attn ticket list` still read.
 See [garden.md](garden.md).
-
-## Hand Over Durable Artifacts
-
-When your work produces a Markdown plan or design that must outlive this
-session, associate it with your seed:
-
-    attn seed attach <seed-id> --path docs/plans/design.md --repo attn
-    attn seed attach <seed-id> --notebook <document-id>
-    attn seed attach <seed-id> --url <url>
-
-Where the document lives does not change — the seed records the association
-only, and `attn seed detach` takes it back.
-
-- If the scope keeps plans or designs in Git, commit the plan first and attach
-  it by `--path` with the `--repo` it lives in. The repository file stays
-  canonical.
-- Otherwise write it into the Notebook (see [notebook.md](notebook.md)) and
-  attach it by `--notebook <document-id>`.
-
-Edit only the canonical source afterward. When you make a meaningful edit,
-rename, or deletion, note it on the seed so whoever reads it next knows to
-re-read the document.
