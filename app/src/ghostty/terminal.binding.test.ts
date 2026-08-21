@@ -94,6 +94,34 @@ describe('GhosttyTerminal', () => {
     t.free();
   });
 
+  it('resolves scrollback cell colors from the style slots', () => {
+    const palette = Array.from({ length: 16 }, (_, index) => (
+      index === 1 ? 0xff0102 : index === 9 ? 0x0a0b0c : index === 3 ? 0x030303 : index === 2 ? 0x020202 : 0
+    ));
+    const t = terminal(20, 2, { fgColor: 0x445566, bgColor: 0x112233, palette });
+    t.write('filler-one\r\n');
+    t.write('filler-two\r\n');
+    t.write('\x1b[31mred\x1b[0m\r\n');
+    t.write('\x1b[38;2;10;20;30mtcolor\x1b[0m\r\n');
+    t.write('\x1b[91mbright\x1b[0m\r\n');
+    t.write('\x1b[42mbgonly\x1b[0m\r\n');
+    t.write('\x1b[1;33mboldyl\x1b[0m\r\n');
+    t.write('end\r\n');
+    t.update();
+
+    // Oldest row first: the two fillers, then each styled line as the next
+    // pushed it out of the 2-row screen.
+    expect(t.getScrollbackLength()).toBe(7);
+    const first = (row: number) => t.getScrollbackLine(row)![0];
+    expect(first(0)).toMatchObject({ codepoint: 'f'.codePointAt(0), fg_r: 0x44, fg_g: 0x55, fg_b: 0x66, bg_r: 0x11, bg_g: 0x22, bg_b: 0x33 });
+    expect(first(2)).toMatchObject({ codepoint: 'r'.codePointAt(0), fg_r: 0xff, fg_g: 0x01, fg_b: 0x02, bg_r: 0x11, bg_g: 0x22, bg_b: 0x33 });
+    expect(first(3)).toMatchObject({ codepoint: 't'.codePointAt(0), fg_r: 10, fg_g: 20, fg_b: 30 });
+    expect(first(4)).toMatchObject({ codepoint: 'b'.codePointAt(0), fg_r: 0x0a, fg_g: 0x0b, fg_b: 0x0c });
+    expect(first(5)).toMatchObject({ codepoint: 'b'.codePointAt(0), fg_r: 0x44, fg_g: 0x55, fg_b: 0x66, bg_r: 0x02, bg_g: 0x02, bg_b: 0x02 });
+    expect(first(6)).toMatchObject({ codepoint: 'b'.codePointAt(0), flags: CellFlags.BOLD, fg_r: 0x03, fg_g: 0x03, fg_b: 0x03 });
+    t.free();
+  });
+
   it('reports wide cells and their spacer', () => {
     const t = terminal();
     t.write('漢x');

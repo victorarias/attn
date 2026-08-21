@@ -111,10 +111,19 @@ export const POINT_OFF_Y = 12;
 export const GRID_REF_SIZE = 12;
 
 /**
- * GhosttyStyle (72 bytes). The three colors are already resolved for us by
- * CELLS_DATA_FG_COLOR / BG_COLOR, so only the attribute booleans are read.
+ * GhosttyStyle (72 bytes). Two self-describing color slots (fg, bg) sit ahead
+ * of the attribute booleans: a u32 kind (default / palette index / direct RGB)
+ * followed by a u32 value. The render-state path resolves colors for us via
+ * CELLS_DATA_FG_COLOR / BG_COLOR; grid refs (scrollback) read the slots.
  */
 export const STYLE_SIZE = 72;
+export const STYLE_OFF_FG_KIND = 8;
+export const STYLE_OFF_FG = 16;
+export const STYLE_OFF_BG_KIND = 24;
+export const STYLE_OFF_BG = 32;
+export const STYLE_COLOR_DEFAULT = 0;
+export const STYLE_COLOR_PALETTE = 1;
+export const STYLE_COLOR_RGB = 2;
 export const STYLE_OFF_BOLD = 56;
 export const STYLE_OFF_ITALIC = 57;
 export const STYLE_OFF_FAINT = 58;
@@ -131,6 +140,7 @@ export const COLORS_OFF_BACKGROUND = 4;
 export const COLORS_OFF_FOREGROUND = 7;
 export const COLORS_OFF_CURSOR = 10;
 export const COLORS_OFF_CURSOR_HAS_VALUE = 13;
+export const COLORS_OFF_PALETTE = 14;
 
 /**
  * GhosttyMode packs the DEC/ANSI distinction into the high bit: ANSI modes set

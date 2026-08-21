@@ -1,0 +1,6 @@
+kind: fixed
+area: terminal
+change: >
+  Keep cell colors in scrollback: lines that had scrolled off the screen lost
+  their foreground and background colors as soon as the viewport scrolled up
+  to show them. Bold, italics, and underlines were already preserved.
