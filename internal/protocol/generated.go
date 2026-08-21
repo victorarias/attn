@@ -6902,6 +6902,9 @@ type SeedTransitionMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
 
+	// Confirm corresponds to the JSON schema field "confirm".
+	Confirm *bool `json:"confirm,omitempty,omitzero"`
+
 	// Member corresponds to the JSON schema field "member".
 	Member *string `json:"member,omitempty,omitzero"`
 

@@ -1,0 +1,20 @@
+kind: changed
+area: garden
+change: >
+  A seed goes back in the pool from anywhere. `attn seed replant` used to reopen
+  a closed seed only, so handing work back meant closing it first and reopening
+  it — harvesting something that was not done, to make it available again. It
+  now also un-parks a dormant seed and hands back one being grown, without
+  closing either. The garden board grows the matching drop zones: Parked → Ready
+  and Growing → Ready, which had no verb behind them before.
+notes: >
+  Taking a seed somebody else still holds now needs `--confirm`, on every verb
+  rather than on `tend` alone. Withering or harvesting another agent's live work
+  used to go through silently, which was more destructive than the take-over
+  `tend` already refused — and refusing only `tend` would not have held anyway,
+  since the same take-over could be spelled `replant --confirm` followed by an
+  uncontested `tend`. The refusal names who holds it and says how to go through
+  with it. Nothing changes for a tender moving its own seed, or for anyone
+  moving a seed whose holder's session has ended: a seat somebody walked away
+  from stays reachable with no flag. On the board the confirmation is a line in
+  the composer naming the holder, so a drop cannot take work without saying so.

@@ -35,10 +35,17 @@ import {
 import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react';
 import type { Seed } from '../hooks/useDaemonSocket';
 import { useEscapeStack } from '../hooks/useEscapeStack';
-import { crewHolderName } from '../utils/crewName';
+import {
+  columnOf,
+  heldByOther,
+  legalVerbs,
+  tenderOf,
+  VERBS,
+  verbsFor,
+  type ColumnKey,
+  type Verb,
+} from './gardenBoardModel';
 import './GardenBoard.css';
-
-export type ColumnKey = 'ready' | 'growing' | 'parked' | 'closed';
 
 export interface GardenBoardProps {
   seeds: Seed[];
@@ -48,7 +55,7 @@ export interface GardenBoardProps {
   /** False until the first daemon push lands — an empty board is not an empty garden. */
   loaded: boolean;
   /** Perform one real lifecycle move. Rejects with the daemon's own sentence. */
-  onTransition: (seedId: string, verb: Verb, reason?: string) => Promise<unknown>;
+  onTransition: (seedId: string, verb: Verb, reason?: string, confirm?: boolean) => Promise<unknown>;
   /** Write on a seed's log — where park and replant put their sentence. */
   onNote: (seedId: string, body: string) => Promise<unknown>;
   /** The list/board switch, owned by the surface so both views show the same one. */
@@ -56,13 +63,9 @@ export interface GardenBoardProps {
   onClose: () => void;
 }
 
-export type Verb = 'park' | 'harvest' | 'wither' | 'replant' | 'dispatch';
-
 // ---------------------------------------------------------------------------
-// The projection
+// The drag, in the DOM. The rules it obeys are in ./gardenBoardModel.
 // ---------------------------------------------------------------------------
-
-const CLOSED = new Set(['harvested', 'withered']);
 
 // The chip sits below-right of the cursor, and flips to its left near the right
 // edge so the last column — where Closed lives — can still be read while
@@ -89,96 +92,6 @@ function hitTest(x: number, y: number): { column: ColumnKey | null; verb: Verb |
 function crownOf(seed: Seed): string {
   return (seed.edges ?? []).find((edge) => edge.kind === 'part-of')?.to ?? '';
 }
-
-function tenderOf(seed: Seed): string {
-  return crewHolderName(seed.tender_member, seed.tender_session);
-}
-
-// columnOf reads a card's column off the seed. Four states, and every open seed
-// lands somewhere: what is neither growing, parked nor closed is waiting to be
-// picked up, whether or not anything is holding it back.
-export function columnOf(seed: Seed): ColumnKey {
-  if (CLOSED.has(seed.status)) return 'closed';
-  if (seed.status === 'dormant') return 'parked';
-  if (seed.status === 'growing') return 'growing';
-  return 'ready';
-}
-
-// legalVerbs is the garden's own lifecycle table (internal/garden/lifecycle.go)
-// read from the board's side: which verbs the target column owns, and which of
-// them the seed's current state would accept.
-//
-// Two absences are the model working rather than gaps in this file. Nothing
-// moves a dormant seed back to the queue — `replant` reopens only a closed one
-// — so Parked → Ready grows no zone. And nothing releases a live claim, so
-// Growing → Ready grows none either.
-export function legalVerbs(seed: Seed, target: ColumnKey): Verb[] {
-  const status = seed.status;
-  const open = status === 'planted' || status === 'growing' || status === 'dormant';
-  switch (target) {
-    case 'closed':
-      return open ? ['harvest', 'wither'] : [];
-    case 'parked':
-      return status === 'planted' || status === 'growing' ? ['park'] : [];
-    case 'ready':
-      return CLOSED.has(status) ? ['replant'] : [];
-    case 'growing':
-      // Dispatching is an intent, not a state: the agent claims the seed when it
-      // starts. A seed already being worked has nobody to dispatch to.
-      return status === 'planted' || status === 'dormant' ? ['dispatch'] : [];
-  }
-}
-
-// The verbs a card offers on its own, which is every zone on the board unioned.
-// The keyboard path and the drag path must never disagree, so they read the
-// same table.
-export function verbsFor(seed: Seed): Verb[] {
-  const columns: ColumnKey[] = ['growing', 'parked', 'closed', 'ready'];
-  return columns.flatMap((column) => legalVerbs(seed, column));
-}
-
-interface VerbSpec {
-  label: string;
-  // What the composer asks for, and whether it may be skipped.
-  prompt: string;
-  required: boolean;
-  // A reason is stored on the seed by harvest and wither alone; the other moves
-  // refuse one, so their sentence goes on the log instead.
-  reasonOnSeed: boolean;
-}
-
-export const VERBS: Record<Verb, VerbSpec> = {
-  harvest: {
-    label: 'Harvest',
-    prompt: 'what got done',
-    required: true,
-    reasonOnSeed: true,
-  },
-  wither: {
-    label: 'Wither',
-    prompt: 'why nobody should pick this up',
-    required: false,
-    reasonOnSeed: true,
-  },
-  park: {
-    label: 'Park',
-    prompt: 'what you are leaving it at',
-    required: false,
-    reasonOnSeed: false,
-  },
-  replant: {
-    label: 'Replant',
-    prompt: 'why it is open again',
-    required: false,
-    reasonOnSeed: false,
-  },
-  dispatch: {
-    label: 'Dispatch an agent',
-    prompt: '',
-    required: false,
-    reasonOnSeed: false,
-  },
-};
 
 const COLUMNS: Array<{ key: ColumnKey; label: string }> = [
   { key: 'ready', label: 'Ready' },
@@ -246,7 +159,7 @@ export function GardenBoard({
   const blockers = useMemo(() => {
     const counts = new Map<string, number>();
     for (const seed of seeds) {
-      if (CLOSED.has(seed.status)) continue;
+      if (columnOf(seed) === 'closed') continue;
       for (const edge of seed.edges ?? []) {
         if (edge.kind === 'blocks') counts.set(edge.to, (counts.get(edge.to) ?? 0) + 1);
       }
@@ -435,7 +348,15 @@ export function GardenBoard({
       // park and replant refuse a reason — the daemon says so itself — so their
       // sentence is written on the log, and the move carries none.
       if (!spec.reasonOnSeed && text) await onNote(compose.seed.id, text);
-      await onTransition(compose.seed.id, compose.verb, spec.reasonOnSeed ? text : undefined);
+      // A card somebody else still holds is taken, not moved, and the daemon
+      // refuses it until the caller says so. The composer already said whose
+      // work this is, so pressing commit is that answer.
+      await onTransition(
+        compose.seed.id,
+        compose.verb,
+        spec.reasonOnSeed ? text : undefined,
+        heldByOther(compose.seed, liveSessions) !== '',
+      );
       setCompose(null);
       setSelected(compose.seed.id);
       setError(null);
@@ -444,7 +365,7 @@ export function GardenBoard({
     } finally {
       setBusy(false);
     }
-  }, [compose, busy, onNote, onTransition]);
+  }, [compose, busy, liveSessions, onNote, onTransition]);
 
   const onKeyDown = (event: KeyboardEvent) => {
     if (compose || dispatchFor) return;
@@ -611,6 +532,7 @@ export function GardenBoard({
                   {composing && (
                     <Composer
                       compose={composing}
+                      takenFrom={heldByOther(composing.seed, liveSessions)}
                       busy={busy}
                       inputRef={composeInput}
                       onCommit={commit}
@@ -900,9 +822,12 @@ function CardMeta({
 }
 
 function Composer({
-  compose, busy, inputRef, onCommit, onCancel,
+  compose, takenFrom, busy, inputRef, onCommit, onCancel,
 }: {
   compose: { seed: Seed; verb: Verb; column: ColumnKey };
+  // Who still holds this seed, when that is somebody. The line it draws is the
+  // board's --confirm: there is no way to commit without having read it.
+  takenFrom: string;
   busy: boolean;
   inputRef: React.RefObject<HTMLInputElement | null>;
   onCommit: () => void;
@@ -942,6 +867,9 @@ function Composer({
           reason, so theirs lands on the log — which is what the daemon's own
           refusal tells a caller to do. */}
       {!spec.reasonOnSeed && <span className="garden-compose__where">goes on the log</span>}
+      {takenFrom !== '' && (
+        <span className="garden-compose__taking">takes it from {takenFrom}</span>
+      )}
     </div>
   );
 }

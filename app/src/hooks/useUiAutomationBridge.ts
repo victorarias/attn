@@ -1451,6 +1451,8 @@ function collectGardenBoardUiState() {
       ? {
           verb: compose.querySelector('.garden-compose__verb')?.textContent?.trim() ?? '',
           seed: compose.querySelector('.garden-compose__id')?.textContent?.trim() ?? '',
+          // The takeover line, when the card is somebody else's live work.
+          taking: compose.querySelector('.garden-compose__taking')?.textContent?.trim() ?? '',
         }
       : null,
   };

@@ -99,6 +99,17 @@ func (t Tender) Holds(sessionLive func(sessionID string) bool) bool {
 	return true
 }
 
+// Ask is one caller's request to move a seed: who is asking, why, and whether
+// they have said yes to taking a seed somebody else still holds.
+type Ask struct {
+	Actor  Tender
+	Reason string
+	// Confirmed is the CLI's --confirm, and it is read only when somebody else
+	// still holds the seed. Every ordinary move — including the tender closing
+	// its own work — never reaches it.
+	Confirmed bool
+}
+
 // move is one verb's rule: which states it accepts, where it lands, and what it
 // does to the tender.
 type move struct {
@@ -145,8 +156,12 @@ var moves = map[Verb]move{
 		resume:      "attn seed replant",
 	},
 	VerbReplant: {
+		// Everything but `planted` itself: replant is how a seed goes back in
+		// the pool, and a seat somebody put down is as much in need of that as
+		// one that closed. Narrower than that, and handing work back meant
+		// closing it first to reopen it.
+		from:   []string{StatusHarvested, StatusWithered, StatusDormant, StatusGrowing},
 		to:     StatusPlanted,
-		from:   []string{StatusHarvested, StatusWithered},
 		resume: "attn seed tend",
 	},
 }
@@ -174,37 +189,40 @@ func ParseVerb(raw string) (Verb, error) {
 // Transition applies one move and hands back the seed as it should be stored,
 // or refuses by name. It never mutates its argument.
 //
-// The tender is guarded on `tend` alone, and that is deliberate. Tending is the
-// atomic claim, so a second session taking a live one silently is the bug this
-// refusal exists for. The other four are fate calls — parking, finishing,
-// abandoning — and a seed whose tender walked away must stay reachable by
-// somebody; guarding those too would make an ended session a one-way door with
-// no key, which is worse than a rude harvest that the log records anyway.
+// Every verb reads the live claim, and reads it the same way: a seed somebody
+// else still holds is taken, not merely moved, so the move is refused unless
+// the caller confirmed it. All five, because all five take the work away —
+// withering another agent's live seed is more destructive than putting it back
+// in the pool. Guarding only `tend` would not hold either: a takeover refused
+// there is a takeover performed as `replant --confirm` and then a `tend` that
+// no longer sees a holder, which launders the same act into two steps and
+// loses the name of who was displaced.
+//
+// A tender moving its own seed never meets the guard, and neither does anyone
+// moving a seed whose holder is gone: `Holds` is what tells a live claim from
+// an ended session, so a seat somebody walked away from stays reachable with no
+// flag at all. That was the reason the fate calls went unguarded in the first
+// place, and it survives here intact.
 //
 // sessionLive is how the claim asks whether the tender is still around, and it
 // is the same predicate `ready` reads: a seed `ready` offers must be one `tend`
 // accepts.
-func Transition(seed Seed, verb Verb, actor Tender, reason string, sessionLive func(sessionID string) bool) (Seed, error) {
+func Transition(seed Seed, verb Verb, ask Ask, sessionLive func(sessionID string) bool) (Seed, error) {
 	rule, ok := moves[verb]
 	if !ok {
 		return Seed{}, fmt.Errorf("%q is not something a seed does", verb)
 	}
-	reason = strings.TrimSpace(reason)
+	reason := strings.TrimSpace(ask.Reason)
 
 	if !slices.Contains(rule.from, seed.Status) {
 		return Seed{}, refuseState(seed, verb, rule)
 	}
-	if rule.claims {
-		if !actor.Named() {
-			return Seed{}, fmt.Errorf(
-				"tending %s records who holds it and this call named nobody; run it from an attn session, or pass --member <name>", seed.ID)
-		}
-		if held := seed.Tender(); held.Holds(sessionLive) && !held.Is(actor) {
-			return Seed{}, fmt.Errorf(
-				"%s is being tended by %s, and a seed has one tender at a time.\n"+
-					"Wait for %s to harvest or park it, or say what you need on the log: attn seed note %s -m \"…\"",
-				seed.ID, held.DisplayName(), held.DisplayName(), seed.ID)
-		}
+	if rule.claims && !ask.Actor.Named() {
+		return Seed{}, fmt.Errorf(
+			"tending %s records who holds it and this call named nobody; run it from an attn session, or pass --member <name>", seed.ID)
+	}
+	if held := seed.Tender(); held.Holds(sessionLive) && !held.Is(ask.Actor) && !ask.Confirmed {
+		return Seed{}, refuseTakeover(seed, verb, held)
 	}
 	if rule.needsReason && reason == "" {
 		return Seed{}, fmt.Errorf(
@@ -228,8 +246,8 @@ func Transition(seed Seed, verb Verb, actor Tender, reason string, sessionLive f
 	next.Status = rule.to
 	switch {
 	case rule.claims:
-		next.TenderSession = strings.TrimSpace(actor.Session)
-		next.TenderMember = strings.TrimSpace(actor.Member)
+		next.TenderSession = strings.TrimSpace(ask.Actor.Session)
+		next.TenderMember = strings.TrimSpace(ask.Actor.Member)
 	default:
 		next.TenderSession = ""
 		next.TenderMember = ""
@@ -250,16 +268,21 @@ func (s Seed) Tender() Tender {
 	return Tender{Session: s.TenderSession, Member: s.TenderMember}
 }
 
+// refuseTakeover is what a caller sees when the seed is somebody else's live
+// work. It names who holds it, says plainly that the move takes the seed from
+// them, and offers both ways forward: mean it, or say something on the log
+// instead. An agent can act on either without asking a person.
+func refuseTakeover(seed Seed, verb Verb, held Tender) error {
+	return fmt.Errorf(
+		"%s is being tended by %s, and `attn seed %s` takes it from them.\n"+
+			"Run it again with --confirm if that is what you mean, or say what you need on the log: attn seed note %s -m \"…\"",
+		seed.ID, held.DisplayName(), verb, seed.ID)
+}
+
 // refuseState names the seed, the state it is actually in, and the way out —
 // the three things an agent needs to fix the call itself.
 func refuseState(seed Seed, verb Verb, rule move) error {
 	switch {
-	// Replant first: its landing state is `planted`, so an "already planted"
-	// answer would hide the rule the caller actually needs.
-	case verb == VerbReplant:
-		return fmt.Errorf(
-			"%s is %s, not closed; replant reopens a harvested or withered seed, and `attn seed tend %s` picks up a live one",
-			seed.ID, seed.Status, seed.ID)
 	case seed.Status == rule.to:
 		return fmt.Errorf("%s is already %s; `%s %s` is the way out of it", seed.ID, seed.Status, rule.resume, seed.ID)
 	case Closed(seed.Status):

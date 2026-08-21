@@ -283,7 +283,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-export const PROTOCOL_VERSION = '267';
+export const PROTOCOL_VERSION = '268';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 // Identifies this app process to the daemon across its own reconnects, so a
@@ -4082,7 +4082,7 @@ export function useDaemonSocket({
   // what is legal from where the seed actually is, so a refusal comes back as
   // its own sentence and the caller renders it rather than pre-judging.
   const sendSeedTransition = useCallback(
-    (seedId: string, verb: string, reason?: string): Promise<Seed> => {
+    (seedId: string, verb: string, reason?: string, confirm?: boolean): Promise<Seed> => {
       return new Promise((resolve, reject) => {
         const ws = wsRef.current;
         if (!ws || ws.readyState !== WebSocket.OPEN) {
@@ -4099,6 +4099,7 @@ export function useDaemonSocket({
             seed_id: seedId,
             verb,
             ...(reason ? { reason } : {}),
+            ...(confirm ? { confirm: true } : {}),
           }),
         );
         setTimeout(() => {

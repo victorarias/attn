@@ -433,7 +433,7 @@ func (d *Daemon) activateAutomationContinuationSeed(sessionID string) error {
 	}
 	actor := garden.Tender{Session: sessionID}
 	if garden.Closed(seed.Status) {
-		if _, _, err := d.applySeedTransition(seedID, garden.VerbReplant, actor, ""); err != nil {
+		if _, _, err := d.applySeedTransition(seedID, garden.VerbReplant, garden.Ask{Actor: actor}); err != nil {
 			return fmt.Errorf("replant automation continuation seed %s: %w", seedID, err)
 		}
 		seed.Status = garden.StatusPlanted
@@ -441,7 +441,7 @@ func (d *Daemon) activateAutomationContinuationSeed(sessionID string) error {
 	if seed.Status == garden.StatusGrowing && seed.TenderSession == sessionID {
 		return nil
 	}
-	if _, _, err := d.applySeedTransition(seedID, garden.VerbTend, actor, ""); err != nil {
+	if _, _, err := d.applySeedTransition(seedID, garden.VerbTend, garden.Ask{Actor: actor}); err != nil {
 		return fmt.Errorf("tend automation continuation seed %s: %w", seedID, err)
 	}
 	return nil

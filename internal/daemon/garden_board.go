@@ -12,10 +12,14 @@ import (
 // and only differ in how the answer travels back.
 //
 // The actor is unnamed. A move from the board is the user's own, and the app
-// holds no session or crew identity to sign it with; the four verbs the board
-// offers are the four that need no tender, so an unnamed actor is legal rather
-// than merely tolerated. `tend` is not reachable from here, which is why the
-// board's Growing column dispatches an agent instead of claiming a seed.
+// holds no session or crew identity to sign it with; the verbs the board offers
+// are the ones that need no tender, so an unnamed actor is legal rather than
+// merely tolerated. `tend` is not reachable from here, which is why the board's
+// Growing column dispatches an agent instead of claiming a seed.
+//
+// An unnamed actor is never the holder, so a card somebody else is still
+// tending refuses every verb until the drop confirms it. That is what the
+// composer's takeover line asks for, and `confirm` is how the answer travels.
 //
 // Prototype: docs/plans/2026-08-20-garden-kanban-board-prototype.md.
 
@@ -37,7 +41,10 @@ func (d *Daemon) handleSeedTransitionWS(client *wsClient, msg *protocol.SeedTran
 		fail(err)
 		return
 	}
-	seed, doc, err := d.applySeedTransition(msg.SeedID, verb, garden.Tender{}, protocol.Deref(msg.Reason))
+	seed, doc, err := d.applySeedTransition(msg.SeedID, verb, garden.Ask{
+		Reason:    protocol.Deref(msg.Reason),
+		Confirmed: protocol.Deref(msg.Confirm),
+	})
 	if err != nil {
 		fail(err)
 		return

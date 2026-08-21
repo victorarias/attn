@@ -783,3 +783,43 @@ func TestGarden_CollectionsAreDeclaredOnStartup(t *testing.T) {
 		}
 	}
 }
+
+// The confirm flag is the only way a caller can take a seed somebody else still
+// holds, so it has to survive the trip: CLI flag, wire field, and the Ask the
+// daemon hands the garden. A rule enforced in `internal/garden` and dropped on
+// the way in refuses every take-over, including the legitimate ones.
+func TestSeedTransitionCarriesTheConfirmToTheGarden(t *testing.T) {
+	d := newGardenDaemon(t)
+	addGardenSession(t, d, "sess-a")
+	addGardenSession(t, d, "sess-b")
+
+	seed := plant(t, d, protocol.SeedPlantMessage{Title: "work somebody is already doing"})
+	move(t, d, "sess-a", seed.ID, garden.VerbTend, "", "")
+
+	refused := transition(t, d, "sess-b", seed.ID, garden.VerbWither, "", "")
+	if refused.Ok {
+		t.Fatal("another session withered a live claim without confirming it")
+	}
+	if !strings.Contains(protocol.Deref(refused.Error), "--confirm") {
+		t.Fatalf("the refusal does not say how to go through with it: %v", protocol.Deref(refused.Error))
+	}
+
+	msg := protocol.SeedTransitionMessage{
+		Cmd:             protocol.CmdSeedTransition,
+		SeedID:          seed.ID,
+		Verb:            string(garden.VerbWither),
+		SourceSessionID: protocol.Ptr("sess-b"),
+		Confirm:         protocol.Ptr(true),
+	}
+	confirmed := gardenCall(t, func(c net.Conn) { d.handleSeedTransition(c, &msg) })
+	if !confirmed.Ok {
+		t.Fatalf("a confirmed take-over was refused: %v", protocol.Deref(confirmed.Error))
+	}
+	if got := confirmed.SeedTransitionResult.Seed.Status; got != garden.StatusWithered {
+		t.Fatalf("status = %q, want withered", got)
+	}
+	// Every move but `tend` releases the claim, so the seed it took is nobody's.
+	if got := confirmed.SeedTransitionResult.Seed.TenderSession; got != "" {
+		t.Fatalf("tender session = %q, want the claim released", got)
+	}
+}
