@@ -16,11 +16,11 @@ export function denialToolResult(denial: Denial): string {
     `Blocked: ${oneLine(denial.action)}`,
     `Reason: ${oneLine(denial.reason)}`,
     "",
-    "Auto mode runs work inside this session's working directory and refuses",
-    "what reaches past it. The session has not stopped. Say in your reply what",
-    "you wanted to do and why, then ask. The user's explicit approval in the",
-    "conversation lets you retry the same call. Do not work around the block",
-    "by another route.",
+    "What gets through: the user approving this in the conversation. Tell them",
+    "what you were trying to do and why, and ask them to approve it. Their",
+    "approval lets you run the same call again. A retry on its own is judged",
+    "the same way and blocks again. Your turn has not ended. Do not reach the",
+    "same end by another route.",
   ].join("\n");
 }
 
@@ -32,11 +32,11 @@ function settledToolResult(denial: Denial): string {
     `Blocked: ${oneLine(denial.action)}`,
     `Reason: ${oneLine(denial.reason)}`,
     "",
-    "Do not ask the user to approve this one. Approval does not move it, and",
-    "neither does retrying. What lifts it is a change to auto mode's own setup,",
-    "which the user makes outside this session. Say plainly in your reply what",
+    "What gets through: nothing you can do from here. Approval does not move",
+    "it and neither does retrying. Only a change to auto mode's own setup",
+    "lifts it, and the user makes that outside this session. Tell them what",
     "you were trying to do and that auto mode refuses it, then carry on with",
-    "the work that does not need it. Do not work around the block by another",
+    "the work that does not need it. Do not reach the same end by another",
     "route.",
   ].join("\n");
 }
@@ -51,9 +51,10 @@ function unjudgedToolResult(denial: Denial): string {
     "",
     "Nothing refused this action and no limit was crossed. Auto mode asks a",
     "model before letting a call like this through, and no answer came back.",
-    "Retrying is what gets through. The user's approval will not unblock this",
-    "one, because the retry reaches the same classifier. If it keeps failing,",
-    "say so in your reply so the user knows the judge is down.",
+    "What gets through: making the same call again. Do not ask the user to",
+    "approve it; approval changes nothing, because the retry reaches the same",
+    "model either way. If it keeps failing, tell the user their classifier",
+    "model looks to be down.",
   ].join("\n");
 }
 
@@ -65,10 +66,11 @@ function unshowableToolResult(denial: Denial): string {
     `Reason: ${oneLine(denial.reason)}`,
     "",
     "Nothing refused this action. The classifier's model would not take a",
-    "conversation this size, so it never saw the call, and the user was asked",
-    "directly and said no. Retrying reaches the same limit. Say in your reply",
-    "what you were trying to do and ask the user for it, or carry on with the",
-    "work that does not need it.",
+    "conversation this size, so it never saw the call. The user was already",
+    "asked about it directly and said no. What gets through: nothing here.",
+    "Retrying reaches the same limit and there is no approval left to ask for.",
+    "Tell the user what you were trying to do, then carry on with the work",
+    "that does not need it.",
   ].join("\n");
 }
 
