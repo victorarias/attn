@@ -1149,11 +1149,17 @@ func TestDispatchLeavesAParkedRuntimeParked(t *testing.T) {
 	if err := d.ensureAppRuntime(); err != nil {
 		t.Fatalf("ensure runtime: %v", err)
 	}
+	// Wait on the notification, not on the phase. The supervisor sets
+	// PhaseParked under its lock and releases it before running the OnGiveUp
+	// sink that writes this, so a reader gated on the phase alone can win the
+	// race and count zero notifications.
 	waitFor(t, "the crash-looping runtime to be parked", func() bool {
-		snapshot, ok := d.appRuntimeSnapshot()
-		return ok && snapshot.Phase == supervise.PhaseParked
+		return len(appNotifications(t, d, notificationKindAppRuntimeParked)) > 0
 	})
-	parked, _ := d.appRuntimeSnapshot()
+	parked, ok := d.appRuntimeSnapshot()
+	if !ok || parked.Phase != supervise.PhaseParked {
+		t.Fatalf("the runtime notified a park without being parked: %+v", parked)
+	}
 
 	for seq := int64(1); seq <= 3; seq++ {
 		err := d.deliverAppEvent(context.Background(), "greeter", appEvent("ticket.created", "tk-1", seq))

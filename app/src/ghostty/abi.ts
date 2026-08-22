@@ -50,6 +50,7 @@ export const RENDER_DATA_CURSOR_BLINKING = 12;
 export const RENDER_DATA_CURSOR_VIEWPORT_HAS_VALUE = 14;
 export const RENDER_DATA_CURSOR_VIEWPORT_X = 15;
 export const RENDER_DATA_CURSOR_VIEWPORT_Y = 16;
+export const RENDER_DATA_COLORS = 19;
 
 /** ghostty_render_state_set options. */
 export const RENDER_OPT_DIRTY = 0;
@@ -134,8 +135,12 @@ export const STYLE_OFF_STRIKETHROUGH = 62;
 export const STYLE_OFF_OVERLINE = 63;
 export const STYLE_OFF_UNDERLINE = 64;
 
-/** GhosttyRenderStateColors: size, bg, fg, cursor, cursor_has_value, palette[256]. */
-export const COLORS_SIZE = 782;
+/**
+ * GhosttyRenderStateColors: size, bg, fg, cursor, cursor_has_value,
+ * palette[256]. 784, not the 782 those fields add up to: the struct is padded
+ * to its alignment, and the size field must carry sizeof, not the content.
+ */
+export const COLORS_SIZE = 784;
 export const COLORS_OFF_BACKGROUND = 4;
 export const COLORS_OFF_FOREGROUND = 7;
 export const COLORS_OFF_CURSOR = 10;
@@ -156,8 +161,8 @@ export interface GhosttyExports extends WebAssembly.Exports {
 
   ghostty_wasm_alloc_opaque(): number;
   ghostty_wasm_free_opaque(ptr: number): void;
-  ghostty_wasm_alloc_u8_array(len: number): number;
-  ghostty_wasm_free_u8_array(ptr: number, len: number): void;
+  ghostty_wasm_alloc(len: number): number;
+  ghostty_wasm_free(ptr: number, len: number): void;
 
   ghostty_terminal_new(allocator: number, out: number, cols: number, rows: number): number;
   ghostty_terminal_free(terminal: number): void;
@@ -187,7 +192,6 @@ export interface GhosttyExports extends WebAssembly.Exports {
   ghostty_render_state_update(state: number, terminal: number): number;
   ghostty_render_state_get(state: number, data: number, out: number): number;
   ghostty_render_state_set(state: number, option: number, value: number): number;
-  ghostty_render_state_colors_get(state: number, outColors: number): number;
 
   ghostty_render_state_row_iterator_new(allocator: number, out: number): number;
   ghostty_render_state_row_iterator_free(iterator: number): void;

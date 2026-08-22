@@ -5,11 +5,18 @@ import (
 	"sync"
 	"syscall"
 
+	"github.com/victorarias/attn/internal/buildinfo"
 	"github.com/victorarias/attn/internal/pty"
 )
 
 type EmbeddedBackend struct {
 	manager *pty.Manager
+}
+
+// SessionTerminalBuild answers with this process's own build: the embedded
+// backend runs the terminal in the daemon, so it can never be a version behind.
+func (b *EmbeddedBackend) SessionTerminalBuild(string) (string, bool) {
+	return buildinfo.SnapshotFormat, true
 }
 
 func NewEmbedded(manager *pty.Manager) *EmbeddedBackend {

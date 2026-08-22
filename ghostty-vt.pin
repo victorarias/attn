@@ -11,5 +11,5 @@
 # then republishing the native archives for it (make publish-native-vt).
 #
 # Verified for native darwin/arm64 + linux/amd64 + linux/arm64 and frontend
-# wasm32-freestanding at d760ee9 (2026-08-15). Never float this commit.
-d760ee96e54657416eb427b793c7e839f003df7d
+# wasm32-freestanding at da5ddcb (2026-08-22). Never float this commit.
+da5ddcb0857c0e4ddb32f7a089911e9038d040f3

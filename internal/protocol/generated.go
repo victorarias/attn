@@ -7083,6 +7083,9 @@ type Session struct {
 	// StateUpdatedAt corresponds to the JSON schema field "state_updated_at".
 	StateUpdatedAt string `json:"state_updated_at"`
 
+	// TerminalBuildStale corresponds to the JSON schema field "terminal_build_stale".
+	TerminalBuildStale *bool `json:"terminal_build_stale,omitempty,omitzero"`
+
 	// TicketUnread corresponds to the JSON schema field "ticket_unread".
 	TicketUnread *bool `json:"ticket_unread,omitempty,omitzero"`
 

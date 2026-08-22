@@ -67,6 +67,11 @@ const (
 	// FactSessionCostChanged: durable token usage changed, or a price override
 	// repriced it. The projection derives the current USD value onto the session.
 	FactSessionCostChanged = "session.cost.changed"
+	// FactSessionTerminalBuildChanged: a live session's pty-worker reported the
+	// libghostty-vt build it was compiled against, and it differs from what the
+	// daemon last knew. Subject-only; the projection re-reads the session, whose
+	// decoration compares the two.
+	FactSessionTerminalBuildChanged = "session.terminal_build.changed"
 	// FactSessionConversationChanged: the provider-owned conversation hosted by
 	// this stable attn session changed. The store already carries the new binding;
 	// the small payload is only the exact live transcript path reported by the
@@ -340,6 +345,12 @@ func buildWireProjections() []projection {
 		},
 		{
 			filter: bus.Filter{FactSessionCostChanged},
+			apply:  func(d *Daemon, ev bus.Event) { d.projectSessionStateChanged(ev.Subject) },
+		},
+		{
+			// The worker's handshake lands after recovery has already
+			// broadcast, so the verdict needs its own push.
+			filter: bus.Filter{FactSessionTerminalBuildChanged},
 			apply:  func(d *Daemon, ev bus.Event) { d.projectSessionStateChanged(ev.Subject) },
 		},
 		{

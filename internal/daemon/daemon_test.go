@@ -1620,6 +1620,18 @@ type fakeSpawnBackend struct {
 	// worker with no frame yet, which is how every test that does not care
 	// about the screen keeps its old behavior.
 	screen string
+	// terminalBuild is what SessionTerminalBuild answers. The zero value is
+	// "no answer yet", so a test that does not set it sees no stale verdict.
+	terminalBuild      string
+	terminalBuildKnown bool
+}
+
+// SessionTerminalBuild makes the fake a ptybackend.TerminalBuildProvider, which
+// is what decorateSessionWithTerminalBuild reads.
+func (f *fakeSpawnBackend) SessionTerminalBuild(string) (string, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.terminalBuild, f.terminalBuildKnown
 }
 
 // Snapshot makes the fake a ptybackend.SnapshotProvider, which is what the

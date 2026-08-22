@@ -87,6 +87,13 @@ type WorkerBackendConfig struct {
 	OwnerStartedAt   string
 	OwnerNonce       string
 	Logf             func(format string, args ...interface{})
+	// OnTerminalBuild fires the first time a live session's worker reports the
+	// libghostty-vt build it was compiled against, and again whenever that
+	// answer changes (a reload replaces the process). The daemon compares it
+	// against its own and re-publishes the session; without the callback a
+	// worker recovered after startup would never reach the wire, since the
+	// handshake lands after the broadcast.
+	OnTerminalBuild func(sessionID string)
 }
 
 type workerSession struct {
@@ -113,6 +120,12 @@ type workerSession struct {
 	monitorStop     chan struct{}
 	monitorDone     chan struct{}
 	legacyLifecycle bool
+	// snapshotFormat is what the worker reported at its last hello. Empty
+	// forever from a worker built before the field existed, which is why
+	// snapshotFormatKnown is separate: "not asked yet" and "asked, answered
+	// nothing" are different verdicts. Both guarded by mu.
+	snapshotFormat      string
+	snapshotFormatKnown bool
 }
 
 type WorkerBackend struct {
@@ -1076,6 +1089,23 @@ func (b *WorkerBackend) SessionInfo(ctx context.Context, sessionID string) (Sess
 // yolo/executable instead of defaulting them. A registry miss, or an entry from a
 // pre-reload worker (LaunchParamsRecorded false), surfaces as Recorded=false so
 // the daemon aborts the reload rather than respawning with wrong launch flags.
+// SessionTerminalBuild reports what the session's worker answered at its last
+// handshake. known is false until the first handshake lands; an empty format
+// with known true is a worker built before the field existed.
+func (b *WorkerBackend) SessionTerminalBuild(sessionID string) (format string, known bool) {
+	// Map lookup only. This runs on every session broadcast, and getSession
+	// falls back to a registry read plus a probe RPC on a miss.
+	b.mu.RLock()
+	session := b.sessions[sessionID]
+	b.mu.RUnlock()
+	if session == nil {
+		return "", false
+	}
+	session.mu.Lock()
+	defer session.mu.Unlock()
+	return session.snapshotFormat, session.snapshotFormatKnown
+}
+
 func (b *WorkerBackend) SessionLaunchParams(ctx context.Context, sessionID string) (SessionLaunchParams, error) {
 	session, err := b.getSession(sessionID)
 	if err != nil {
@@ -1636,6 +1666,14 @@ func (b *WorkerBackend) connectWithIdentity(
 		if hello.DaemonInstanceID != daemonInstanceID || hello.SessionID != session.SessionID {
 			_ = conn.Close()
 			return nil, nil, nil, errors.New("worker identity mismatch")
+		}
+		session.mu.Lock()
+		changed := !session.snapshotFormatKnown || session.snapshotFormat != hello.SnapshotFormat
+		session.snapshotFormatKnown = true
+		session.snapshotFormat = hello.SnapshotFormat
+		session.mu.Unlock()
+		if changed && b.cfg.OnTerminalBuild != nil {
+			b.cfg.OnTerminalBuild(session.SessionID)
 		}
 		break
 	}

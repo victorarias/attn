@@ -2043,6 +2043,7 @@ export interface SessionObject {
     state_reason?:              string;
     state_since:                string;
     state_updated_at:           string;
+    terminal_build_stale?:      boolean;
     ticket_unread?:             boolean;
     todos?:                     string[];
     turn_opened_at?:            string;
@@ -7138,6 +7139,7 @@ export interface Session {
     state_reason?:              string;
     state_since:                string;
     state_updated_at:           string;
+    terminal_build_stale?:      boolean;
     ticket_unread?:             boolean;
     todos?:                     string[];
     turn_opened_at?:            string;
@@ -14683,6 +14685,7 @@ const typeMap: any = {
         { json: "state_reason", js: "state_reason", typ: u(undefined, "") },
         { json: "state_since", js: "state_since", typ: "" },
         { json: "state_updated_at", js: "state_updated_at", typ: "" },
+        { json: "terminal_build_stale", js: "terminal_build_stale", typ: u(undefined, true) },
         { json: "ticket_unread", js: "ticket_unread", typ: u(undefined, true) },
         { json: "todos", js: "todos", typ: u(undefined, a("")) },
         { json: "turn_opened_at", js: "turn_opened_at", typ: u(undefined, "") },
@@ -17878,6 +17881,7 @@ const typeMap: any = {
         { json: "state_reason", js: "state_reason", typ: u(undefined, "") },
         { json: "state_since", js: "state_since", typ: "" },
         { json: "state_updated_at", js: "state_updated_at", typ: "" },
+        { json: "terminal_build_stale", js: "terminal_build_stale", typ: u(undefined, true) },
         { json: "ticket_unread", js: "ticket_unread", typ: u(undefined, true) },
         { json: "todos", js: "todos", typ: u(undefined, a("")) },
         { json: "turn_opened_at", js: "turn_opened_at", typ: u(undefined, "") },

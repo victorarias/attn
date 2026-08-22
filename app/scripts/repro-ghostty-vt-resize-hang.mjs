@@ -76,10 +76,10 @@ async function runInWorker() {
 
   const write = (text) => {
     const payload = new TextEncoder().encode(text);
-    const ptr = e.ghostty_wasm_alloc_u8_array(payload.length);
+    const ptr = e.ghostty_wasm_alloc(payload.length);
     new Uint8Array(e.memory.buffer).set(payload, ptr);
     e.ghostty_terminal_vt_write(term, ptr, payload.length);
-    e.ghostty_wasm_free_u8_array(ptr, payload.length);
+    e.ghostty_wasm_free(ptr, payload.length);
   };
 
   const steps = [

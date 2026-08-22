@@ -1119,6 +1119,9 @@ func (d *Daemon) Start() error {
 			DaemonInstanceID: d.daemonInstanceID,
 			BinaryPath:       strings.TrimSpace(os.Getenv("ATTN_PTY_WORKER_BINARY")),
 			Logf:             d.logf,
+			OnTerminalBuild: func(sessionID string) {
+				d.publishFact(FactSessionTerminalBuildChanged, sessionID, nil)
+			},
 		})
 		if err != nil {
 			d.logf("failed to initialize worker PTY backend: %v; falling back to embedded", err)
@@ -3500,6 +3503,7 @@ func (d *Daemon) sessionForBroadcastWithChiefOfStaff(
 	d.decorateSessionWithWorkspace(clone)
 	d.decorateSessionWithWorkspaceMute(clone)
 	d.decorateSessionWithCost(clone)
+	d.decorateSessionWithTerminalBuild(clone)
 	// Last: turn ownership reads the chief flag and the workspace the earlier
 	// decorations resolved.
 	d.decorateSessionWithTurn(clone)

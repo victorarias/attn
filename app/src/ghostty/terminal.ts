@@ -34,6 +34,7 @@ import {
   RENDER_DATA_CURSOR_VIEWPORT_Y,
   RENDER_DATA_CURSOR_VISIBLE,
   RENDER_DATA_CURSOR_VISUAL_STYLE,
+  RENDER_DATA_COLORS,
   RENDER_DATA_DIRTY,
   RENDER_DATA_ROW_ITERATOR,
   RENDER_OPT_DIRTY,
@@ -251,13 +252,13 @@ export class GhosttyTerminal {
     this.handle = this.dv().getUint32(out, true);
     exports.ghostty_wasm_free_opaque(out);
 
-    this.pScratch = exports.ghostty_wasm_alloc_u8_array(SCRATCH_CAP);
-    this.pPoint = exports.ghostty_wasm_alloc_u8_array(POINT_SIZE);
-    this.pRef = exports.ghostty_wasm_alloc_u8_array(GRID_REF_SIZE);
-    this.pStyle = exports.ghostty_wasm_alloc_u8_array(STYLE_SIZE);
-    this.pColors = exports.ghostty_wasm_alloc_u8_array(COLORS_SIZE);
-    this.pGraphemes = exports.ghostty_wasm_alloc_u8_array(GRAPHEME_CAP * 4);
-    this.pUri = exports.ghostty_wasm_alloc_u8_array(HYPERLINK_URI_CAP);
+    this.pScratch = exports.ghostty_wasm_alloc(SCRATCH_CAP);
+    this.pPoint = exports.ghostty_wasm_alloc(POINT_SIZE);
+    this.pRef = exports.ghostty_wasm_alloc(GRID_REF_SIZE);
+    this.pStyle = exports.ghostty_wasm_alloc(STYLE_SIZE);
+    this.pColors = exports.ghostty_wasm_alloc(COLORS_SIZE);
+    this.pGraphemes = exports.ghostty_wasm_alloc(GRAPHEME_CAP * 4);
+    this.pUri = exports.ghostty_wasm_alloc(HYPERLINK_URI_CAP);
 
     this.config = config;
     this.applyConfig(config);
@@ -357,9 +358,9 @@ export class GhosttyTerminal {
     const bytes = typeof data === 'string' ? this.encoder.encode(data) : data;
     if (bytes.length === 0) return;
     if (this.writeBufLen < bytes.length) {
-      if (this.writeBufPtr) this.e.ghostty_wasm_free_u8_array(this.writeBufPtr, this.writeBufLen);
+      if (this.writeBufPtr) this.e.ghostty_wasm_free(this.writeBufPtr, this.writeBufLen);
       this.writeBufLen = Math.max(bytes.length, 4096);
-      this.writeBufPtr = this.e.ghostty_wasm_alloc_u8_array(this.writeBufLen);
+      this.writeBufPtr = this.e.ghostty_wasm_alloc(this.writeBufLen);
     }
     new Uint8Array(this.e.memory.buffer, this.writeBufPtr, bytes.length).set(bytes);
     this.e.ghostty_terminal_vt_write(this.handle, this.writeBufPtr, bytes.length);
@@ -391,12 +392,12 @@ export class GhosttyTerminal {
     const e = this.e;
     this.history?.close();
 
-    const src = e.ghostty_wasm_alloc_u8_array(snapshot.length);
+    const src = e.ghostty_wasm_alloc(snapshot.length);
     new Uint8Array(e.memory.buffer, src, snapshot.length).set(snapshot);
     const out = e.ghostty_wasm_alloc_opaque();
     const releaseSource = () => {
       e.ghostty_wasm_free_opaque(out);
-      e.ghostty_wasm_free_u8_array(src, snapshot.length);
+      e.ghostty_wasm_free(src, snapshot.length);
     };
 
     if (e.ghostty_snapshot_decoder_new_buf(0, out, src, snapshot.length) !== GHOSTTY_SUCCESS) {
@@ -469,14 +470,14 @@ export class GhosttyTerminal {
     this.state = 0;
     this.iterator = 0;
     this.cells = 0;
-    if (this.writeBufPtr) this.e.ghostty_wasm_free_u8_array(this.writeBufPtr, this.writeBufLen);
-    this.e.ghostty_wasm_free_u8_array(this.pScratch, SCRATCH_CAP);
-    this.e.ghostty_wasm_free_u8_array(this.pPoint, POINT_SIZE);
-    this.e.ghostty_wasm_free_u8_array(this.pRef, GRID_REF_SIZE);
-    this.e.ghostty_wasm_free_u8_array(this.pStyle, STYLE_SIZE);
-    this.e.ghostty_wasm_free_u8_array(this.pColors, COLORS_SIZE);
-    this.e.ghostty_wasm_free_u8_array(this.pGraphemes, GRAPHEME_CAP * 4);
-    this.e.ghostty_wasm_free_u8_array(this.pUri, HYPERLINK_URI_CAP);
+    if (this.writeBufPtr) this.e.ghostty_wasm_free(this.writeBufPtr, this.writeBufLen);
+    this.e.ghostty_wasm_free(this.pScratch, SCRATCH_CAP);
+    this.e.ghostty_wasm_free(this.pPoint, POINT_SIZE);
+    this.e.ghostty_wasm_free(this.pRef, GRID_REF_SIZE);
+    this.e.ghostty_wasm_free(this.pStyle, STYLE_SIZE);
+    this.e.ghostty_wasm_free(this.pColors, COLORS_SIZE);
+    this.e.ghostty_wasm_free(this.pGraphemes, GRAPHEME_CAP * 4);
+    this.e.ghostty_wasm_free(this.pUri, HYPERLINK_URI_CAP);
     this.cellPool.length = 0;
   }
 
@@ -687,7 +688,7 @@ export class GhosttyTerminal {
   private renderPalette(): Uint8Array | null {
     this.sync();
     this.dv().setUint32(this.pColors, COLORS_SIZE, true);
-    if (this.e.ghostty_render_state_colors_get(this.state, this.pColors) !== GHOSTTY_SUCCESS) return null;
+    if (this.e.ghostty_render_state_get(this.state, RENDER_DATA_COLORS, this.pColors) !== GHOSTTY_SUCCESS) return null;
     return new Uint8Array(this.e.memory.buffer, this.pColors + COLORS_OFF_PALETTE, 256 * 3);
   }
 
@@ -717,7 +718,7 @@ export class GhosttyTerminal {
   getColors(): RenderStateColors {
     this.sync();
     this.dv().setUint32(this.pColors, COLORS_SIZE, true);
-    this.e.ghostty_render_state_colors_get(this.state, this.pColors);
+    this.e.ghostty_render_state_get(this.state, RENDER_DATA_COLORS, this.pColors);
     const b = new Uint8Array(this.e.memory.buffer, this.pColors, COLORS_SIZE);
     return {
       background: { r: b[COLORS_OFF_BACKGROUND], g: b[COLORS_OFF_BACKGROUND + 1], b: b[COLORS_OFF_BACKGROUND + 2] },

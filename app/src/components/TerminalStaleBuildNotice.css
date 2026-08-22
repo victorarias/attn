@@ -1,0 +1,113 @@
+/* Overlays the top of the pane instead of sitting above the terminal in flow:
+   taking layout space would resize the PTY, and reflowing an agent's output to
+   show a notice about the terminal is its own small disaster. */
+.terminal-stale-build-notice {
+  align-items: flex-start;
+  background: var(--color-bg-panel);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.38);
+  display: flex;
+  gap: 12px;
+  left: 50%;
+  max-width: min(520px, calc(100% - 24px));
+  padding: 12px 12px 12px 14px;
+  position: absolute;
+  top: 12px;
+  transform: translateX(-50%);
+  z-index: 20;
+}
+
+.terminal-stale-build-notice-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.terminal-stale-build-notice p {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  line-height: 1.4;
+  margin: 0;
+}
+
+.terminal-stale-build-notice-lead {
+  color: var(--color-text-primary) !important;
+  font-weight: 600;
+}
+
+.terminal-stale-build-notice-aside {
+  color: var(--color-text-tertiary) !important;
+  margin-top: 2px !important;
+}
+
+.terminal-stale-build-notice-dismiss {
+  align-self: flex-start;
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  padding: 2px 5px;
+}
+
+.terminal-stale-build-notice-dismiss:hover,
+.terminal-stale-build-notice-dismiss:focus-visible {
+  background: var(--color-bg-elevated);
+  color: var(--color-text-primary);
+  outline: none;
+}
+
+.terminal-stale-build-notice-hint {
+  flex: 0 0 auto;
+  height: 96px;
+  width: 200px;
+}
+
+.terminal-stale-build-notice-hint .hint-row,
+.terminal-stale-build-notice-hint .hint-menu {
+  fill: var(--color-bg-elevated);
+  stroke: var(--color-border);
+}
+
+.terminal-stale-build-notice-hint .hint-dot-state {
+  fill: var(--color-text-muted);
+}
+
+.terminal-stale-build-notice-hint .hint-label,
+.terminal-stale-build-notice-hint .hint-item {
+  fill: var(--color-text-dimmed);
+}
+
+.terminal-stale-build-notice-hint .hint-more {
+  fill: var(--color-text-secondary);
+  font-size: 10px;
+  letter-spacing: 0.5px;
+}
+
+.terminal-stale-build-notice-hint .hint-arrow {
+  fill: none;
+  stroke: var(--color-accent);
+  stroke-width: 1.25;
+}
+
+.terminal-stale-build-notice-hint .hint-arrow-head {
+  fill: var(--color-accent);
+}
+
+.terminal-stale-build-notice-hint .hint-divider {
+  stroke: var(--color-border-subtle);
+}
+
+.terminal-stale-build-notice-hint .hint-item-active-bg {
+  fill: var(--color-bg-selected);
+}
+
+.terminal-stale-build-notice-hint .hint-item-active {
+  fill: var(--color-text-primary);
+  font-size: 9px;
+}

@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/victorarias/attn/internal/buildinfo"
 	"github.com/victorarias/attn/internal/launchcontract"
 	"github.com/victorarias/attn/internal/pty"
 )
@@ -781,6 +782,7 @@ func (c *connCtx) handleRequest(req RequestEnvelope) {
 			RPCMinor:         RPCMinor,
 			DaemonInstanceID: c.runtime.cfg.DaemonInstanceID,
 			SessionID:        c.runtime.cfg.SessionID,
+			SnapshotFormat:   buildinfo.SnapshotFormat,
 		})
 		return
 	}
