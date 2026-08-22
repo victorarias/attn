@@ -1,15 +1,8 @@
-// Where a classification's cost goes.
-//
-// pi sums the `usage` on toolResult messages into the session's totals
-// (pi 0.84.2, core/usage-totals.ts), and a `tool_result` handler can attach
-// it. A BLOCKED call never reaches that handler — pi answers it inline from
-// the block reason and runs no result hook (pi-agent-core agent-loop.ts,
-// `kind: "immediate"`) — so a denial's tokens have no result of their own to
-// ride. They wait here and join the next one instead: the session total is
-// right, which is what pays the bill; the per-call attribution is not, and
-// nothing in pi can make it so today. A session whose last act is a denial
-// keeps that last classification unreported — a few tenths of a cent, and the
-// alternative is inventing a tool result the model never asked for.
+// A blocked call never reaches pi's `tool_result` handler (pi answers it
+// inline, `kind: "immediate"`), so a denial's classification tokens have no
+// result to ride. They wait here and join the next one: the session total is
+// right, the per-call attribution is not, and a session ending on a denial
+// leaves that last classification unreported.
 
 export type UsageLike = {
   input?: number;

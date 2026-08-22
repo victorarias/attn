@@ -1,9 +1,6 @@
-// The static decision tree: everything auto mode can answer without asking a
-// model. Pure and synchronous — the classifier is what the tree routes to,
-// never something it calls.
-//
-// Order is the policy (docs/plans/2026-08-16-pi-auto-mode.md, "Decision
-// path"): hard denies, then the allow list, then the static rules themselves.
+// Everything auto mode answers without a model. Pure and synchronous, and the
+// order IS the policy (docs/plans/2026-08-16-pi-auto-mode.md, "Decision path"):
+// denies, then the allow list, then the static rules.
 import { classifyBashCommand } from "./bash";
 import { matchesAnyPattern, type AutoModeConfig } from "./config";
 import { locatePath } from "./paths";
@@ -41,7 +38,7 @@ export function decideStatically(call: ToolCall, config: AutoModeConfig, cwd: st
 
   const denied = matchesAnyPattern(config.hardDeny, signature);
   if (denied !== undefined) {
-    return { outcome: "block", rule: "hard-deny", reason: `hard-denied by the configured pattern ${denied}` };
+    return { outcome: "block", rule: "hard-deny", reason: `denied by the configured pattern ${denied}, which no approval in the conversation lifts` };
   }
 
   const allowed = matchesAnyPattern(config.allow, signature);
@@ -104,10 +101,7 @@ function decideBash(call: ToolCall): StaticDecision {
   return { outcome: "classify", rule: "unjudged-bash", reason: classification.reason };
 }
 
-/**
- * What allow and hard-deny patterns are matched against: the bare command
- * for `bash`, `<tool> <path-or-pattern>` for everything else.
- */
+/** The bare command for `bash`, `<tool> <path-or-pattern>` for everything else. */
 export function callSignature(call: ToolCall): string {
   if (call.toolName === "bash") return stringInput(call, "command").trim();
   const argument = stringInput(call, "path") || stringInput(call, "pattern");

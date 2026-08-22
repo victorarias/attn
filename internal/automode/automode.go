@@ -1,12 +1,7 @@
 // Package automode is attn's half of pi's auto mode: the config value the
-// pi-side decision tree is evaluated against, and the rules about what may be
-// written into it.
-//
-// It is the Go mirror of plugins/attn-pi/automode/config.ts, and the JSON tags
-// here ARE that file's `RawAutoModeConfig` — a Config marshalled by this package
-// is what `loadAutoModeConfig` parses on the other side. The two must stay in
-// lockstep; a field renamed here without renaming it there silently drops to the
-// pi-side default.
+// pi-side decision tree runs on, and the rules about what may be written into
+// it. The JSON tags here ARE config.ts's `RawAutoModeConfig`; a field renamed
+// on one side and not the other silently drops to the pi-side default.
 //
 // Design: docs/plans/2026-08-16-pi-auto-mode.md.
 package automode
@@ -16,17 +11,15 @@ import (
 	"strings"
 )
 
-// Defaults from the classifier receipt in the plan doc. They are settings, not
-// pins: a stored empty model means "whichever default ships", so changing these
-// reaches every user who never picked one.
+// Defaults from the classifier receipt in the plan doc. Settings, not pins:
+// changing these reaches every user who never picked a model.
 const (
 	DefaultClassifierModel = "opencode-go/glm-5.3"
 	DefaultEscalationModel = "opencode-go/qwen3.8-max"
 )
 
 // Config is auto mode's promoted policy — what a session actually launches
-// with. Everything in it has been through the app; a proposal is not part of it
-// until a human promotes one.
+// with. A proposal is not part of it until a human promotes one.
 type Config struct {
 	// Whether an attn session starts with auto mode on.
 	EnabledDefault bool `json:"enabled_default"`
@@ -36,11 +29,8 @@ type Config struct {
 	Allow []string `json:"allow"`
 	// Patterns refused before anything else looks at the call.
 	HardDeny []string `json:"hard_deny"`
-	// Layer 2a's models, and layer 2b's for what 2a cannot decide. Ordered,
-	// primary first: pi walks the rest only when the one before it cannot be
-	// reached (plugins/attn-pi/automode/model-classifier.ts). Always resolved
-	// and never empty — a caller never has to know what the built-in default
-	// is, and an empty list is a layer that can judge nothing.
+	// Ordered, primary first: pi walks the rest only on an unreachable
+	// endpoint. Always resolved and never empty.
 	ClassifierModels []string `json:"classifier_models"`
 	EscalationModels []string `json:"escalation_models"`
 }
@@ -58,19 +48,10 @@ func Defaults() Config {
 }
 
 // ShippedHardDeny is auto mode's own leash: the patterns every machine gets
-// whether or not anyone configured one. A session under auto mode reaching for
-// the surfaces that decide what auto mode permits is denied by policy here, not
-// only by which transport carries which verb.
-//
-// Two surfaces, matched against a call signature (the bare command, for bash):
-// the `attn automode` verbs that write — environment prose lands in the
-// classifier's own prompt, and a proposal the agent files is a line in the
-// human's review list — and the app's WebSocket port, where promotion lives.
-// The read-only verbs (`show`, `denials`) stay reachable on purpose: a denied
-// agent explaining what stopped it is the behavior the plan asks for.
-//
-// wsPort is the daemon's own port, which is per-profile, so the deny names the
-// port this machine actually listens on rather than a hardcoded 9849.
+// whether or not anyone configured one. It covers the `attn automode` verbs
+// that write and the app's WebSocket port, where promotion lives. The read-only
+// verbs stay reachable so a denied agent can explain what stopped it. wsPort is
+// per-profile, so the deny names the port this machine listens on.
 func ShippedHardDeny(wsPort string) []string {
 	patterns := []string{
 		"*attn automode env*",
@@ -88,11 +69,8 @@ func ShippedHardDeny(wsPort string) []string {
 	return patterns
 }
 
-// ResolveHardDeny is what a caller reads: the shipped denies first, then
-// whatever a human promoted. Shipped entries are resolved at read rather than
-// written into anyone's row, the same way an unset model resolves to the
-// default — so changing this list reaches every machine, and no stored row can
-// drop an entry from it.
+// ResolveHardDeny returns the shipped denies first, then whatever a human
+// promoted. Resolved at read, never stored, so no row can drop an entry.
 func ResolveHardDeny(wsPort string, stored []string) []string {
 	resolved := ShippedHardDeny(wsPort)
 	for _, pattern := range stored {
@@ -101,9 +79,7 @@ func ResolveHardDeny(wsPort string, stored []string) []string {
 	return resolved
 }
 
-// StripShippedHardDeny is ResolveHardDeny's inverse, for the write path: a
-// config read, changed, and written back must not persist the shipped entries
-// it was handed.
+// StripShippedHardDeny is ResolveHardDeny's inverse, for the write path.
 func StripShippedHardDeny(wsPort string, resolved []string) []string {
 	shipped := map[string]bool{}
 	for _, pattern := range ShippedHardDeny(wsPort) {
@@ -127,15 +103,12 @@ func appendUnique(values []string, value string) []string {
 	return append(values, value)
 }
 
-// MaxPendingProposalsPerProposer caps how many unresolved proposals one
-// proposer can hold. The receipt is pi's own circuit breaker: a session is
-// stopped for a human question at 20 denials (docs/plans/2026-08-16-pi-auto-mode.md),
-// and a denial is what prompts a proposal, so no healthy session reaches this.
-// A proposer that does has stopped asking and started burying the review list.
+// MaxPendingProposalsPerProposer caps one proposer's unresolved proposals. The
+// receipt is pi's own breaker, which stops a session at 20 denials, so no
+// healthy session reaches this.
 const MaxPendingProposalsPerProposer = 20
 
-// Proposal kinds and model targets. A proposal names one change; promotion in
-// the app is what applies it.
+// Proposal kinds and model targets. Promotion in the app applies one.
 const (
 	KindAllow = "allow"
 	KindDeny  = "deny"
@@ -149,17 +122,15 @@ const (
 	StateDiscarded = "discarded"
 )
 
-// The two pattern lists a human edits directly in the app. They name Config's
-// fields on the wire; a proposal names a Kind instead, because a proposal is a
-// change somebody asked for rather than a list somebody is editing.
+// The two pattern lists a human edits directly in the app, named as Config's
+// fields on the wire. A proposal names a Kind instead.
 const (
 	ListAllow    = "allow"
 	ListHardDeny = "hard_deny"
 )
 
-// IsBroadPattern reports whether a pattern names nothing: with the wildcards and
-// whitespace removed there is no literal left, so it matches every call it is
-// asked about. Mirrors isBroadPattern in config.ts.
+// IsBroadPattern reports whether a pattern names nothing, so it matches every
+// call. Mirrors isBroadPattern in config.ts.
 func IsBroadPattern(pattern string) bool {
 	stripped := strings.Map(func(r rune) rune {
 		switch r {
@@ -171,9 +142,8 @@ func IsBroadPattern(pattern string) bool {
 	return stripped == ""
 }
 
-// ValidateAllowPattern refuses an allow entry that names nothing. Only allow is
-// checked: a broad hard-deny refuses everything, which is safe, while a broad
-// allow is the leash removing itself.
+// ValidateAllowPattern refuses an allow entry that names nothing: a broad allow
+// is the leash removing itself.
 func ValidateAllowPattern(pattern string) error {
 	if strings.TrimSpace(pattern) == "" {
 		return fmt.Errorf("allow pattern is empty")
@@ -186,9 +156,8 @@ func ValidateAllowPattern(pattern string) error {
 	return nil
 }
 
-// ValidateDenyPattern refuses a hard-deny entry that names nothing. A broad
-// deny is safe — it refuses everything — so only an empty one is rejected, and
-// the direct editor and the proposal path refuse it for the same reason.
+// ValidateDenyPattern refuses a deny entry that names nothing. A broad deny is
+// safe, so only an empty one is rejected.
 func ValidateDenyPattern(pattern string) error {
 	if strings.TrimSpace(pattern) == "" {
 		return fmt.Errorf("deny pattern is empty")
@@ -196,8 +165,7 @@ func ValidateDenyPattern(pattern string) error {
 	return nil
 }
 
-// ValidatePattern dispatches to the validator for one of the two editable
-// lists, so a caller holding a list name does not have to switch on it.
+// ValidatePattern dispatches to one of the two editable lists' validators.
 func ValidatePattern(list, pattern string) error {
 	switch list {
 	case ListAllow:
@@ -209,17 +177,13 @@ func ValidatePattern(list, pattern string) error {
 	}
 }
 
-// ModelListSeparator is how a model proposal writes an ordered list into its
-// single value column: `provider/id,provider/id`, primary first. A proposal
-// names ONE change, and for a layer that change is which models may serve it —
-// promotion replaces the layer's list rather than appending to it, so there is
-// no reorder verb to miss and nothing to un-append.
+// ModelListSeparator packs an ordered list into a proposal's single value
+// column: `provider/id,provider/id`, primary first. Promotion REPLACES a
+// layer's list rather than appending, so there is no reorder verb to miss.
 const ModelListSeparator = ","
 
-// ParseModelList reads a model proposal's value into the ordered list a layer
-// runs on. Every entry must be a `provider/id` pair, and a layer with no model
-// is refused: it could judge nothing, and "no models" is never what a caller
-// means by it.
+// ParseModelList reads a proposal's value into a layer's ordered list. Every
+// entry must be `provider/id`, and an empty list is refused.
 func ParseModelList(value string) ([]string, error) {
 	models := []string{}
 	for _, entry := range strings.Split(value, ModelListSeparator) {
@@ -243,16 +207,13 @@ func ParseModelList(value string) ([]string, error) {
 	return models, nil
 }
 
-// FormatModelList is ParseModelList's inverse, for a proposal value and for
-// anywhere a layer's models are shown on one line.
+// FormatModelList is ParseModelList's inverse.
 func FormatModelList(models []string) string {
 	return strings.Join(models, ModelListSeparator)
 }
 
-// ValidateProposal checks one proposed change before it is recorded. Refusing at
-// submission is what keeps an unpromotable entry out of the app's review list.
-// It shares ValidateAllowPattern and ValidateDenyPattern with the app's direct
-// editor, so the two paths refuse the same entries with the same words.
+// ValidateProposal checks one proposed change before it is recorded, sharing
+// its pattern validators with the app's direct editor.
 func ValidateProposal(kind, target, value string) error {
 	value = strings.TrimSpace(value)
 	switch kind {

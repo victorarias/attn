@@ -1,10 +1,6 @@
-// Where a file path sits relative to auto mode's static rules. The boundary
-// is the session's working directory minus the paths that decide
-// what agents and shells are allowed to do — editing those from inside a
-// session is how a session widens its own leash.
-//
-// Resolution is lexical (node:path), so a symlink inside the working
-// directory that points outside it resolves as in-cwd.
+// Where a path sits relative to the static rules: the working directory, minus
+// the paths that decide what agents and shells may do. Resolution is lexical,
+// so a symlink pointing out of the cwd still resolves as in-cwd.
 import { isAbsolute, resolve, sep } from "node:path";
 
 /** Directory names that are protected wherever they appear in a path. */
@@ -19,11 +15,7 @@ export const protectedDirectories: readonly string[] = [
   ".aws",
 ];
 
-/**
- * File names that are protected wherever they appear. Last-segment names
- * beginning `attn-automode` are protected by the same rule (see
- * protectedSegment): auto mode's config and its denial ledger.
- */
+/** Protected wherever they appear. `attn-automode*` is covered by protectedSegment. */
 export const protectedFiles: readonly string[] = [
   ".bashrc",
   ".bash_profile",
@@ -59,8 +51,7 @@ export function isInside(cwd: string, resolved: string): boolean {
   return resolved.startsWith(base);
 }
 
-// Compared case-insensitively: on a case-insensitive filesystem `.GIT` and
-// `.git` are the same directory.
+// Case-insensitive: `.GIT` and `.git` are one directory on macOS.
 function protectedSegment(resolved: string): string | undefined {
   const segments = resolved.split(sep).filter((segment) => segment !== "");
   for (const [index, segment] of segments.entries()) {
@@ -69,10 +60,8 @@ function protectedSegment(resolved: string): string | undefined {
     if (protectedDirectories.includes(name)) return segment;
     if (last && protectedFiles.includes(name)) return segment;
     if (last && name.startsWith(".env")) return segment;
-    // Auto mode's own files — its config and its denial ledger, wherever the
-    // pi agent dir or attn's data dir puts them. A session that can edit its
-    // permission system does not have one, and a session that can edit the
-    // record of what it was refused leaves no record.
+    // Auto mode's own config and ledger, wherever they live. A session that can
+    // edit its permission system does not have one.
     if (last && name.startsWith("attn-automode")) return segment;
   }
   return undefined;

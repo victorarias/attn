@@ -1,13 +1,7 @@
-// The static read-only bash set: the boring commands that carry normal work
-// and cannot change anything. Everything this file declines goes to the
-// classifier, so declining is cheap and being wrong in the other direction
-// is not — every entry here runs unjudged.
-//
-// Two rules keep the set honest. A command that can be talked into writing
-// (`sort -o`, `git branch -D`) carries the flags or subcommands that make it
-// read-only, not just its name. And a command that can run another command
-// (`env`, `xargs`, `find -exec`, `sh -c`) is not in the set at all: naming
-// the wrapper would let anything ride in behind it.
+// The static read-only bash set. Every entry here runs UNJUDGED, so declining
+// is cheap and being wrong the other way is not. Two rules keep it honest: a
+// command that can be talked into writing carries the flags that make it
+// read-only, and a command that can run another command is not in the set.
 
 /** Reaching the network is never read-only, whatever the command looks like. */
 export const networkCommands: readonly string[] = [
@@ -73,11 +67,7 @@ export const readOnlyCommands: Readonly<Record<string, ReadOnlyCommand>> = {
   git: { subcommands: ["status", "log", "diff", "show", "blame", "rev-parse", "ls-files", "describe", "shortlog"] },
 };
 
-/**
- * Characters that let one command line become several, redirect output, or
- * expand into text this matcher never sees. Any of them and the command is
- * not read-only, whatever the words around them say.
- */
+/** Anything that makes one command line several, or text this matcher never sees. */
 const controlCharacters = [";", "&", ">", "<", "`", "$", "(", ")", "{", "}", "\n", "\r", "\\"];
 
 export type BashClassification =
@@ -106,11 +96,7 @@ export function classifyBashCommand(command: string): BashClassification {
   return { kind: "read-only" };
 }
 
-/**
- * Scans the whole command line for a network command name rather than only
- * the leading word, so a network call cannot ride in as a later element of
- * something that otherwise parses as read-only.
- */
+/** Scans the whole line, so a network call cannot ride in as a later element. */
 function networkCommandIn(command: string): string | undefined {
   for (const word of command.split(/[^A-Za-z0-9_.-]+/)) {
     if (networkCommands.includes(word.toLowerCase())) return word.toLowerCase();

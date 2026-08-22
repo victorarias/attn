@@ -1,12 +1,7 @@
-// Auto mode as a pi session sees it: the `/auto` command, the `--auto` /
-// `--no-auto` flags, the status indicator, and the classifier built from
-// whatever model registry the running session hands over.
-//
-// One instance of this class lives at module scope in the entrypoints
-// (suite/index.ts, standalone.ts) and `register` runs once per pi factory run,
-// per plugins/attn-pi/AGENTS.md's lifecycle invariants. That is what makes the
-// user's `/auto` choice outlive a /new or a resume in the same process, while
-// the verdict cache and the breaker — owned by the factory below — do not.
+// Auto mode as a pi session sees it: `/auto`, the launch flags, the status
+// indicator, and the classifier built from the running session's registry. One
+// instance at module scope, so the user's `/auto` outlives a /new or a resume
+// while the verdict cache and breaker do not.
 import type { Classifier } from "./classifier";
 import type { AutoModeConfig } from "./config";
 import {
@@ -41,15 +36,9 @@ export type AutoModeSetup = {
   config: AutoModeConfig;
   /** The durable local record every blocked call is written to. */
   ledger?: DenialLedgerLike;
-  /**
-   * Reported for every blocked call. The seam attn's own surfaces hang off;
-   * bare pi leaves it unset.
-   */
+  /** The seam attn's surfaces hang off; bare pi leaves it unset. */
   onDenial?: (denial: AutoModeDenial) => void;
-  /**
-   * True while the breaker's question waits on the user, false once answered.
-   * attn's suite declares `pending_approval` from it; bare pi leaves it unset.
-   */
+  /** attn's suite declares `pending_approval` from it; bare pi leaves it unset. */
   onWaitingForUser?: (waiting: boolean) => void;
   /** Said once, at the first session start that has a UI. A broken config is the caller. */
   notice?: string;
@@ -79,11 +68,7 @@ export class AutoMode {
     });
   }
 
-  /**
-   * The mode in force. A launch flag outranks the configured default, and the
-   * user's own `/auto` outranks both from the moment they use it — a command
-   * that silently loses to the flag it was typed to override is not a command.
-   */
+  /** `/auto` outranks a launch flag, which outranks the configured default. */
   enabled(): boolean {
     return this.choice ?? this.flag ?? this.setup.config.enabledDefault;
   }
@@ -91,8 +76,7 @@ export class AutoMode {
   register(pi: AutoModePiLike): void {
     pi.registerFlag("auto", { description: "Start with attn auto mode on", type: "boolean" });
     pi.registerFlag("no-auto", { description: "Start with attn auto mode off", type: "boolean" });
-    // No flag carries a default, so an unset one reads as undefined rather
-    // than as a false somebody typed. --no-auto wins a session given both.
+    // Unset reads as undefined, not as a typed false. --no-auto wins both.
     this.flag = pi.getFlag("no-auto") === true ? false : pi.getFlag("auto") === true ? true : undefined;
 
     pi.registerCommand("auto", {
