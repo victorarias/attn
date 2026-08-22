@@ -348,12 +348,20 @@ plans live under `docs/plans/` and the classifier receipt is
   a different one. An exhausted list still blocks, under the rule
   `classifier-unavailable` and with a reason naming the layer, the models
   tried and the last failure.
-- **The rulebook is sent warm.** It is the whole system prompt and it is the
-  same on every call, which is what pi's `cacheControlFormat: 'anthropic'`
-  marks for the provider. What pi needs from us is the key: `sessionId` is
-  `<attn session>:<stage>`, so a session keeps two warm prefixes, and
+- **The rulebook lives in `automode/rulebook.md`,** not in TypeScript.
+  `prompt.ts` imports it with `with { type: "text" }`, which bun inlines at
+  build time, so it ships inside `suite.js` and `automode.js` with no file to
+  copy and no path to resolve at runtime. It is split once at module load on
+  its single `{{ENVIRONMENT}}` placeholder, and a missing placeholder throws
+  there rather than shipping a prompt with a hole in it.
+- **One system prompt, both passes, byte for byte.** The pass is named only in
+  the last user message. That is what lets the provider cache one prefix per
+  session instead of two, and it is why `sessionId` is the attn session id
+  with no stage suffix: the key routes both passes to the replica already
+  holding the rulebook. `cacheControlFormat: 'anthropic'` marks it and
   `cacheRetention: "long"` asks for the 24h window where the provider has one.
-  Anything that moves the rulebook out of the system prompt throws that away.
+  Splitting the system prompt by stage, or moving the rulebook out of it,
+  throws the cache away.
 - **Stage one is the cheap one and is capped like one.** `harmMaxTokens` is
   512 — eight times the 60 output tokens glm-5.3 spent answering one severity
   tag (2026-08-17) — against `intentMaxTokens` 8,192 for the stage that

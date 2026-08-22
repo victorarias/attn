@@ -154,16 +154,16 @@ describe("classifier prompt", () => {
     expect(call?.model.baseUrl).toBe("https://proxy.internal/v1");
   });
 
-  test("each stage gets its own cache key, stable across the session's calls", async () => {
+  test("one cache key covers both passes, stable across the session's calls", async () => {
     const registry = new FakeRegistry([dangerous(), graded(80, "Git Destructive"), routine()]);
     const classifier = classifierWith(registry, defaultAutoModeConfig, undefined, "session-7");
     await classifier.classify(request());
     await classifier.classify(request());
 
     expect(registry.calls.map((call) => call.options?.sessionId)).toEqual([
-      "session-7:harm",
-      "session-7:intent",
-      "session-7:harm",
+      "session-7",
+      "session-7",
+      "session-7",
     ]);
     expect(registry.calls.every((call) => call.options?.cacheRetention === classifierCacheRetention)).toBe(true);
   });
@@ -294,13 +294,17 @@ describe("the harm stage and the intent stage", () => {
     });
   });
 
-  test("the harm stage is told to grade harm alone, and the intent stage to weigh intent", async () => {
+  // Both passes send the rulebook byte for byte, so the provider caches one
+  // copy per session. Only the last user message says which pass this is.
+  test("both passes share one system prompt, and the pass is named in the message", async () => {
     const registry = new FakeRegistry([dangerous(), graded(90, "Data Exfiltration")]);
     await classifierWith(registry).classify(request());
-    expect(registry.calls[0]?.context.systemPrompt).toContain("Do NOT apply user intent");
-    expect(messagesOf(registry.calls[0])[0]).toContain("Grade HARM ONLY");
-    expect(registry.calls[1]?.context.systemPrompt).toContain("User intent is the final signal");
-    expect(messagesOf(registry.calls[1])[0]).toContain("<thinking>");
+    const first = registry.calls[0]?.context.systemPrompt;
+    expect(first).toContain("You are a security monitor");
+    expect(registry.calls[1]?.context.systemPrompt).toBe(first);
+    expect(messagesOf(registry.calls[0]).at(-1)).toContain("This is pass 1");
+    expect(messagesOf(registry.calls[1]).at(-1)).toContain("This is pass 2");
+    expect(messagesOf(registry.calls[1]).at(-1)).toContain("<thinking>");
   });
 
   test("the one hard block is the one denial an approval cannot lift", async () => {

@@ -32,9 +32,14 @@ change: |
     call runs, say no and it stays blocked.
   - Tool calls the agent already made are in the window, so the classifier
     sees the work leading up to the call it is judging.
-  - The rules grew from twelve to about fifty, and they are sent in a form
-    providers cache, so the second call in a session costs a fraction of the
-    first.
+  - The rules grew from twelve to about seventy, and each one now says what
+    the user has to name for an approval to clear it. Naming the task never
+    clears the dangerous step: "clean up the repo" does not authorize
+    discarding uncommitted work, and "get the deploy working" does not
+    authorize a rollback.
+  - Both passes now send the same rules, word for word, so a provider caches
+    one copy per session instead of two. The second call in a session costs a
+    fraction of the first.
   - A blocked call's local record keeps the whole prompt it was judged on, so
     a wrong verdict can be told apart from a window that never carried the
     sentence that mattered.

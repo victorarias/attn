@@ -5,8 +5,7 @@ import {
   classifierUserPrompt,
   grantPrompt,
   hardBlockRule,
-  harmSystemPrompt,
-  intentSystemPrompt,
+  classifierSystemPrompt,
   parseSeverity,
   stageOneAllowCeiling,
   unreadableReason,
@@ -104,10 +103,12 @@ export class ModelClassifier implements Classifier {
     const grant = request.grant?.trim();
     const preamble = grant && grant !== "" ? [grantPrompt(grant)] : [];
 
+    const systemPrompt = classifierSystemPrompt(request.environment);
+
     const harmMessages = [...preamble, classifierUserPrompt(input, "harm")];
     const harmPrompt: ClassifierPrompt = {
       layer: "harm",
-      system: harmSystemPrompt(request.environment),
+      system: systemPrompt,
       user: harmMessages.join("\n\n"),
     };
     const harm = await this.judge({
@@ -116,7 +117,7 @@ export class ModelClassifier implements Classifier {
       systemPrompt: harmPrompt.system,
       messages: harmMessages,
       maxTokens: harmMaxTokens,
-      ...(this.sessionId("harm") ?? {}),
+      ...(this.sessionId() ?? {}),
       signal: request.signal,
     });
     if (harm.answered === false) return unansweredVerdict(harm, harmPrompt);
@@ -127,7 +128,7 @@ export class ModelClassifier implements Classifier {
     const intentMessages = [...preamble, classifierUserPrompt(input, "intent")];
     const intentPrompt: ClassifierPrompt = {
       layer: "intent",
-      system: intentSystemPrompt(request.environment),
+      system: systemPrompt,
       user: intentMessages.join("\n\n"),
     };
     const intent = await this.judge({
@@ -136,7 +137,7 @@ export class ModelClassifier implements Classifier {
       systemPrompt: intentPrompt.system,
       messages: intentMessages,
       maxTokens: intentMaxTokens,
-      ...(this.sessionId("intent") ?? {}),
+      ...(this.sessionId() ?? {}),
       signal: request.signal,
     });
     if (intent.answered === false) return unansweredVerdict(intent, intentPrompt);
@@ -152,9 +153,11 @@ export class ModelClassifier implements Classifier {
     return settle(intent.parsed, intentPrompt);
   }
 
-  private sessionId(layer: ClassifierLayer): { sessionId: string } | undefined {
+  // One key for both passes: they send the same system prompt, and the key is
+  // what routes them to the replica already holding it.
+  private sessionId(): { sessionId: string } | undefined {
     const key = this.options.sessionKey?.trim();
-    return key ? { sessionId: `${key}:${layer}` } : undefined;
+    return key ? { sessionId: key } : undefined;
   }
 
   private async judge(input: {
