@@ -3,7 +3,10 @@ import type { ClassifierRequest } from "../automode/classifier";
 import { defaultAutoModeConfig, type AutoModeConfig } from "../automode/config";
 import {
   attemptsPerModel,
+  classifierCacheRetention,
   classifierThinkingLevel,
+  harmMaxTokens,
+  intentMaxTokens,
   ModelClassifier,
   type CompletionContext,
   type CompletionOptions,
@@ -108,8 +111,9 @@ function classifierWith(
   registry: ModelRegistryLike,
   config: AutoModeConfig = defaultAutoModeConfig,
   onUsage?: (usage: UsageLike) => void,
+  sessionKey?: string,
 ) {
-  return new ModelClassifier({ registry, config, onUsage });
+  return new ModelClassifier({ registry, config, onUsage, ...(sessionKey ? { sessionKey } : {}) });
 }
 
 describe("classifier prompt", () => {
@@ -148,6 +152,32 @@ describe("classifier prompt", () => {
     expect(call?.options?.headers).toEqual({ "x-test": "1" });
     expect(call?.options?.reasoning).toBe(classifierThinkingLevel);
     expect(call?.model.baseUrl).toBe("https://proxy.internal/v1");
+  });
+
+  test("each stage gets its own cache key, stable across the session's calls", async () => {
+    const registry = new FakeRegistry([dangerous(), graded(80, "Git Destructive"), routine()]);
+    const classifier = classifierWith(registry, defaultAutoModeConfig, undefined, "session-7");
+    await classifier.classify(request());
+    await classifier.classify(request());
+
+    expect(registry.calls.map((call) => call.options?.sessionId)).toEqual([
+      "session-7:harm",
+      "session-7:intent",
+      "session-7:harm",
+    ]);
+    expect(registry.calls.every((call) => call.options?.cacheRetention === classifierCacheRetention)).toBe(true);
+  });
+
+  test("a session with no key still classifies", async () => {
+    const registry = new FakeRegistry([routine()]);
+    await classifierWith(registry).classify(request());
+    expect(registry.calls[0]?.options?.sessionId).toBeUndefined();
+  });
+
+  test("the cheap stage is capped far tighter than the escalation", async () => {
+    const registry = new FakeRegistry([dangerous(), graded(80, "Git Destructive")]);
+    await classifierWith(registry).classify(request());
+    expect(registry.calls.map((call) => call.options?.maxTokens)).toEqual([harmMaxTokens, intentMaxTokens]);
   });
 
   test("no resolved base url leaves the catalog's model alone", async () => {
@@ -533,5 +563,37 @@ describe("the transcript the classifier is handed", () => {
     const registry = new FakeRegistry([routine()]);
     await classifierWith(registry).classify(request());
     expect(messagesOf(registry.calls[0])[0]).not.toContain("tool_result");
+  });
+});
+
+describe("a conversation the model will not take", () => {
+  const refusal = "prompt is too long: 412000 tokens > 200000 maximum";
+
+  test("is told apart from an outage, whichever way the provider reports it", async () => {
+    for (const answers of [errors(attemptsPerModel, refusal), providerErrors(attemptsPerModel, refusal)]) {
+      const verdict = await classifierWith(new FakeRegistry(answers)).classify(request());
+      expect(verdict.verdict).toBe("deny");
+      if (verdict.verdict !== "deny") return;
+      expect(verdict.tooLong).toBe(true);
+      expect(verdict.unavailable).toBeUndefined();
+      expect(verdict.reason).toContain("refused this conversation for its size");
+    }
+  });
+
+  test("stays an outage when any model failed for another reason", async () => {
+    const config: AutoModeConfig = { ...defaultAutoModeConfig, classifierModels: ["p/a", "p/b"] };
+    const registry = new FakeRegistry([...errors(attemptsPerModel, refusal), ...errors(attemptsPerModel, "ECONNRESET")]);
+    const verdict = await classifierWith(registry, config).classify(request());
+    if (verdict.verdict !== "deny") throw new Error("expected a deny");
+    expect(verdict.unavailable).toBe(true);
+    expect(verdict.tooLong).toBeUndefined();
+  });
+
+  test("is still walked across the model list, in case a bigger window takes it", async () => {
+    const config: AutoModeConfig = { ...defaultAutoModeConfig, classifierModels: ["p/small", "p/large"] };
+    const registry = new FakeRegistry([...errors(attemptsPerModel, refusal), routine()]);
+    const verdict = await classifierWith(registry, config).classify(request());
+    expect(verdict.verdict).toBe("allow");
+    expect(registry.calls.map((call) => call.model.id)).toEqual(["small", "small", "large"]);
   });
 });

@@ -1,6 +1,3 @@
-export const transcriptEntryLimit = 24;
-export const transcriptCharLimit = 16_000;
-
 export type TranscriptRole = "user" | "assistant" | "tool";
 
 export type TranscriptEntry = {
@@ -11,7 +8,7 @@ export type TranscriptEntry = {
 };
 
 export class TranscriptWindow {
-  private readonly entries: TranscriptEntry[] = [];
+  private entries: TranscriptEntry[] = [];
 
   private opening: string | undefined;
 
@@ -27,11 +24,14 @@ export class TranscriptWindow {
       if (this.latest("user") === trimmed) return;
     }
     this.entries.push({ role, text: trimmed, ...(tool === undefined ? {} : { tool }) });
-    while (this.entries.length > transcriptEntryLimit) this.entries.shift();
   }
 
   recordToolCall(tool: string, action: string): void {
     this.record("tool", action, tool);
+  }
+
+  compacted(): void {
+    this.entries = [];
   }
 
   latest(role: TranscriptRole): string | undefined {
@@ -46,24 +46,8 @@ export class TranscriptWindow {
     return this.opening;
   }
 
-  oversized(): number | undefined {
-    const newest = this.entries[this.entries.length - 1];
-    if (newest === undefined) return undefined;
-    return newest.text.length > transcriptCharLimit ? newest.text.length : undefined;
-  }
-
   snapshot(): TranscriptEntry[] {
-    const kept: TranscriptEntry[] = [];
-    let budget = transcriptCharLimit;
-    for (let i = this.entries.length - 1; i >= 0; i--) {
-      const entry = this.entries[i];
-      if (!entry) continue;
-      const cost = entry.text.length;
-      if (cost > budget) break;
-      budget -= cost;
-      kept.unshift(entry);
-    }
-    return kept;
+    return [...this.entries];
   }
 }
 

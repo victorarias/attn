@@ -7,9 +7,9 @@ different machinery. On 2026-08-22 we watched CC's real classifier traffic and
 captured both an allow and a block. CC's design is better on every point where
 attn has already drawn blood, so we mirror it.
 
-The one deliberate divergence is setup. attn keeps its ordered per-layer model
-lists, walked only when a model cannot be reached, with one immediate retry
-each. CC pins one model per stage and has no equivalent.
+The ruling that governs everything below: auto mode works the way it works in
+Claude Code, except the parts attn cannot or should not copy. Each divergence
+in this doc names itself as one.
 
 ## How the receipts were taken
 
@@ -71,62 +71,128 @@ observed) carrying a policy that says what it can authorize: a specific grant
 naming the same operation and target counts, and generic encouragement does not
 and "must not lower your block threshold".
 
-**A prompt that does not fit is not judged.** Over the context window, CC stops
-classifying and hands the decision back: the permission dialog interactively,
-an outright agent abort headless, deny under `dontAsk`. It records
-`transcript_too_long` with the actual and limit token counts.
+**There is no verdict cache on the tool gate.** The only two classifier skips
+are named in the binary - the safe allowlist, and calls that `acceptEdits`
+would allow anyway. CC's one classifier cache belongs to a different gate, the
+sandbox network classifier keyed `host:port`, and its policy is the inverse of
+attn's old one: an allow is reusable only while the conversation has not moved,
+a block sticks for the session, an outage is not remembered at all.
 
-## What attn does today, and what changes
+**Nothing is measured before the call.** CC has no pre-flight budget. It sends
+the whole thing and learns from the provider: `transcript_too_long` is parsed
+out of a `prompt is too long: N tokens > M` API error. That is why nobody has
+ever seen it fire in a long CC session - it only fires when the API refuses.
+When it does, CC hands the decision to the user: the permission dialog
+interactively, an abort headless, deny under `dontAsk`.
+
+## The decisions
+
+Interviewed and settled 2026-08-22. Each row says what attn does and, where it
+differs from CC, why.
+
+| # | Question | Decision |
+| --- | --- | --- |
+| 1 | Hard blocks | One, like CC: `Data Exfiltration`. Auto-mode tampering becomes soft. |
+| 2 | Verdict cache | None, like CC. The whole cache goes. |
+| 3 | Stage models | attn's ordered lists per stage. **Divergence:** CC pins one model. |
+| 4 | Thresholds | CC's 25 / 35, global named constants. Per-model when measured. |
+| 5 | Breaker | Unchanged: 3 consecutive, 20 total. **Divergence:** CC has none. |
+| 6 | Over budget | No pre-flight check. React to the provider's error, like CC. |
+| 7 | Rulebook size | Grown substantially, attn's own prose, CC's rule names. |
+| 8 | Allowlist shadowing | Left open, like CC. Seed `s-ypkx47` stays open. |
+| 9 | Transcript window | Follows pi's context. **Divergence:** CC's is unbounded. |
+| 10 | Stage 1 shape | Capped tokens, thinking at pi's floor. **Partly forced:** see below. |
+| 11 | Prefix caching | Required. pi's `cacheControlFormat` already does it. |
+| 12 | Cache key | Per attn session, per stage: two warm prefixes each. |
+| 13 | Cache retention | `long`. pi defaults to `short`. |
+| 14 | Too long | Block the call and open a turn. attn's permission dialog. |
+
+### Why each divergence is one attn cannot or should not copy
+
+**Model lists.** CC ships one model and knows its number. attn runs whatever
+the user configured, and a model that cannot be reached must not silently
+become an allow. The list is walked only on unreachability, never on a verdict.
+
+**The breaker.** CC's classifier sits in front of a user who is watching. attn
+runs sessions nobody is watching, so a session that has been refused twenty
+times has to stop and ask rather than grind.
+
+**The transcript window.** CC's transcript can grow until the API refuses it.
+pi compacts, and a window holding turns pi has already dropped would judge a
+call on a conversation that no longer exists. So the window follows pi: it
+holds what pi still holds, and drops what pi drops.
+
+**Stage one's shape.** CC closes stage one with a stop sequence and thinking
+fully off. pi's `streamSimple` exposes no stop sequence at all, and its
+`reasoning` bottoms out at `minimal`. So the cap does the work alone:
+`harmMaxTokens` is 512, eight times the 60 output tokens glm-5.3 spent
+answering one severity tag (2026-08-17). A stage-one answer cut short by the
+cap parses as nothing and escalates to stage two, which is the safe direction.
+
+**Thresholds.** CC's per-model table is measured against models we do not run.
+25/35 are the only measured numbers we have; they are named constants, and the
+s7 corpus is what will move them. They are not tripwires - every
+classification passes through them.
+
+### Two decisions that change the security posture
+
+Both are the user's call, and both were made in the interview rather than
+assumed:
+
+**Auto-mode tampering stops being a boundary.** It moves to the clearable side,
+leaving exfiltration alone as the thing a conversation cannot lift. What makes
+this safe here and not merely a copy: auto mode's config is proposal-gated -
+an agent can only reach `CreateAutoModeProposal`, and `PromoteAutoModeProposal`
+has exactly one caller, a WebSocket command from the app. And `paths.ts`
+statically refuses any path segment beginning `attn-automode`, unjudged, before
+the classifier runs.
+
+**The verdict cache goes.** It was the last remembered decision in the gate. An
+allow that outlives the conversation it was judged in is a stale allow, and a
+deny that outlives it blocks a retry the user just authorized. CC keeps
+neither, and the two live places attn needs memory - the breaker counters and
+the standing-denial widget - are not the gate.
+
+## Mechanisms
+
+**Following pi's context.** The window has no cap of its own - between
+compactions it grows exactly as CC's does. pi fires `session_compact` after it
+drops history, and the window empties there, so it can never carry turns pi has
+already forgotten. The grant keeps its seat across a compaction: it is the
+session's standing authorization, not a turn.
+
+**Opening a turn on a too-long prompt.** attn has no permission dialog, but it
+has the thing a dialog is for: `ctx.ui.confirm` blocking pi on the user while
+`reportApprovalWindow` declares `pending_approval`, which opens an attn turn.
+That is the breaker's existing path, and the too-long case takes it.
+
+**Prefix caching.** The rulebook stays in the system prompt, which is what pi's
+`cacheControlFormat: 'anthropic'` marks. `sessionId` drives `prompt_cache_key`
+and the affinity headers; one per attn session per stage. `cacheRetention:
+"long"` asks for the 24h window where the provider supports it.
+
+## What ships
 
 | | attn today | after |
 | --- | --- | --- |
-| transcript | full message text, each entry cut to 4,000 chars head-and-tail | projected entries, nothing cut |
+| transcript | full text, each entry cut to 4,000 chars head-and-tail | projected entries, nothing cut, following pi |
 | tool calls | not in the transcript at all | projected in, like CC |
 | opening message | reserved seat, 12,000-char cap | its own message, no cap, with the authorization policy |
 | layers | same question twice; 2b escalates only an allow | stage 1 grades harm, stage 2 applies intent |
 | verdict | allow / deny / uncertain | severity plus a category naming the matched rule |
 | hard blocks | two: exfiltration, auto mode tampering | one: exfiltration |
-| over budget | truncate and judge anyway | refuse to judge, say so |
-| models | ordered list per layer, walked on unreachable | unchanged, the deliberate divergence |
-
-### Decisions
-
-**The rulebook is attn's own prose, not a copy.** CC's 119,893 characters are
-Anthropic's. We mirror the architecture, the taxonomy and the vocabulary, and
-write our own rules. attn's list is shorter because attn's surface is smaller.
-
-**Auto-mode tampering stops being a boundary.** It moves to the clearable side,
-leaving exfiltration alone as the thing a conversation cannot lift. This is a
-product decision, not a rename: it is the difference between attn holding a line
-against its own user and attn trusting a user who says so plainly. Mirroring CC
-is the ruling.
-
-**attn's thresholds start at CC's numbers** because they are the only measured
-ones we have, and they are named constants so the s7 corpus can move them.
-They are not tripwires: every classification passes through them.
-
-**Unattended is attn's own answer.** CC aborts a headless agent that cannot be
-classified. attn exists to run sessions nobody is watching, so an unjudgeable
-call there joins the family attn already has: a denial nobody judged, whose way
-through is neither an approval nor a retry.
-
-## What shipped
-
-`transcript.ts` projects entries and never truncates, records tool calls, and
-holds the opening message in `grant()` rather than in the window.
-`prompt.ts` carries the rulebook, both stage prompts, the grant policy and the
-severity parser mirroring CC's regexes. `model-classifier.ts` runs the two
-stages against the ordered model lists, gating stage two on
-`stageOneAllowCeiling` (25) and blocking above `blockLine` (35), and hands both
-stages the grant message as its own seat. `session.ts` records every allowed
-call into the window and refuses to judge a conversation that will not fit.
-`Data Exfiltration` is the one category that comes back unclearable.
+| verdict cache | allow and deny remembered per intent | none |
+| over budget | truncate and judge anyway | send it; block and ask when the API refuses |
+| stage 1 cost | unbounded tokens | capped at 512, escalating if it overruns |
+| caching | nothing passed to pi | session-keyed prefix cache, long retention |
 
 ## Gaps this does not close
 
 An allow pattern still answers before the classifier runs, so a configured
 `curl:*` shadows the exfiltration hard block entirely. Observed live in CC with
 Victor's own settings: `curl -X POST --data-binary @.env` executed with no
-classifier call. Seed `s-ypkx47` holds the two questions - whether a hard block
-should outrank an allowlist, and whether attn should say out loud which rule
-let something past.
+classifier call. CC has the same hole, so mirroring keeps it. Seed `s-ypkx47`
+holds the two questions - whether a hard block should outrank an allowlist, and
+whether attn should say out loud which rule let something past.
+
+The s7 corpus receipt for the new thresholds is still owed.

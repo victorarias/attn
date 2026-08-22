@@ -23,12 +23,20 @@ change: >
   says plainly what they want done. Turning auto mode off from inside a session
   used to be the second one; it is a refusal the user can now clear, which is
   the difference between attn holding a line against its own user and attn
-  trusting a user who says so. And a conversation that will not fit is no
-  longer judged on the part that does. Auto mode blocks the call, says nothing
-  refused it and no model was asked, and tells the agent to ask the user
-  directly, because retrying and approving both reach the same wall. Auto mode
-  keeps its own ordered lists of classifier models, walked when one cannot be
-  reached; that part is attn's, and it stays.
+  trusting a user who says so. Nothing about a verdict is remembered any more
+  either. Auto mode used to reuse an earlier answer for a call it had seen
+  before, which meant an approval could be ignored on the retry and an old
+  yes could outlive the conversation that earned it; every call is judged on
+  the conversation as it stands. And when a conversation grows past what the
+  classifier's model will take, auto mode does not guess beforehand and does
+  not judge on a piece of it. It sends the call, and if the model refuses the
+  conversation for its size, auto mode asks the user directly, in the session,
+  the way Claude Code puts up a permission dialog. Say yes and the call runs;
+  say no and the agent is told to ask rather than retry. The rulebook is also
+  sent in a form providers can cache, so the second call in a session costs a
+  fraction of the first. Auto mode keeps its own ordered lists of classifier
+  models, walked when one cannot be reached; that part is attn's, and it
+  stays.
 symptom: >
   A classifier that was shown a trimmed conversation refused work the user had
   already authorized in the part that was trimmed away.

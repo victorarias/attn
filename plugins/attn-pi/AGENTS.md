@@ -306,14 +306,25 @@ plans live under `docs/plans/` and the classifier receipt is
   standing denial is an outage. Handing over the wrong one costs the user a
   turn and leaves them thinking they fixed it.
 - **The session's opening message keeps its own seat in the classifier's
-  transcript window, and its own cap.** It is the only message that can GRANT
-  anything and the first the budgets squeeze: oldest, so the window cap
-  reaches it, and far longer than a typed message, so the entry cap does too.
-  Measured 2026-08-22: every delegation brief on this machine (4,495-5,881
-  chars) was clamped at 4,000 head-and-tail, and the middle it dropped is
-  where a brief says what the agent is authorized to do. Only a message with
-  nothing before it claims the seat, so the window still renders oldest
-  first.
+  transcript window, and rides whole.** It is the only message that can GRANT
+  anything, and a cap on it cuts exactly the middle where a delegation brief
+  says what the agent is authorized to do (measured 2026-08-22: every brief on
+  this machine ran 4,495-5,881 chars). Only a message with nothing before it
+  claims the seat, so the window still renders oldest first, and a compaction
+  clears the window without touching the grant.
+- **Nothing about a verdict is remembered.** The window holds no cap of its
+  own and the gate holds no cache: the same call made twice is judged twice.
+  A remembered allow outlives the conversation it was judged in, and a
+  remembered deny blocks a retry the user just authorized. Claude Code keeps
+  neither; the breaker counters and the standing-denial widget are the only
+  state a session accumulates, and neither decides a call.
+- **A prompt too big to judge is learned from the provider, not measured.**
+  There is no pre-flight budget. The call goes out and a `prompt is too long`
+  refusal comes back; every model in the layer refusing that way is
+  `classifier-too-long`, which asks the user through `ctx.ui.confirm` — the
+  attn equivalent of Claude Code's permission dialog, and it opens a turn.
+  A yes runs the call, a no blocks it with a text that sends the agent to the
+  user rather than to a retry. Mixed failures stay an outage.
 - Like `suite/`, the module is duck-typed against pi's shapes rather than
   importing pi, so `bun test` covers the whole extension including its
   `tool_call` wiring. `index.ts` is the only file that knows pi's event names.
@@ -332,8 +343,20 @@ plans live under `docs/plans/` and the classifier receipt is
   including unparseable output — advancing on a verdict would be shopping for
   a different one. An exhausted list still blocks, under the rule
   `classifier-unavailable` and with a reason naming the layer, the models
-  tried and the last failure. An unavailable deny is never cached: the cache
-  holds verdicts, and there was none.
+  tried and the last failure.
+- **The rulebook is sent warm.** It is the whole system prompt and it is the
+  same on every call, which is what pi's `cacheControlFormat: 'anthropic'`
+  marks for the provider. What pi needs from us is the key: `sessionId` is
+  `<attn session>:<stage>`, so a session keeps two warm prefixes, and
+  `cacheRetention: "long"` asks for the 24h window where the provider has one.
+  Anything that moves the rulebook out of the system prompt throws that away.
+- **Stage one is the cheap one and is capped like one.** `harmMaxTokens` is
+  512 — eight times the 60 output tokens glm-5.3 spent answering one severity
+  tag (2026-08-17) — against `intentMaxTokens` 8,192 for the stage that
+  thinks. Claude Code closes stage one with a stop sequence too; pi's
+  `streamSimple` exposes none, and its `reasoning` cannot go below `minimal`,
+  so the cap is what we have. A stage-one answer cut short parses as nothing
+  and escalates, which is the safe direction.
 - **Escalation is scoped to allow verdicts.** A confident deny is final — the
   user overturns one by saying so, and a second opinion buys them only the
   wait. Letting denials escalate doubled the cost of the corpus.
@@ -352,8 +375,8 @@ plans live under `docs/plans/` and the classifier receipt is
   is not refreshed.
 - The `AutoMode` in `mode.ts` lives at module scope and the session state the
   factory owns does not. That is the line: the user's `/auto` choice is theirs
-  until they change it, while the verdict cache and the breaker belong to one
-  session.
+  until they change it, while the transcript window and the breaker belong to
+  one session.
 - Precedence is `/auto` > `--auto`/`--no-auto` > `enabled_default`. The flags
   carry no default so an unset one reads as undefined, and a command that
   loses to a flag is not a command.
@@ -369,8 +392,8 @@ plans live under `docs/plans/` and the classifier receipt is
   episode where EVERY block was an outage says so (`BreakerState.outage`) and
   asks about the outage instead of claiming the session was refused N times.
 - **A denial names who decided.** Static rules keep their own names; a
-  classified call reports the layer that answered (`classifier-2a`,
-  `classifier-2b`), or `classifier-unavailable` when no model in the layer
+  classified call reports the stage that answered (`classifier-harm`,
+  `classifier-intent`), or `classifier-unavailable` when no model in the stage
   could be reached, which is why `ClassifierVerdict` carries a `layer` and an
   `unavailable` flag. Denials reach attn through `AutoMode`'s `onDenial` seam,
   which `suite/index.ts` sets to one fire-and-forget `suite.report_denial`
@@ -387,8 +410,7 @@ plans live under `docs/plans/` and the classifier receipt is
 - **A classified denial keeps the prompt it was judged on**, verbatim, in the
   ledger line and nowhere else — not the store, the protocol or the app. It
   rides on an unavailable deny too: nobody read it, and that is the finding.
-  Only a call a classifier ran for carries one; a cached deny is answering with
-  an earlier call's prompt, which that call's own record holds.
+  Only a call a classifier ran for carries one.
 - **A denial says whether an approval could lift it.** A boundary verdict and
   every static rule set `clearable: false`, and their tool result sends the
   agent neither to the user nor to a retry: the tree re-decides identically,

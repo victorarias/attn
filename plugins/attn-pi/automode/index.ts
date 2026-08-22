@@ -9,6 +9,7 @@ import {
   autoModeDenialWidgetKey,
   breakerQuestion,
   classifyingWorkingMessage,
+  tooLongQuestion,
   denialNotice,
   denialWidgetLines,
   type AutoModeUILike,
@@ -42,6 +43,8 @@ export type MessageLike = { role: string; content: { type: string; text?: string
 
 export type MessageEndEventLike = { type: "message_end"; message: MessageLike };
 
+export type SessionCompactEventLike = { type: "session_compact" };
+
 export type ToolResultEventLike = {
   type: "tool_result";
   toolCallId: string;
@@ -72,6 +75,7 @@ export type AutoModeExtensionAPILike = {
     handler: (event: BeforeAgentStartEventLike, ctx: AutoModeContextLike) => BeforeAgentStartResultLike,
   ): void;
   on(event: "message_end", handler: (event: MessageEndEventLike, ctx: AutoModeContextLike) => void): void;
+  on(event: "session_compact", handler: (event: SessionCompactEventLike, ctx: AutoModeContextLike) => void): void;
   on(
     event: "tool_result",
     handler: (event: ToolResultEventLike, ctx: AutoModeContextLike) => ToolResultEventResultLike | undefined,
@@ -151,6 +155,12 @@ export function createAutoMode(options: AutoModeOptions): (pi: AutoModeExtension
             decision = await session.decide(call, decideOptions);
           }
         }
+        if (decision.outcome === "block" && decision.rule === "classifier-too-long") {
+          if (await askToRun(decision.action, ctx, options.onWaitingForUser)) {
+            session.noteApprovedCall(call);
+            return undefined;
+          }
+        }
       } catch (error) {
         return { block: true, reason: denialToolResult({ action: describeCall(call), reason: failureReason(error) }) };
       } finally {
@@ -208,6 +218,10 @@ export function createAutoMode(options: AutoModeOptions): (pi: AutoModeExtension
       session.noteAssistantText(messageText(event.message));
     });
 
+    pi.on("session_compact", () => {
+      session.noteCompaction();
+    });
+
     pi.on("tool_result", (event) => {
       const held = options.usageLedger?.drain();
       return held ? { usage: mergeUsage(event.usage, held) } : undefined;
@@ -234,6 +248,24 @@ async function askToResume(
   const ui = uiOf(ctx);
   if (!ui) return false;
   const question = breakerQuestion(session.breaker());
+  announceWaiting(ctx, onWaitingForUser, true);
+  try {
+    return await ui.confirm(question.title, question.message);
+  } catch {
+    return false;
+  } finally {
+    announceWaiting(ctx, onWaitingForUser, false);
+  }
+}
+
+async function askToRun(
+  action: string,
+  ctx: AutoModeContextLike,
+  onWaitingForUser?: (waiting: boolean) => void,
+): Promise<boolean> {
+  const ui = uiOf(ctx);
+  if (!ui) return false;
+  const question = tooLongQuestion(action);
   announceWaiting(ctx, onWaitingForUser, true);
   try {
     return await ui.confirm(question.title, question.message);

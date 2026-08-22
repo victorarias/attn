@@ -38,6 +38,7 @@ const autoMode = processSingleton("attn:pi-automode", () => {
     ? new AutoMode({
         config: source.config,
         notice: source.problem,
+        ...(process.env.ATTN_SESSION_ID ? { sessionKey: process.env.ATTN_SESSION_ID } : {}),
         ledger: denialLedgerFor(process.env),
         onDenial: (denial) => suite.reportDenial(denial),
         onWaitingForUser: (waiting) => suite.reportApprovalWindow(waiting),

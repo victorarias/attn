@@ -41,6 +41,8 @@ export type ClassifierVerdict =
       unavailable?: boolean;
 
       unreadable?: boolean;
+
+      tooLong?: boolean;
     };
 
 export interface Classifier {

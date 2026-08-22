@@ -8,6 +8,7 @@ import type {
   InputEventLike,
   MessageEndEventLike,
   MessageLike,
+  SessionCompactEventLike,
   ToolCallEventLike,
   ToolCallEventResultLike,
   ToolResultEventLike,
@@ -34,6 +35,7 @@ export class FakePi implements AutoModeExtensionAPILike, AutoModePiLike {
     | ((event: BeforeAgentStartEventLike, ctx: AutoModeContextLike) => BeforeAgentStartResultLike)
     | undefined;
   messageEnd: ((event: MessageEndEventLike, ctx: AutoModeContextLike) => void) | undefined;
+  sessionCompact: ((event: SessionCompactEventLike, ctx: AutoModeContextLike) => void) | undefined;
   toolResult:
     | ((event: ToolResultEventLike, ctx: AutoModeContextLike) => ToolResultEventResultLike | undefined)
     | undefined;
@@ -45,6 +47,7 @@ export class FakePi implements AutoModeExtensionAPILike, AutoModePiLike {
     handler: (event: BeforeAgentStartEventLike, ctx: AutoModeContextLike) => BeforeAgentStartResultLike,
   ): void;
   on(event: "message_end", handler: (event: MessageEndEventLike, ctx: AutoModeContextLike) => void): void;
+  on(event: "session_compact", handler: (event: SessionCompactEventLike, ctx: AutoModeContextLike) => void): void;
   on(
     event: "tool_result",
     handler: (event: ToolResultEventLike, ctx: AutoModeContextLike) => ToolResultEventResultLike | undefined,
@@ -58,6 +61,7 @@ export class FakePi implements AutoModeExtensionAPILike, AutoModePiLike {
     if (event === "input") this.input = handler as FakePi["input"];
     if (event === "before_agent_start") this.beforeAgentStart = handler as FakePi["beforeAgentStart"];
     if (event === "message_end") this.messageEnd = handler as FakePi["messageEnd"];
+    if (event === "session_compact") this.sessionCompact = handler as FakePi["sessionCompact"];
     if (event === "tool_result") this.toolResult = handler as FakePi["toolResult"];
     if (event === "session_start") this.sessionStart = handler as FakePi["sessionStart"];
   }
@@ -85,6 +89,11 @@ export class FakePi implements AutoModeExtensionAPILike, AutoModePiLike {
 
   start(ctx: AutoModeSessionContextLike): void {
     this.sessionStart?.({ type: "session_start" }, ctx);
+  }
+
+  /** pi finished compacting: everything before this is gone from its context. */
+  compact(): void {
+    this.sessionCompact?.({ type: "session_compact" }, ctx);
   }
 
   async run(command: string, args: string, ctx: AutoModeContextLike): Promise<void> {

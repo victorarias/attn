@@ -52,7 +52,17 @@ function offer(denials: readonly AutoModeDenial[]): string {
 }
 
 function nothingJudged(denial: AutoModeDenial): boolean {
-  return denial.rule === "classifier-unavailable" || denial.rule === "classifier-oversized";
+  return denial.rule === "classifier-unavailable" || denial.rule === "classifier-too-long";
+}
+
+export function tooLongQuestion(action: string): { title: string; message: string } {
+  return {
+    title: "auto mode could not judge this call",
+    message:
+      `The conversation no longer fits in the classifier's model, so nothing judged ` +
+      `${clamp(action)}. Nothing refused it either — auto mode was never shown it. Run it anyway? ` +
+      `Answering no blocks the call and tells the agent to ask you directly.`,
+  };
 }
 
 export function breakerQuestion(breaker: BreakerState): { title: string; message: string } {

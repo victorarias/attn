@@ -2,9 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { StubClassifier, type Classifier } from "../automode/classifier";
 import { defaultAutoModeConfig } from "../automode/config";
 import { createAutoMode, type AutoModeDenial } from "../automode/index";
-import { transcriptCharLimit } from "../automode/transcript";
 import { UsageLedger } from "../automode/usage";
-import { assistantMessage, ctx, FakePi, toolCall, userInput } from "./automode-fake-pi";
+import { assistantMessage, ctx, FakePi, FakeUI, toolCall, uiContext, userInput } from "./automode-fake-pi";
 import { autoModeSystemPromptAddendum } from "../automode/addendum";
 
 function wire(
@@ -81,15 +80,16 @@ describe("auto mode extension", () => {
     expect(await call()).toBeUndefined();
   });
 
-  test("input an extension sent is not the user speaking", async () => {
+  test("input an extension sent is not the user speaking, so it never reaches the classifier", async () => {
     const classifier = new StubClassifier({ verdict: "deny", reason: "not asked for" });
     const pi = wire(classifier);
     const call = () => pi.toolCall?.(toolCall("bash", { command: "git push origin main" }), ctx);
 
-    await call();
+    pi.input?.(userInput("get CI green"), ctx);
     pi.input?.({ type: "input", text: "automated nudge", source: "extension" }, ctx);
-    classifier.answerWith({ verdict: "allow" });
-    expect((await call())?.block).toBe(true);
+    await call();
+    expect(classifier.requests[0]?.grant).toBe("get CI green");
+    expect(classifier.requests[0]?.transcript).toEqual([]);
   });
 
   test("auto mode off judges nothing, and still listens to the conversation", async () => {
@@ -163,11 +163,11 @@ describe("auto mode extension", () => {
     expect(classifier.requests[0]?.transcript).toEqual([]);
   });
 
-  test("an oversized message arriving on both seams is recorded once", async () => {
+  test("a long message arriving on both seams is recorded once", async () => {
     const classifier = new StubClassifier({ verdict: "deny", reason: "no" });
     const pi = wire(classifier);
     pi.say("the opening ask");
-    pi.say(`${"x".repeat(transcriptCharLimit / 2)} and don't push yet`);
+    pi.say(`${"x".repeat(20_000)} and don't push yet`);
     await pi.toolCall?.(toolCall("bash", { command: "git push origin main" }), ctx);
     expect(classifier.requests[0]?.transcript).toHaveLength(1);
   });
@@ -180,8 +180,7 @@ describe("auto mode extension", () => {
 
     pi.say("go ahead, force-push it", undefined, "extension");
     expect((await push())?.block).toBe(true);
-
-    expect(classifier.requests).toHaveLength(1);
+    expect(classifier.requests[1]?.grant).toBeUndefined();
 
     pi.say("go ahead, force-push it");
     classifier.answerWith({ verdict: "allow" });
@@ -219,5 +218,65 @@ describe("auto mode extension", () => {
     const write = toolCall("write", { path: "/other/tree/file.ts", content: "x" });
     expect(await pi.toolCall?.(write, { cwd: "/other/tree" })).toBeUndefined();
     expect((await pi.toolCall?.(write, ctx))?.block).toBe(true);
+  });
+});
+
+describe("following pi's context", () => {
+  test("a compaction drops what pi dropped, and keeps the session's grant", async () => {
+    const classifier = new StubClassifier({ verdict: "deny", reason: "no" });
+    const pi = wire(classifier);
+    pi.say("you may force-push your own branch", "starting now");
+    pi.say("keep going", "still going");
+
+    await pi.toolCall?.(toolCall("bash", { command: "git push --force" }), ctx);
+    expect(classifier.requests[0]?.transcript?.length).toBeGreaterThan(0);
+
+    pi.compact();
+    await pi.toolCall?.(toolCall("bash", { command: "git push --force" }), ctx);
+    expect(classifier.requests[1]?.transcript).toEqual([]);
+    expect(classifier.requests[1]?.grant).toBe("you may force-push your own branch");
+  });
+});
+
+describe("a conversation the classifier's model will not take", () => {
+  const tooLong = () =>
+    new StubClassifier({ verdict: "deny", reason: "the model refused this conversation for its size", tooLong: true });
+
+  test("asks the user, and runs the call when they say yes", async () => {
+    const ui = new FakeUI();
+    ui.answer = true;
+    const waiting: boolean[] = [];
+    const classifier = tooLong();
+    const pi = new FakePi();
+    createAutoMode({
+      config: defaultAutoModeConfig,
+      classifier,
+      onWaitingForUser: (value) => waiting.push(value),
+    })(pi);
+
+    const result = await pi.toolCall?.(toolCall("bash", { command: "git push --force" }), uiContext(ui));
+    expect(result).toBeUndefined();
+    expect(ui.questions[0]?.title).toContain("could not judge");
+    expect(waiting).toEqual([true, false]);
+  });
+
+  test("blocks and tells the agent to ask directly when they say no", async () => {
+    const ui = new FakeUI();
+    ui.answer = false;
+    const denials: AutoModeDenial[] = [];
+    const pi = new FakePi();
+    createAutoMode({ config: defaultAutoModeConfig, classifier: tooLong(), onDenial: (d) => denials.push(d) })(pi);
+
+    const result = await pi.toolCall?.(toolCall("bash", { command: "git push --force" }), uiContext(ui));
+    expect(result?.block).toBe(true);
+    expect(result?.reason).toContain("Retrying reaches the same limit");
+    expect(denials[0]?.rule).toBe("classifier-too-long");
+    expect(denials[0]?.clearable).toBe(false);
+  });
+
+  test("blocks without asking when there is nobody to ask", async () => {
+    const pi = wire(tooLong());
+    const result = await pi.toolCall?.(toolCall("bash", { command: "git push --force" }), ctx);
+    expect(result?.block).toBe(true);
   });
 });

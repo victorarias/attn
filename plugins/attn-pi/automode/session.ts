@@ -1,15 +1,8 @@
 import type { Classifier, ClassifierPrompt } from "./classifier";
 import type { AutoModeConfig } from "./config";
 import { denialToolResult } from "./denial";
-import {
-  callSignature,
-  decideStatically,
-  describeCall,
-  normalizedIntent,
-  type StaticRule,
-  type ToolCall,
-} from "./policy";
-import { transcriptCharLimit, TranscriptWindow } from "./transcript";
+import { callSignature, decideStatically, describeCall, type StaticRule, type ToolCall } from "./policy";
+import { TranscriptWindow } from "./transcript";
 
 export const consecutiveDenialLimit = 3;
 
@@ -17,13 +10,11 @@ export const totalDenialLimit = 20;
 
 export type DecisionRule =
   | StaticRule
-  | "cached-allow"
-  | "cached-deny"
   | "classifier"
   | "classifier-harm"
   | "classifier-intent"
-  | "classifier-oversized"
   | "classifier-unavailable"
+  | "classifier-too-long"
   | "circuit-breaker";
 
 export type SessionDecision =
@@ -54,7 +45,6 @@ export type DecideOptions = {
 };
 
 export class AutoModeSession {
-  private readonly cache = new Map<string, { verdict: "allow" | "deny"; reason: string; boundary?: boolean }>();
   private readonly transcript = new TranscriptWindow();
   private consecutiveDenials = 0;
   private totalDenials = 0;
@@ -76,7 +66,6 @@ export class AutoModeSession {
 
   noteUserInput(text = ""): void {
     this.transcript.record("user", text);
-    for (const [key, entry] of this.cache) if (entry.verdict === "deny") this.cache.delete(key);
     this.clearCounters();
   }
 
@@ -94,6 +83,14 @@ export class AutoModeSession {
     this.transcript.record("assistant", text);
   }
 
+  noteApprovedCall(call: ToolCall): void {
+    this.transcript.recordToolCall(call.toolName, callSignature(call));
+  }
+
+  noteCompaction(): void {
+    this.transcript.compacted();
+  }
+
   async decide(call: ToolCall, options: DecideOptions): Promise<SessionDecision> {
     const staticDecision = decideStatically(call, this.config, options.cwd);
     if (staticDecision.outcome === "run") {
@@ -104,28 +101,9 @@ export class AutoModeSession {
       return this.denied(call, staticDecision.rule, staticDecision.reason, { outage: false, clearable: false });
     }
 
-    const intent = normalizedIntent(call);
-    const cached = this.cache.get(intent);
-    if (cached?.verdict === "allow") {
-      this.transcript.recordToolCall(call.toolName, callSignature(call));
-      return this.allowed("cached-allow");
-    }
-    if (cached?.verdict === "deny") {
-      return this.denied(call, "cached-deny", cached.reason, { outage: false, clearable: cached.boundary !== true });
-    }
-
     const breaker = this.breaker();
     if (breaker.tripped) {
       return this.denied(call, "circuit-breaker", breakerReason(breaker), { outage: breaker.outage });
-    }
-
-    const oversized = this.transcript.oversized();
-    if (oversized !== undefined) {
-      return this.denied(call, "classifier-oversized", oversizedReason(oversized), {
-        outage: false,
-        judged: false,
-        clearable: false,
-      });
     }
 
     const grant = this.transcript.grant();
@@ -139,21 +117,25 @@ export class AutoModeSession {
       signal: options.signal,
     });
     const prompt = judged.verdict === "deny" ? judged.prompt : undefined;
+    if (judged.verdict === "deny" && judged.tooLong === true) {
+      return this.denied(call, "classifier-too-long", judged.reason, {
+        outage: false,
+        judged: false,
+        clearable: false,
+        prompt,
+      });
+    }
     if (judged.verdict === "deny" && judged.unavailable === true) {
       return this.denied(call, "classifier-unavailable", judged.reason, { outage: true, judged: false, prompt });
     }
     const rule: DecisionRule = judged.layer ? `classifier-${judged.layer}` : "classifier";
     if (judged.verdict === "allow") {
-      this.cache.set(intent, { verdict: "allow", reason: judged.reason ?? "" });
       this.transcript.recordToolCall(call.toolName, callSignature(call));
       return this.allowed(rule);
     }
     const reason = judged.reason;
     const boundary = judged.boundary === true;
     const unreadable = judged.unreadable === true;
-    if (!unreadable) {
-      this.cache.set(intent, { verdict: "deny", reason, ...(boundary ? { boundary: true } : {}) });
-    }
     return this.denied(call, rule, reason, {
       outage: false,
       judged: !unreadable,
@@ -187,15 +169,6 @@ export class AutoModeSession {
       ...(kind.prompt ? { prompt: kind.prompt } : {}),
     };
   }
-}
-
-function oversizedReason(chars: number): string {
-  return (
-    `the last message in this conversation is ${chars} characters, past auto mode's ` +
-    `${transcriptCharLimit}-character classifier budget, so the classifier cannot be shown what was said. ` +
-    `Auto mode will not judge a call on a conversation it can only see part of, so it did not judge this ` +
-    `one. Nothing refused the action. Ask the user directly for what you need.`
-  );
 }
 
 function breakerReason(breaker: BreakerState): string {

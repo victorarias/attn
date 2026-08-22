@@ -18,6 +18,12 @@ import type { UsageLike } from "./usage";
 
 export const classifierThinkingLevel = "minimal";
 
+export const harmMaxTokens = 512;
+
+export const intentMaxTokens = 8_192;
+
+export const classifierCacheRetention = "long";
+
 export const attemptsPerModel = 2;
 
 export type ModelLike = { provider: string; id: string; baseUrl?: string };
@@ -35,6 +41,9 @@ export type CompletionContext = {
 
 export type CompletionOptions = {
   reasoning?: string;
+  maxTokens?: number;
+  cacheRetention?: string;
+  sessionId?: string;
   apiKey?: string;
   headers?: Record<string, string | null>;
   env?: Record<string, string>;
@@ -75,6 +84,8 @@ export type ModelClassifierOptions = {
   registry: ModelRegistryLike;
   config: AutoModeConfig;
 
+  sessionKey?: string;
+
   onUsage?: (usage: UsageLike) => void;
 };
 
@@ -104,9 +115,11 @@ export class ModelClassifier implements Classifier {
       layer: "harm",
       systemPrompt: harmPrompt.system,
       messages: harmMessages,
+      maxTokens: harmMaxTokens,
+      ...(this.sessionId("harm") ?? {}),
       signal: request.signal,
     });
-    if (harm.answered === false) return unavailableVerdict(harm.reason, harmPrompt);
+    if (harm.answered === false) return unansweredVerdict(harm, harmPrompt);
     if (harm.parsed && harm.parsed.severity <= stageOneAllowCeiling) {
       return { verdict: "allow", layer: "harm", severity: harm.parsed.severity };
     }
@@ -122,9 +135,11 @@ export class ModelClassifier implements Classifier {
       layer: "intent",
       systemPrompt: intentPrompt.system,
       messages: intentMessages,
+      maxTokens: intentMaxTokens,
+      ...(this.sessionId("intent") ?? {}),
       signal: request.signal,
     });
-    if (intent.answered === false) return unavailableVerdict(intent.reason, intentPrompt);
+    if (intent.answered === false) return unansweredVerdict(intent, intentPrompt);
     if (!intent.parsed) {
       return {
         verdict: "deny",
@@ -137,14 +152,22 @@ export class ModelClassifier implements Classifier {
     return settle(intent.parsed, intentPrompt);
   }
 
+  private sessionId(layer: ClassifierLayer): { sessionId: string } | undefined {
+    const key = this.options.sessionKey?.trim();
+    return key ? { sessionId: `${key}:${layer}` } : undefined;
+  }
+
   private async judge(input: {
     models: readonly string[];
     layer: ClassifierLayer;
     systemPrompt: string;
     messages: readonly string[];
+    maxTokens: number;
+    sessionId?: string;
     signal?: AbortSignal;
   }): Promise<LayerAnswer> {
     let lastFailure = "no model was configured for this layer";
+    let everyFailureTooLong = input.models.length > 0;
     for (const modelSpec of input.models) {
       for (let attempt = 0; attempt < attemptsPerModel; attempt += 1) {
         let result: CompletionResult;
@@ -152,7 +175,9 @@ export class ModelClassifier implements Classifier {
           result = await this.complete({ ...input, modelSpec });
         } catch (error) {
           if (input.signal?.aborted) throw error;
-          lastFailure = `${modelSpec}: ${message(error)}`;
+          const failure = message(error);
+          if (!promptIsTooLong(failure)) everyFailureTooLong = false;
+          lastFailure = `${modelSpec}: ${failure}`;
           continue;
         }
 
@@ -160,12 +185,17 @@ export class ModelClassifier implements Classifier {
 
         if (result.stopReason === "aborted") throw new Error("classification aborted");
         if (result.stopReason === "error") {
-          lastFailure = `${modelSpec}: ${result.errorMessage ?? "no reason given"}`;
+          const failure = result.errorMessage ?? "no reason given";
+          if (!promptIsTooLong(failure)) everyFailureTooLong = false;
+          lastFailure = `${modelSpec}: ${failure}`;
           continue;
         }
         const text = textOf(result);
         return { answered: true, text, parsed: parseSeverity(text) };
       }
+    }
+    if (everyFailureTooLong) {
+      return { answered: false, tooLong: true, reason: tooLongReason(input.layer, lastFailure) };
     }
     return { answered: false, reason: unavailableReason(input.layer, input.models, lastFailure) };
   }
@@ -174,6 +204,8 @@ export class ModelClassifier implements Classifier {
     modelSpec: string;
     systemPrompt: string;
     messages: readonly string[];
+    maxTokens: number;
+    sessionId?: string;
     signal?: AbortSignal;
   }): Promise<CompletionResult> {
     const registry = this.options.registry;
@@ -202,6 +234,9 @@ export class ModelClassifier implements Classifier {
         },
         {
           reasoning: classifierThinkingLevel,
+          maxTokens: input.maxTokens,
+          cacheRetention: classifierCacheRetention,
+          ...(input.sessionId ? { sessionId: input.sessionId } : {}),
           apiKey: auth.apiKey,
           headers: auth.headers,
           env: auth.env,
@@ -220,7 +255,19 @@ export class ModelClassifier implements Classifier {
 
 type LayerAnswer =
   | { answered: true; text: string; parsed: ParsedSeverity | undefined }
-  | { answered: false; reason: string };
+  | { answered: false; reason: string; tooLong?: boolean };
+
+function promptIsTooLong(failure: string): boolean {
+  return /prompt is too long|context[_ ]length[_ ]exceeded|too many tokens|maximum context length/i.test(failure);
+}
+
+function tooLongReason(layer: ClassifierLayer, lastFailure: string): string {
+  return (
+    `auto mode's ${layer} model refused this conversation for its size: ${lastFailure}. ` +
+    `Nothing judged the call and nothing refused the action - the classifier was never shown it. ` +
+    `Retrying reaches the same limit. Auto mode has asked the user to decide.`
+  );
+}
 
 function unavailableReason(layer: ClassifierLayer, models: readonly string[], lastFailure: string): string {
   const tried = models.length > 0 ? models.join(", ") : "(no model configured)";
@@ -232,8 +279,11 @@ function unavailableReason(layer: ClassifierLayer, models: readonly string[], la
   );
 }
 
-function unavailableVerdict(reason: string, prompt: ClassifierPrompt): ClassifierVerdict {
-  return { verdict: "deny", layer: prompt.layer, prompt, reason, unavailable: true };
+function unansweredVerdict(answer: { reason: string; tooLong?: boolean }, prompt: ClassifierPrompt): ClassifierVerdict {
+  if (answer.tooLong === true) {
+    return { verdict: "deny", layer: prompt.layer, prompt, reason: answer.reason, tooLong: true };
+  }
+  return { verdict: "deny", layer: prompt.layer, prompt, reason: answer.reason, unavailable: true };
 }
 
 function settle(parsed: ParsedSeverity, prompt: ClassifierPrompt): ClassifierVerdict {

@@ -216,19 +216,18 @@ describe("the s7 corpus through the whole extension", () => {
   });
 });
 
-describe("the corpus against the cache and the breaker", () => {
-  test("a repeated allowed call is answered from the cache, not the model", async () => {
-    const { pi, registry } = session([routine]);
+describe("the corpus against a repeated call and the breaker", () => {
+  test("a repeated allowed call is asked again, every time", async () => {
+    const { pi, registry } = session([routine, routine]);
     const call = () => pi.toolCall?.(toolCall("bash", { command: "go test ./..." }), ctx);
     expect(await call()).toBeUndefined();
     expect(await call()).toBeUndefined();
-    expect(registry.prompts).toHaveLength(1);
+    expect(registry.prompts).toHaveLength(2);
   });
 
-  test("a repeated refused call is answered from the cache until the user speaks", async () => {
+  test("a refused call retried after the user says go ahead is judged again, and clears", async () => {
     const { pi, registry } = session([{ severity: 70 }, refused("Irreversible Local Destruction"), routine]);
     const call = () => pi.toolCall?.(toolCall("bash", { command: "git push --force origin main" }), ctx);
-    expect((await call())?.block).toBe(true);
     expect((await call())?.block).toBe(true);
     expect(registry.prompts).toHaveLength(2);
 

@@ -64,11 +64,11 @@ function unshowableToolResult(denial: Denial): string {
     `Blocked: ${oneLine(denial.action)}`,
     `Reason: ${oneLine(denial.reason)}`,
     "",
-    "Nothing refused this action and no limit was crossed. Auto mode never",
-    "shows its classifier part of a conversation, and this one does not fit,",
-    "so no model was asked. Retrying changes nothing and the user's approval",
-    "does not reach this. Say in your reply what you were trying to do and ask",
-    "the user for it directly.",
+    "Nothing refused this action. The classifier's model would not take a",
+    "conversation this size, so it never saw the call, and the user was asked",
+    "directly and said no. Retrying reaches the same limit. Say in your reply",
+    "what you were trying to do and ask the user for it, or carry on with the",
+    "work that does not need it.",
   ].join("\n");
 }
 

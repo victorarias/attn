@@ -36,6 +36,8 @@ export type AutoModeSetup = {
 
   onWaitingForUser?: (waiting: boolean) => void;
 
+  sessionKey?: string;
+
   notice?: string;
 };
 
@@ -123,6 +125,7 @@ export class AutoMode {
         instance: new ModelClassifier({
           registry,
           config: this.setup.config,
+          ...(this.setup.sessionKey ? { sessionKey: this.setup.sessionKey } : {}),
           onUsage: (usage) => this.usage.add(usage),
         }),
       };
