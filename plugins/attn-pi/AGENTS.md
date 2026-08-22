@@ -383,6 +383,16 @@ rather than through dialogs. Design, receipts and slices:
   (`internal/daemon/automode_ledger.go`). A failed write is said out loud,
   because it is the only leg with nothing behind it. Design:
   [docs/plans/2026-08-18-automode-denial-ledger.md](../../docs/plans/2026-08-18-automode-denial-ledger.md).
+- **A classified denial keeps the prompt it was judged on**, verbatim, in the
+  ledger line and nowhere else — not the store, the protocol or the app. It
+  rides on an unavailable deny too: nobody read it, and that is the finding.
+  Only a call a classifier ran for carries one; a cached deny is answering with
+  an earlier call's prompt, which that call's own record holds.
+- **A denial says whether an approval could lift it.** A boundary verdict and
+  every static rule set `clearable: false`, and their tool result sends the
+  agent neither to the user nor to a retry: the tree re-decides identically,
+  and a boundary is the one thing auto mode holds against the user's wishes.
+  The `hard_deny` list keeps its name; it is an ordinary deny, not a boundary.
 - The ledger keeps an active file and one rotated generation, and a rotation
   counts the destroyed generation's records AND its markers into one marker
   opening the new active file. The marker in the file being renamed survives

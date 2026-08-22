@@ -103,7 +103,12 @@ function denial(overrides: Partial<AutoModeDenial> = {}): AutoModeDenial {
 }
 
 /** Runs one denied call through the whole extension against a real ledger. */
-async function denyOneCall(options: { path: string; onDenial?: (denial: AutoModeDenial) => void }): Promise<FakeUI> {
+async function denyOneCall(options: {
+  path: string;
+  onDenial?: (denial: AutoModeDenial) => void;
+  /** Said by the user before the call, so it reaches the classifier's window. */
+  opening?: string;
+}): Promise<FakeUI> {
   const mode = new AutoMode({
     config: defaultAutoModeConfig,
     ledger: new DenialLedger(options.path, "sess-1"),
@@ -112,6 +117,7 @@ async function denyOneCall(options: { path: string; onDenial?: (denial: AutoMode
   const pi = new FakePi();
   mode.register(pi);
   pi.start(uiContext(new FakeUI(), { modelRegistry: new DenyingRegistry() }));
+  if (options.opening !== undefined) pi.say(options.opening);
   const ui = new FakeUI();
   expect((await pi.toolCall?.(push(), uiContext(ui)))?.block).toBe(true);
   return ui;
@@ -160,7 +166,42 @@ describe("what a denial leaves behind", () => {
       reason: "not asked for",
       rule: "classifier-2a",
       at: expect.any(String),
+      prompt: { layer: "2a", system: expect.any(String), user: expect.any(String) },
     });
+  });
+
+  test("the record keeps the exact prompt the layer was judged on", async () => {
+    // The reason says what came back; without what went in there is no telling
+    // a wrong verdict from a window that never carried the sentence granting
+    // the work, which is the 2026-08-22 episode.
+    const path = tempPath();
+    await denyOneCall({ path, opening: "you may force-push this branch, it is mine" });
+
+    const prompt = readRecords(path)[0]?.prompt;
+    expect(prompt?.layer).toBe("2a");
+    expect(prompt?.system).toContain("You are a safety classifier");
+    expect(prompt?.user).toContain("you may force-push this branch, it is mine");
+    expect(prompt?.user).toContain("bash: git push --force origin main");
+  });
+
+  test("a call no classifier judged carries no prompt", async () => {
+    // A static rule asked nothing, so there is nothing to keep. Writing an
+    // empty one would read as a classifier that saw nothing.
+    const path = tempPath();
+    const mode = new AutoMode({
+      config: { ...defaultAutoModeConfig, hardDeny: ["rm -rf *"] },
+      ledger: new DenialLedger(path, "sess-1"),
+    });
+    const pi = new FakePi();
+    mode.register(pi);
+    pi.start(uiContext(new FakeUI(), { modelRegistry: new DenyingRegistry() }));
+    const call = toolCall("bash", { command: "rm -rf /tmp/whatever" });
+    expect((await pi.toolCall?.(call, uiContext(new FakeUI())))?.block).toBe(true);
+
+    const record = readRecords(path)[0];
+    expect(record?.rule).toBe("hard-deny");
+    expect(record?.prompt).toBeUndefined();
+    expect(record?.clearable).toBe(false);
   });
 
   test("a report that reaches a relay and dies there still leaves the record", async () => {

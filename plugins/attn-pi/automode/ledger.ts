@@ -1,10 +1,6 @@
-// The denial ledger: every blocked call, written to disk at decision time,
-// before anything is told about it. attn's relay report is a mirror — a bare
-// pi has no relay, and a relay whose socket died drops what it is handed —
-// so the file is what makes a denial readable later at all.
-//
-// One JSON object per line, appended with a single write so a crash cannot
-// interleave two records. The reader is `internal/automode/denialledger.go`.
+// Every blocked call, written to disk at decision time, before anything is told
+// about it: the relay report can be lost, this cannot. One JSON object per
+// line, one write each. The reader is `internal/automode/denialledger.go`.
 import { appendFileSync, mkdirSync, readFileSync, renameSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
@@ -23,14 +19,12 @@ export const denialLedgerSessionEnvVar = "ATTN_PI_SESSION_ID";
 export const denialLedgerFileName = "attn-automode-denials.jsonl";
 
 /**
- * How large one generation grows before it rotates. Measured 2026-08-18: a fat denial
- * line — a piped-curl command carrying a full classifier reason — is 476
- * bytes, so one generation holds ~8,800 of them against a circuit breaker that
- * stops a session at 20 denials since the user last spoke. Two generations are kept, so nothing
- * is dropped before ~18,000 records. A tripwire for a loop nobody is
- * watching, not a budget.
+ * One generation's size tripwire. The classifier prompt sizes the line:
+ * measured 2026-08-22, the largest the transcript budgets can produce is
+ * 24,569 bytes, against 476 with no prompt. This holds ~8,000 records at the
+ * ~8 KB a real denial runs, and two generations are kept.
  */
-export const denialLedgerMaxBytes = 4 * 1024 * 1024;
+export const denialLedgerMaxBytes = 64 * 1024 * 1024;
 
 export type EnvironmentLike = Record<string, string | undefined>;
 
@@ -55,6 +49,16 @@ export type DenialLedgerRecord = {
   reason: string;
   rule: string;
   at: string;
+  /** Written only when false: the user's approval could not have lifted this. */
+  clearable?: boolean;
+  /** What the deciding layer was sent. Absent when no classifier ran. */
+  prompt?: DenialLedgerPrompt;
+};
+
+export type DenialLedgerPrompt = {
+  layer: string;
+  system: string;
+  user: string;
 };
 
 export type DenialLedgerLike = { record(denial: AutoModeDenial): void };
@@ -77,6 +81,8 @@ export class DenialLedger implements DenialLedgerLike {
       reason: denial.reason,
       rule: denial.rule,
       at: denial.at,
+      ...(denial.clearable === false ? { clearable: false } : {}),
+      ...(denial.prompt ? { prompt: denial.prompt } : {}),
     };
     this.ensureDirectory();
     this.rotateIfFull();
@@ -90,13 +96,10 @@ export class DenialLedger implements DenialLedgerLike {
   }
 
   /**
-   * Keeps the active file and one previous generation, so a rotation destroys
-   * whatever the older generation held: its records, and the markers standing
-   * for what IT displaced. Both are counted into the marker that opens the new
-   * active file, and both are counted from the generation being destroyed —
-   * never from the active file, whose own marker survives the rename and is
-   * still there for the reader to sum. Counting that one here as well would
-   * double every earlier rotation, compounding with each one.
+   * Keeps the active file and one previous generation. The drop count comes
+   * from the generation being destroyed, never from the active file, whose own
+   * marker survives the rename — counting it here would double every earlier
+   * rotation.
    */
   private rotateIfFull(): void {
     if (sizeOf(this.path) < this.maxBytes) return;
@@ -105,17 +108,10 @@ export class DenialLedger implements DenialLedgerLike {
     try {
       renameSync(this.path, previous);
     } catch (error) {
-      // Every session in a profile appends to one ledger, so another one may
-      // have rotated between the size check and here. Its rotation is this
-      // rotation: the active file is fresh, and the record about to be written
-      // belongs in it. Losing a denial to the bookkeeping around denials is the
-      // failure this file exists to end.
+      // Another session in this profile rotated first. Its rotation is ours.
       if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") throw error;
       return;
     }
-    // Nothing was dropped on the first rotation — the previous generation is
-    // still on disk — and a marker claiming zero is noise the reader has to
-    // step over.
     if (dropped === 0) return;
     const marker = JSON.stringify({ type: "rotated", dropped, at: new Date().toISOString() });
     appendFileSync(this.path, `${marker}\n`, { encoding: "utf8", mode: 0o600 });

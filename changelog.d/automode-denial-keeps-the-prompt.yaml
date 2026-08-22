@@ -1,0 +1,20 @@
+kind: added
+area: pi
+change: >
+  Auto mode's denial ledger now records the whole prompt the classifier was
+  judged on, not just the call it refused. A denial already said what came
+  back; without what went in there is no telling a verdict that was wrong from
+  a conversation window that never carried the sentence granting the work —
+  which is exactly the failure this release also fixes. The record keeps the
+  deciding layer's system prompt and its user prompt verbatim, including when
+  no model answered at all: an outage and a bad window both end in a block, and
+  the prompt is what separates them. Only a call a classifier actually judged
+  carries one, so a static rule, a cached refusal and the circuit breaker leave
+  the field off. It stays in the file: the live surfaces show a person one line
+  and this is a page of it, so nothing new crosses the relay or reaches the
+  denials list. One generation of the ledger now holds 64 MiB rather than 4,
+  measured against the largest prompt the conversation window can produce
+  (24,569 bytes, against 476 for a record without one).
+symptom: >
+  When auto mode refused something it should have allowed, there was no way to
+  see what the classifier had actually been shown.

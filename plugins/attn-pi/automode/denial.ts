@@ -1,26 +1,20 @@
-// The denial contract: the text a blocked tool call hands back to the model.
-// It is the whole model-facing API of auto mode, so it says four things and
-// nothing else — that auto mode blocked this, what was blocked, why, and what
-// unblocks it. That fourth one has two answers, and handing over the wrong one
-// costs the user a turn: a refusal is lifted by their approval, while a call
-// nobody could judge is lifted by retrying and by nothing they can say.
+// The text a blocked tool call hands back to the model: what was blocked, why,
+// and what unblocks it. That last one has three answers and the wrong one costs
+// the user a turn.
 
 export type Denial = {
   /** The call, one line (see policy.ts's describeCall). */
   action: string;
-  /** Why it was refused, in the reader's terms. */
   reason: string;
-  /**
-   * False when nothing judged this call: no classifier could be reached, or
-   * the one that answered said something unreadable. The block stands either
-   * way, but the way through is the opposite one — a retry, not the user's
-   * approval, which would only send the call back to the same classifier.
-   */
+  /** False when nothing judged this call: a retry is the way through, not approval. */
   judged?: boolean;
+  /** False when approval cannot lift it: a static rule, or a boundary verdict. */
+  clearable?: boolean;
 };
 
 export function denialToolResult(denial: Denial): string {
   if (denial.judged === false) return unjudgedToolResult(denial);
+  if (denial.clearable === false) return settledToolResult(denial);
   return [
     "attn auto mode blocked this tool call.",
     "",
@@ -35,12 +29,23 @@ export function denialToolResult(denial: Denial): string {
   ].join("\n");
 }
 
-/**
- * An outage wearing a refusal's words sends the agent to apologize to the user
- * for something nobody objected to, and the approval it asks for cannot help:
- * approval re-runs the classification, against the endpoint that is still
- * down.
- */
+function settledToolResult(denial: Denial): string {
+  return [
+    "attn auto mode blocked this tool call, and nothing said in this",
+    "conversation lifts it.",
+    "",
+    `Blocked: ${oneLine(denial.action)}`,
+    `Reason: ${oneLine(denial.reason)}`,
+    "",
+    "Do not ask the user to approve this one: approval does not move it, and",
+    "neither does retrying. What moves it is a change to auto mode's own setup,",
+    "which the user makes outside this session. Say plainly in your reply what",
+    "you were trying to do and that auto mode refuses it, then carry on with",
+    "the work that does not need it. Do not work around the block by another",
+    "route.",
+  ].join("\n");
+}
+
 function unjudgedToolResult(denial: Denial): string {
   return [
     "attn auto mode could not judge this tool call, so it blocked it.",

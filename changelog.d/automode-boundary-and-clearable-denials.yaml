@@ -1,0 +1,17 @@
+kind: changed
+area: pi
+change: >
+  Auto mode now tells the agent which of its blocks an approval can actually
+  lift. A refusal the user can authorize still says so and sends the agent to
+  ask. Two kinds no longer do: a call the classifier refused as a boundary —
+  data leaving the machine, or auto mode being switched off from inside a
+  session — and any block the static rules decided, which re-decide the same way
+  on every attempt however warmly the call is approved. Both now say plainly
+  that nothing said in the conversation moves them and that the way through is
+  the user's own settings, and the denials widget stops offering an approval
+  that would not have worked. The deny list keeps its name and its entries; what
+  changed is that it no longer promises a way out it does not have.
+symptom: >
+  Approving a call auto mode had refused by a configured pattern did nothing,
+  and the agent kept asking because the block told it approval was the way
+  through.

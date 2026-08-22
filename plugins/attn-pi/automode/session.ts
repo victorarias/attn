@@ -1,13 +1,7 @@
-// Auto mode's per-session state: the conversation window the classifier
-// judges against, the verdict cache that keeps the hot path free of classifier
-// calls, and the circuit breaker that stops an agent from grinding against the
-// same refusal while nobody is watching.
-//
-// The cache and the breaker are reset by the user speaking, because that is
-// auto mode's approval channel: the next message may be the grant, so a cached
-// deny must not eat it, and a breaker must not outlive the answer that
-// resolves it. The window is not reset — what was said is still what was said.
-import type { Classifier } from "./classifier";
+// Per-session state: the conversation window, the verdict cache, and the
+// circuit breaker. The user speaking is auto mode's approval channel, so it
+// resets the deny cache and the breaker. The window is never reset.
+import type { Classifier, ClassifierPrompt } from "./classifier";
 import type { AutoModeConfig } from "./config";
 import { denialToolResult } from "./denial";
 import { decideStatically, describeCall, normalizedIntent, type StaticRule, type ToolCall } from "./policy";
@@ -19,11 +13,7 @@ export const consecutiveDenialLimit = 3;
 /** Denials since the user last said anything. */
 export const totalDenialLimit = 20;
 
-// The rule names a denial reports as "who decided this". A classified call
-// names the layer that answered — 2a is the configured classifier, 2b the
-// escalation model — and falls back to the bare name when the classifier does
-// not say. `classifier-unavailable` is the one that is not a judgment: every
-// model a layer could reach failed to answer and auto mode failed closed.
+/** Who decided. `classifier-unavailable` is the one that is not a judgment. */
 export type DecisionRule =
   | StaticRule
   | "cached-allow"
@@ -36,17 +26,23 @@ export type DecisionRule =
 
 export type SessionDecision =
   | { outcome: "run"; rule: DecisionRule }
-  | { outcome: "block"; rule: DecisionRule; action: string; reason: string; toolResult: string };
+  | {
+      outcome: "block";
+      rule: DecisionRule;
+      action: string;
+      reason: string;
+      toolResult: string;
+      /** Set only when a classifier ran for THIS call; a cached deny carries none. */
+      prompt?: ClassifierPrompt;
+      /** False when the user's approval cannot lift this block. */
+      clearable?: boolean;
+    };
 
 export type BreakerState = {
   consecutive: number;
   total: number;
   tripped: boolean;
-  /**
-   * Every block since the counters were cleared was an outage — no model
-   * judged any of them. The breaker still stops the session, but what it says
-   * about why must not read as a refusal.
-   */
+  /** Every block this episode was an outage, so it must not read as a refusal. */
   outage: boolean;
 };
 
@@ -56,13 +52,10 @@ export type DecideOptions = {
 };
 
 export class AutoModeSession {
-  // Allow verdicts live for the session; deny verdicts are dropped the
-  // moment the user speaks.
-  private readonly cache = new Map<string, { verdict: "allow" | "deny"; reason: string }>();
+  private readonly cache = new Map<string, { verdict: "allow" | "deny"; reason: string; boundary?: boolean }>();
   private readonly transcript = new TranscriptWindow();
   private consecutiveDenials = 0;
   private totalDenials = 0;
-  // How many of the blocks counted above were outages rather than verdicts.
   private totalOutages = 0;
 
   constructor(
@@ -86,12 +79,7 @@ export class AutoModeSession {
     this.clearCounters();
   }
 
-  /**
-   * The user answered the breaker's question. It clears the counters and
-   * nothing else: resuming means calls get judged again, not that the call
-   * that tripped the breaker is approved. The deny cache stays, so a refusal
-   * the user has not spoken to still stands.
-   */
+  /** Counters only: resuming judges calls again, it approves nothing. */
   resumeAfterBreaker(): void {
     this.clearCounters();
   }
@@ -111,19 +99,19 @@ export class AutoModeSession {
     const staticDecision = decideStatically(call, this.config, options.cwd);
     if (staticDecision.outcome === "run") return this.allowed(staticDecision.rule);
     if (staticDecision.outcome === "block") {
-      return this.denied(call, staticDecision.rule, staticDecision.reason);
+      // The tree is pure, so an approved retry blocks identically.
+      return this.denied(call, staticDecision.rule, staticDecision.reason, { outage: false, clearable: false });
     }
 
     const intent = normalizedIntent(call);
     const cached = this.cache.get(intent);
     if (cached?.verdict === "allow") return this.allowed("cached-allow");
-    if (cached?.verdict === "deny") return this.denied(call, "cached-deny", cached.reason);
+    if (cached?.verdict === "deny") {
+      return this.denied(call, "cached-deny", cached.reason, { outage: false, clearable: cached.boundary !== true });
+    }
 
     const breaker = this.breaker();
     if (breaker.tripped) {
-      // The breaker's own block is of whatever kind the episode is: counting it
-      // as a judgment would turn a run of pure outages into a mixed episode on
-      // the very call that reports it.
       return this.denied(call, "circuit-breaker", breakerReason(breaker), { outage: breaker.outage });
     }
 
@@ -135,11 +123,10 @@ export class AutoModeSession {
       transcript: this.transcript.snapshot(),
       signal: options.signal,
     });
+    const prompt = judged.verdict === "deny" ? judged.prompt : undefined;
     if (judged.verdict === "deny" && judged.unavailable === true) {
-      // Nobody judged this call, so there is no verdict to remember: caching
-      // one would keep blocking the call after the endpoint is back, until the
-      // user happened to speak.
-      return this.denied(call, "classifier-unavailable", judged.reason, { outage: true, judged: false });
+      // Uncached: a remembered outage would outlive the endpoint coming back.
+      return this.denied(call, "classifier-unavailable", judged.reason, { outage: true, judged: false, prompt });
     }
     const rule: DecisionRule = judged.layer ? `classifier-${judged.layer}` : "classifier";
     if (judged.verdict === "allow") {
@@ -150,12 +137,13 @@ export class AutoModeSession {
       judged.verdict === "deny"
         ? judged.reason
         : `auto mode could not judge this call confidently${judged.reason ? `: ${judged.reason}` : ""}`;
-    this.cache.set(intent, { verdict: "deny", reason });
-    // An unreadable answer ended the walk, so a model was reached — the rule
-    // still names the layer that answered. What it did not do is judge.
+    const boundary = judged.verdict === "deny" && judged.boundary === true;
+    this.cache.set(intent, { verdict: "deny", reason, ...(boundary ? { boundary: true } : {}) });
     return this.denied(call, rule, reason, {
       outage: false,
       judged: judged.verdict !== "deny" || judged.unreadable !== true,
+      clearable: !boundary,
+      prompt,
     });
   }
 
@@ -168,13 +156,10 @@ export class AutoModeSession {
     call: ToolCall,
     rule: DecisionRule,
     reason: string,
-    kind: { outage: boolean; judged?: boolean } = { outage: false },
+    kind: { outage: boolean; judged?: boolean; clearable?: boolean; prompt?: ClassifierPrompt } = { outage: false },
   ): SessionDecision {
     this.consecutiveDenials += 1;
     this.totalDenials += 1;
-    // An outage still counts: an agent grinding against an unreachable
-    // classifier is exactly what the breaker exists to stop. What changes is
-    // what the breaker then says, not whether it trips.
     if (kind.outage) this.totalOutages += 1;
     const action = describeCall(call);
     return {
@@ -182,16 +167,13 @@ export class AutoModeSession {
       rule,
       action,
       reason,
-      toolResult: denialToolResult({ action, reason, judged: kind.judged ?? true }),
+      toolResult: denialToolResult({ action, reason, judged: kind.judged ?? true, clearable: kind.clearable ?? true }),
+      ...(kind.clearable === false ? { clearable: false } : {}),
+      ...(kind.prompt ? { prompt: kind.prompt } : {}),
     };
   }
 }
 
-/**
- * Why the breaker blocked this call, in the model's terms. An episode of pure
- * outages is not the session having been refused twenty times: saying so would
- * put the agent — and then the user it apologizes to — on the wrong problem.
- */
 function breakerReason(breaker: BreakerState): string {
   if (breaker.outage) {
     return (

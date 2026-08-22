@@ -1,11 +1,6 @@
-// What auto mode shows a person, and the slice of pi's ExtensionUIContext it
-// shows it through. Duck-typed like the rest of this module (pi 0.83.0,
-// core/extensions/types.ts) so `bun test` drives the whole surface.
-//
-// Everything here is set once, on a transition: a status that changes when the
-// mode changes, a working message that appears for the length of one
-// classification, a widget that changes when a call is denied. Nothing repaints
-// on a timer, and a session where nothing happens draws nothing.
+// What auto mode shows a person, through a duck-typed slice of pi's
+// ExtensionUIContext (pi 0.83.0). Everything here is set on a transition:
+// nothing repaints on a timer, and a quiet session draws nothing.
 import type { AutoModeDenial } from "./index";
 import type { BreakerState } from "./session";
 
@@ -27,12 +22,7 @@ export type AutoModeUILike = {
   confirm(title: string, message: string): Promise<boolean>;
 };
 
-/**
- * How much of a blocked call the surfaces show. A bash command carries the
- * whole shell line and reads past four wrapped rows in the widget, which
- * buries the reason underneath it — and the reason is what a person acts on.
- * The model still gets the call in full: `denialToolResult` does not clamp.
- */
+/** The surfaces only. The model gets the call in full: `denialToolResult` does not clamp. */
 export const denialActionCharLimit = 80;
 
 export function autoModeStatusText(enabled: boolean): string {
@@ -47,11 +37,7 @@ function clamp(text: string): string {
   return text.length <= denialActionCharLimit ? text : `${text.slice(0, denialActionCharLimit - 1)}…`;
 }
 
-/**
- * The denials since the user last spoke. Speaking is what clears the list,
- * which is the same act that clears the denials themselves: the next message
- * may be the approval.
- */
+/** The denials since the user last spoke, which is what clears both. */
 export function denialWidgetLines(denials: readonly AutoModeDenial[]): string[] {
   if (denials.length === 0) return [];
   const shown = denials.slice(-denialWidgetLimit);
@@ -59,27 +45,25 @@ export function denialWidgetLines(denials: readonly AutoModeDenial[]): string[] 
   const lines = [`auto mode blocked ${denials.length} call${denials.length === 1 ? "" : "s"}:`];
   if (hidden > 0) lines.push(`  … ${hidden} earlier`);
   for (const denial of shown) lines.push(`  ${clamp(denial.action)} — ${denial.reason}`);
-  // Approving is the way through a refusal and does nothing for an outage: it
-  // sends the call back to the classifier that never answered. Telling the
-  // user to approve an outage spends their turn and leaves them thinking they
-  // fixed it.
-  lines.push(
-    denials.every(nothingJudged)
-      ? "  Nothing judged these — the classifier is unreachable. Approving will not help."
-      : "  Approve in your reply to let the agent retry.",
-  );
+  lines.push(offer(denials));
   return lines;
+}
+
+function offer(denials: readonly AutoModeDenial[]): string {
+  if (denials.every(nothingJudged)) {
+    return "  Nothing judged these — the classifier is unreachable. Approving will not help.";
+  }
+  if (denials.every((denial) => denial.clearable === false)) {
+    return "  Approving will not help — auto mode's own settings decide these.";
+  }
+  return "  Approve in your reply to let the agent retry.";
 }
 
 function nothingJudged(denial: AutoModeDenial): boolean {
   return denial.rule === "classifier-unavailable";
 }
 
-/**
- * The breaker's question, in the flavour the episode earned. An episode of
- * blocks that no model ever judged is an outage, and asking the user to weigh
- * in on refusals that never happened sends them after the wrong problem.
- */
+/** In the flavour the episode earned: an outage is not twenty refusals. */
 export function breakerQuestion(breaker: BreakerState): { title: string; message: string } {
   if (breaker.outage) {
     return {

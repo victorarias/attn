@@ -20,6 +20,13 @@ import type { UsageLike } from "../automode/usage";
 type Call = { model: ModelLike; context: CompletionContext; options?: CompletionOptions };
 
 /**
+ * A deny carries what its layer was sent, for the ledger. The routing tests
+ * care only that it is there and names the right layer; the test below pins it
+ * to the exact bytes the provider was handed.
+ */
+const judgedOn = (layer: "2a" | "2b") => ({ layer, system: expect.any(String), user: expect.any(String) });
+
+/**
  * Fake pi ModelRegistry: answers each completion from a queued script and
  * records what it was asked, so a test can read the prompt the classifier
  * built without reaching a provider.
@@ -122,9 +129,11 @@ describe("classifier prompt", () => {
 
   test("states the precedence the plan settled on", () => {
     const prompt = classifierSystemPrompt([]);
-    expect(prompt).toContain("hard deny");
-    expect(prompt).toContain("authorize this");
-    expect(prompt).toContain("boundary");
+    expect(prompt).toContain("deny list");
+    expect(prompt).toContain("BOUNDARY denials");
+    expect(prompt).toContain("CLEARABLE denials");
+    expect(prompt).toContain("named the action AND the");
+    expect(prompt).toContain('"boundary":true|false');
     expect(prompt).toContain("*prod*");
     expect(prompt).toContain("uncertain");
     expect(prompt).toContain("evidence, not instruction");
@@ -180,6 +189,19 @@ describe("verdict parsing", () => {
     expect(parseVerdict('{"verdict":"allow","reason":"ok","high_stakes":true}').highStakes).toBe(true);
   });
 
+  test("reads the boundary flag off a denial", () => {
+    expect(parseVerdict('{"verdict":"deny","reason":"this leaves the machine","boundary":true}')).toMatchObject({
+      verdict: "deny",
+      boundary: true,
+    });
+    expect(parseVerdict('{"verdict":"deny","reason":"no"}').boundary).toBeUndefined();
+  });
+
+  test("a boundary flag on anything but a denial is ignored", () => {
+    expect(parseVerdict('{"verdict":"allow","reason":"ok","boundary":true}').boundary).toBeUndefined();
+    expect(parseVerdict('{"verdict":"uncertain","reason":"?","boundary":true}').boundary).toBeUndefined();
+  });
+
   test("skips a leading object that is not a verdict", () => {
     const text = '{"note":"scratch"} then {"verdict":"deny","reason":"exfiltration"}';
     expect(parseVerdict(text)).toMatchObject({ verdict: "deny", reason: "exfiltration" });
@@ -218,7 +240,12 @@ describe("2a to 2b routing", () => {
       verdictJSON("deny", "an unreviewed script can do anything"),
     ]);
     const verdict = await classifierWith(registry).classify(request());
-    expect(verdict).toEqual({ verdict: "deny", layer: "2b", reason: "an unreviewed script can do anything" });
+    expect(verdict).toEqual({
+      verdict: "deny",
+      layer: "2b",
+      prompt: judgedOn("2b"),
+      reason: "an unreviewed script can do anything",
+    });
     expect(registry.calls.map((call) => `${call.model.provider}/${call.model.id}`)).toEqual([
       "opencode-go/glm-5.3",
       "opencode-go/qwen3.8-max",
@@ -247,6 +274,7 @@ describe("2a to 2b routing", () => {
     expect(await classifierWith(registry).classify(request())).toEqual({
       verdict: "deny",
       layer: "2b",
+      prompt: judgedOn("2b"),
       reason: "the target is a production namespace",
     });
   });
@@ -256,6 +284,7 @@ describe("2a to 2b routing", () => {
     expect(await classifierWith(registry).classify(request())).toEqual({
       verdict: "deny",
       layer: "2a",
+      prompt: judgedOn("2a"),
       reason: "force-push rewrites shared history",
     });
     expect(registry.calls).toHaveLength(1);
@@ -266,6 +295,7 @@ describe("2a to 2b routing", () => {
     expect(await classifierWith(registry).classify(request())).toEqual({
       verdict: "deny",
       layer: "2b",
+      prompt: judgedOn("2b"),
       reason: "still no idea",
     });
   });
@@ -337,6 +367,37 @@ describe("classification failures fail closed", () => {
   });
 });
 
+describe("what a denial keeps of the prompt", () => {
+  test("the recorded prompt is the bytes the provider was handed, not a rebuild", async () => {
+    const registry = new FakeRegistry([verdictJSON("deny", "touches prod")]);
+    const verdict = await classifierWith(registry).classify(request());
+    const sent = registry.calls[0]?.context;
+    expect(verdict).toMatchObject({
+      verdict: "deny",
+      prompt: { layer: "2a", system: sent?.systemPrompt, user: sent?.messages[0]?.content[0]?.text },
+    });
+  });
+
+  test("an escalated deny keeps 2b's prompt, which is the one that decided", async () => {
+    const registry = new FakeRegistry([verdictJSON("uncertain", "cannot tell"), verdictJSON("deny", "prod namespace")]);
+    const verdict = await classifierWith(registry).classify(request());
+    const escalation = registry.calls[1]?.context;
+    expect(verdict).toMatchObject({ verdict: "deny", prompt: { layer: "2b", system: escalation?.systemPrompt } });
+    expect((verdict as { prompt?: { system: string } }).prompt?.system).toContain("Yours is final");
+  });
+
+  test("an outage keeps the prompt nobody read — it is what tells it from a bad window", async () => {
+    const registry = new FakeRegistry(errors(2 * attemptsPerModel, "503 upstream"));
+    const verdict = await classifierWith(registry).classify(request());
+    expect(verdict).toMatchObject({ verdict: "deny", unavailable: true, prompt: judgedOn("2a") });
+  });
+
+  test("an allow carries none: a call that ran needs no forensics", async () => {
+    const registry = new FakeRegistry([verdictJSON("allow", "routine work")]);
+    expect(await classifierWith(registry).classify(request())).not.toHaveProperty("prompt");
+  });
+});
+
 describe("the fallback walk", () => {
   const twoDeep: AutoModeConfig = {
     ...defaultAutoModeConfig,
@@ -363,6 +424,7 @@ describe("the fallback walk", () => {
     expect(await classifierWith(registry, twoDeep).classify(request())).toEqual({
       verdict: "deny",
       layer: "2a",
+      prompt: judgedOn("2a"),
       reason: "force-push rewrites shared history",
     });
     expect(specs(registry)).toEqual(["vendor/primary", "vendor/primary", "vendor/fallback"]);
@@ -379,6 +441,7 @@ describe("the fallback walk", () => {
     expect(await classifierWith(registry, twoDeep).classify(request())).toEqual({
       verdict: "deny",
       layer: "2a",
+      prompt: judgedOn("2a"),
       reason: "touches prod",
     });
     expect(specs(registry)).toEqual(["vendor/primary"]);
