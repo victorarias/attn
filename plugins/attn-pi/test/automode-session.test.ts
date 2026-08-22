@@ -45,9 +45,6 @@ describe("denial text contract", () => {
     expect(denialToolResult({ action: "write /etc/hosts", reason: "" })).toContain("Reason: (not stated)");
   });
 
-  // A block nobody judged wearing a refusal's words sends the agent to ask for
-  // approval that cannot help: approval only re-runs the classification, and
-  // the classifier is still down.
   describe("a call nothing could judge", () => {
     const unjudged = denialToolResult({
       action: "bash: sed -n 1,200p notes.txt",
@@ -214,7 +211,7 @@ describe("verdict cache", () => {
     const decision = await session.decide(bash("git push origin main"), { cwd });
     expect(decision.outcome).toBe("block");
     if (decision.outcome !== "block") return;
-    // A model was reached, so the rule still names the layer that answered.
+
     expect(decision.rule).toBe("classifier-2a");
     expect(decision.toolResult).toContain("could not judge");
   });

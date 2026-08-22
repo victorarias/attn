@@ -17,7 +17,6 @@ import {
   type SessionStartReason,
 } from "../suite/core";
 
-// Keep filenames short: macOS unix socket paths cap sun_path at 104 bytes.
 const tmpRoot = mkdtempSync(join(tmpdir(), "attn-pi-suite-"));
 let socketCounter = 0;
 
@@ -33,8 +32,6 @@ async function waitFor(predicate: () => boolean, timeoutMs = 2_000): Promise<voi
   }
 }
 
-// Fake pi ExtensionContext: mimics the real one's "stale after session
-// replacement" behavior via poison(), and lets tests flip isIdle().
 class FakeContext implements ExtensionContextLike {
   private idle = true;
   private poisonMessage: string | undefined;
@@ -45,7 +42,6 @@ class FakeContext implements ExtensionContextLike {
     this.idle = idle;
   }
 
-  /** After this, isIdle()/sessionManager throw, mirroring a ctx from a superseded session generation. */
   poison(message: string): void {
     this.poisonMessage = message;
   }
@@ -62,8 +58,6 @@ class FakeContext implements ExtensionContextLike {
   }
 }
 
-// Fake pi ExtensionAPI: records registered handlers and sendUserMessage
-// calls, and can be poisoned the same way FakeContext can.
 class FakePi {
   readonly handlers = new Map<string, ExtensionHandler<any>>();
   readonly sentMessages: Array<{ content: string; options: { deliverAs?: "steer" | "followUp" } | undefined }> = [];
@@ -88,9 +82,6 @@ class FakePi {
   }
 }
 
-// Driver-side harness: a real RelayServer (same one PiDriver uses) with a
-// delegate that just records what arrives, instead of PiDriver's actual
-// session/token bookkeeping.
 class RecordingDelegate implements RelayDelegate {
   readonly calls: Array<{ method: string; params: unknown }> = [];
   readonly connections: RelayConnection[] = [];
@@ -114,9 +105,6 @@ class RecordingDelegate implements RelayDelegate {
   }
 }
 
-// A driver that takes a report and never answers it — what a runtime being
-// replaced looks like from inside pi: the bytes are accepted, the process goes
-// away before it forwards them, and nothing on the wire says so.
 class StallingDelegate extends RecordingDelegate {
   async suiteReportStop(params: unknown): Promise<void> {
     this.calls.push({ method: relayMethods.reportStop, params });
@@ -224,7 +212,6 @@ describe("AttnPiSuite: agent_end + agent_settled -> suite.report_stop", () => {
       aborted: false,
     });
 
-    // A second settle without a new agent_end has nothing cached.
     pi.fire("agent_settled", agentSettled, ctx);
     await waitFor(() => delegate.calls.filter((call) => call.method === relayMethods.reportStop).length === 2);
     const stops = delegate.calls.filter((call) => call.method === relayMethods.reportStop);
@@ -285,9 +272,6 @@ describe("AttnPiSuite: driver.deliver_message", () => {
     expect(idle).toEqual({ delivered: true });
     expect(pi1.sentMessages[1]).toEqual({ content: "you around?", options: undefined });
 
-    // Simulate a session transition: pi re-runs the factory with a fresh
-    // pi/ctx pair; the old ones must throw on any further use, same as real
-    // pi after resume/fork/new/reload.
     pi1.poison("stale extension ctx after session replacement");
     ctx1.poison("stale extension ctx after session replacement");
 
@@ -304,7 +288,7 @@ describe("AttnPiSuite: driver.deliver_message", () => {
     );
     expect(afterTransition).toEqual({ delivered: true });
     expect(pi2.sentMessages).toEqual([{ content: "after resume", options: undefined }]);
-    expect(pi1.sentMessages).toHaveLength(2); // stale pi was never touched again
+    expect(pi1.sentMessages).toHaveLength(2);
 
     suite.close();
     relay.close();
@@ -358,9 +342,6 @@ describe("AttnPiSuite: auto mode denials -> suite.report_denial", () => {
   });
 });
 
-// The driver process is replaced whenever attn's daemon restarts, and the pi it
-// launched keeps running. The relay path is stable per profile precisely so the
-// suite can find the replacement; these cover it finding one.
 describe("AttnPiSuite: the driver was replaced under a live session", () => {
   test("re-dials the stable path, names its run again, and reports land on the new driver", async () => {
     const socketPath = nextSocketPath();
@@ -375,8 +356,6 @@ describe("AttnPiSuite: the driver was replaced under a live session", () => {
     pi.fire("agent_start", { type: "agent_start" }, ctx);
     await new Promise((resolve) => setTimeout(resolve, 50));
 
-    // The replacement driver: same path, new listener, and no memory of the
-    // connection the first one held.
     first.close();
     const replacement = new RecordingDelegate();
     const second = new RelayServer({ socketPath, delegate: replacement });
@@ -387,8 +366,6 @@ describe("AttnPiSuite: the driver was replaced under a live session", () => {
     await waitFor(() => helloCalls(replacement).length >= 1);
     await waitFor(() => replacement.calls.some((call) => call.method === relayMethods.reportState));
 
-    // The hello comes first: a report that overtook it would be answered
-    // "unknown pi suite token" and dropped.
     expect(replacement.calls[0]?.method).toBe(relayMethods.hello);
     expect(helloCalls(replacement)[0]).toEqual({
       token: "tok-r",
@@ -419,8 +396,6 @@ describe("AttnPiSuite: the driver was replaced under a live session", () => {
     const second = new RelayServer({ socketPath, delegate: replacement });
     await second.listen();
 
-    // Nothing fires on pi's side: the session is sitting at its prompt. The
-    // reconnect is what gives the replacement driver a connection at all.
     await waitFor(() => helloCalls(replacement).length >= 1, 5_000);
     expect(helloCalls(replacement)[0]).toEqual({
       token: "tok-q",
@@ -453,8 +428,6 @@ describe("AttnPiSuite: a report the driver never took", () => {
     pi.fire("agent_settled", { type: "agent_settled" }, ctx);
     await waitFor(() => stalling.calls.some((call) => call.method === relayMethods.reportStop));
 
-    // The driver dies holding the settle. Without the re-declaration attn would
-    // show this session working until its next run, minutes or hours later.
     first.close();
     const replacement = new RecordingDelegate();
     const second = new RelayServer({ socketPath, delegate: replacement });
@@ -473,7 +446,7 @@ describe("AttnPiSuite: a report the driver never took", () => {
   });
 
   test("keeps trying a socket nothing is listening on yet, and lands the report when a driver appears", async () => {
-    const socketPath = nextSocketPath(); // nothing listening
+    const socketPath = nextSocketPath();
     const suite = new AttnPiSuite({ socketPath, token: "tok-y", piVersion: "0.80.10" });
     const pi = new FakePi();
     suite.register(pi);
@@ -506,7 +479,6 @@ describe("AttnPiSuite: running outside attn or without a live relay", () => {
 
     expect(pi.handlers.size).toBe(0);
 
-    // Firing events pi never subscribed to must be a pure no-op, not a crash.
     const ctx = new FakeContext("native-6");
     pi.fire("session_start", { type: "session_start", reason: "startup" }, ctx);
     pi.fire("agent_start", { type: "agent_start" }, ctx);
@@ -515,7 +487,7 @@ describe("AttnPiSuite: running outside attn or without a live relay", () => {
   });
 
   test("a socket with nothing listening never crashes or produces an unhandled rejection", async () => {
-    const socketPath = nextSocketPath(); // never listened on
+    const socketPath = nextSocketPath();
     const suite = new AttnPiSuite({ socketPath, token: "tok-7", piVersion: "0.80.10" });
     const pi = new FakePi();
     suite.register(pi);
@@ -533,7 +505,6 @@ describe("AttnPiSuite: running outside attn or without a live relay", () => {
       pi.fire("agent_end", { type: "agent_end", messages: [] }, ctx);
       pi.fire("agent_settled", { type: "agent_settled" }, ctx);
 
-      // Give the failed dial attempts a tick to settle.
       await new Promise((resolve) => setTimeout(resolve, 50));
     } finally {
       process.off("unhandledRejection", onUnhandledRejection);
@@ -677,7 +648,6 @@ describe("AttnPiSuite: reports nobody could take", () => {
     suite.register(pi);
     const ctx = new FakeContext("native-dr");
 
-    // Nothing is listening yet, so every dial fails and every report is dropped.
     pi.fire("session_start", { type: "session_start", reason: "startup" }, ctx);
     suite.reportDenial({ tool: "bash", action: "bash: curl example.com", reason: "no", rule: "static", at: "now" });
     suite.reportDenial({ tool: "bash", action: "bash: nc example.com 80", reason: "no", rule: "static", at: "now" });

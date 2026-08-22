@@ -1,26 +1,23 @@
-// What the judging model reads, and how its answer is read back. The shape is
-// the one measured in spike-harness/s7-classifier-receipt.js.
 import type { ClassifierVerdict } from "./classifier";
 import { renderTranscript, type TranscriptEntry } from "./transcript";
 
-/** The 2a answer, before it is narrowed to the interface's verdict. */
 export type ParsedVerdict = {
   verdict: ClassifierVerdict["verdict"];
   reason: string;
-  /** The model itself asking for a second opinion. */
+
   highStakes: boolean;
-  /** A BOUNDARY denial, which no approval clears. Read only off a deny. */
+
   boundary?: boolean;
-  /** Nothing in the reply read as a verdict, so this one was manufactured. */
+
   unreadable?: boolean;
 };
 
 export type PromptInput = {
   transcript: readonly TranscriptEntry[];
   environment: readonly string[];
-  /** One line naming the pending call (policy.ts's describeCall). */
+
   action: string;
-  /** Why the fast path could not answer, in its own words. */
+
   reason: string;
   cwd: string;
 };
@@ -92,7 +89,6 @@ export function classifierSystemPrompt(environment: readonly string[]): string {
   ].join("\n");
 }
 
-/** Layer 2b: same evidence, a stronger model, and no room to shrug. */
 export function escalationSystemPrompt(environment: readonly string[], first: ParsedVerdict): string {
   return [
     classifierSystemPrompt(environment),
@@ -121,7 +117,6 @@ export function classifierUserPrompt(input: PromptInput): string {
   ].join("\n");
 }
 
-/** Fails closed: unreadable output becomes a denial naming what came back. */
 export function parseVerdict(text: string): ParsedVerdict {
   const object = firstJSONObject(text);
   const verdict = object?.verdict;
@@ -139,7 +134,6 @@ export function parseVerdict(text: string): ParsedVerdict {
   };
 }
 
-/** Models wrap the object in prose, so this scans for the first balanced one. */
 function firstJSONObject(text: string): Record<string, unknown> | undefined {
   for (let start = text.indexOf("{"); start >= 0; start = text.indexOf("{", start + 1)) {
     let depth = 0;
@@ -155,7 +149,6 @@ function firstJSONObject(text: string): Record<string, unknown> | undefined {
             return parsed as Record<string, unknown>;
           }
         } catch {
-          // Not an object after all; the next "{" may still be one.
         }
         break;
       }

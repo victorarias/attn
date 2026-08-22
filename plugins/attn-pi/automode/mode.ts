@@ -1,7 +1,3 @@
-// Auto mode as a pi session sees it: `/auto`, the launch flags, the status
-// indicator, and the classifier built from the running session's registry. One
-// instance at module scope, so the user's `/auto` outlives a /new or a resume
-// while the verdict cache and breaker do not.
 import type { Classifier } from "./classifier";
 import type { AutoModeConfig } from "./config";
 import {
@@ -16,7 +12,6 @@ import { autoModeStatusKey, autoModeStatusText } from "./ui";
 import { UsageLedger } from "./usage";
 
 export type AutoModeSessionContextLike = AutoModeContextLike & {
-  /** pi's ModelRegistry, the only way to reach the classifier's model. */
   modelRegistry?: ModelRegistryLike;
 };
 
@@ -34,25 +29,25 @@ export type AutoModePiLike = AutoModeExtensionAPILike & {
 
 export type AutoModeSetup = {
   config: AutoModeConfig;
-  /** The durable local record every blocked call is written to. */
+
   ledger?: DenialLedgerLike;
-  /** The seam attn's surfaces hang off; bare pi leaves it unset. */
+
   onDenial?: (denial: AutoModeDenial) => void;
-  /** attn's suite declares `pending_approval` from it; bare pi leaves it unset. */
+
   onWaitingForUser?: (waiting: boolean) => void;
-  /** Said once, at the first session start that has a UI. A broken config is the caller. */
+
   notice?: string;
 };
 
 export class AutoMode {
   private readonly usage = new UsageLedger();
   private readonly extension: (pi: AutoModeExtensionAPILike) => void;
-  /** The session's own registry, captured from the first ctx that carries one. */
+
   private registry: ModelRegistryLike | undefined;
   private classifier: { registry: ModelRegistryLike; instance: Classifier } | undefined;
-  /** What `/auto` last said. Undefined until the user says anything. */
+
   private choice: boolean | undefined;
-  /** What the launch flags said. Undefined when neither was passed. */
+
   private flag: boolean | undefined;
   private noticed = false;
 
@@ -68,7 +63,6 @@ export class AutoMode {
     });
   }
 
-  /** `/auto` outranks a launch flag, which outranks the configured default. */
   enabled(): boolean {
     return this.choice ?? this.flag ?? this.setup.config.enabledDefault;
   }
@@ -76,7 +70,7 @@ export class AutoMode {
   register(pi: AutoModePiLike): void {
     pi.registerFlag("auto", { description: "Start with attn auto mode on", type: "boolean" });
     pi.registerFlag("no-auto", { description: "Start with attn auto mode off", type: "boolean" });
-    // Unset reads as undefined, not as a typed false. --no-auto wins both.
+
     this.flag = pi.getFlag("no-auto") === true ? false : pi.getFlag("auto") === true ? true : undefined;
 
     pi.registerCommand("auto", {
@@ -118,7 +112,6 @@ export class AutoMode {
     ctx.ui?.setStatus(autoModeStatusKey, autoModeStatusText(this.enabled()));
   }
 
-  /** The classifier for the registry this session is running against. */
   private judge(): Classifier {
     const registry = this.registry;
     if (!registry) {

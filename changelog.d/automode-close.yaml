@@ -8,4 +8,4 @@ change: >
   auto mode toggle also keeps an explicit choice: a promoted default that
   changes while the launcher is open no longer flips it back.
 notes: >
-  Slice 6 of the pi auto mode plan (docs/plans/2026-08-16-pi-auto-mode.md).
+  Slice 6 of the pi auto mode plan.

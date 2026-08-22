@@ -1,37 +1,29 @@
-// The config value the decision tree is evaluated against, and the loader that
-// validates one. Patterns match a call's signature (policy.ts's callSignature):
-// `*` matches any run of characters, `?` matches one.
-
-/** Defaults from the classifier receipt in docs/plans/2026-08-16-pi-auto-mode.md. */
 export const defaultClassifierModel = "opencode-go/glm-5.3";
 export const defaultEscalationModel = "opencode-go/qwen3.8-max";
 
-/** Primary first, the rest walked on an unreachable endpoint. Receipts only. */
 export const defaultClassifierModels: readonly string[] = [defaultClassifierModel];
 export const defaultEscalationModels: readonly string[] = [defaultEscalationModel];
 
 export type AutoModeConfig = {
-  /** Whether new sessions start with auto mode on. */
   enabledDefault: boolean;
-  /** Prose the classifier reads to learn what this machine is allowed to do. */
+
   environment: readonly string[];
-  /** Narrow patterns that skip the classifier and run. */
+
   allow: readonly string[];
-  /** Patterns refused before anything else looks at the call. No approval lifts one. */
+
   hardDeny: readonly string[];
-  /** Layer 2a's models, primary first. Never empty. */
+
   classifierModels: readonly string[];
-  /** Layer 2b's models, primary first. Never empty. */
+
   escalationModels: readonly string[];
 };
 
-/** The on-the-wire/on-disk shape, snake_case per the plan's schema. */
 export type RawAutoModeConfig = {
   enabled_default?: unknown;
   environment?: unknown;
   allow?: unknown;
   hard_deny?: unknown;
-  /** The singular spellings predate the lists and load as a one-entry list. */
+
   classifier_model?: unknown;
   escalation_model?: unknown;
   classifier_models?: unknown;
@@ -91,7 +83,6 @@ export function loadAutoModeConfig(raw: RawAutoModeConfig | undefined): AutoMode
   };
 }
 
-/** A pattern with no literal characters matches everything it is asked about. */
 export function isBroadPattern(pattern: string): boolean {
   return pattern.replace(/[*?\s]/g, "") === "";
 }
@@ -128,10 +119,6 @@ function readStrings(value: unknown, field: string): string[] {
   });
 }
 
-/**
- * The singular field is what stored configs say today and loads as one entry.
- * An empty list is refused rather than defaulted: it is always a typo.
- */
 function readModels(raw: {
   list: unknown;
   listField: string;

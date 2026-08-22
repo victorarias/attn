@@ -1,6 +1,3 @@
-// The durable local record of every refused call. The relay is allowed to lose
-// a denial — a bare pi has none, and a relay whose socket died drops what it is
-// handed — so these tests are about what survives that.
 import { describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -60,7 +57,6 @@ function tempPath(name = denialLedgerFileName): string {
   return join(mkdtempSync(join(tmpdir(), "attn-ledger-")), name);
 }
 
-/** The denials in a generation. A rotation marker is not one. */
 function readRecords(path: string): DenialLedgerRecord[] {
   return readLines(path)
     .map((line) => JSON.parse(line) as DenialLedgerRecord & { type?: string })
@@ -73,11 +69,6 @@ function readMarkers(path: string): { dropped: number }[] {
     .filter((record) => record.type === "rotated");
 }
 
-/**
- * What the Go reader computes: the markers of both generations, summed. Kept
- * here so the writer's arithmetic is pinned against the reader that consumes
- * it rather than against itself.
- */
 function droppedAcrossGenerations(path: string): number {
   return [`${path}.1`, path]
     .flatMap((generation) => (existsSync(generation) ? readMarkers(generation) : []))
@@ -102,11 +93,10 @@ function denial(overrides: Partial<AutoModeDenial> = {}): AutoModeDenial {
   };
 }
 
-/** Runs one denied call through the whole extension against a real ledger. */
 async function denyOneCall(options: {
   path: string;
   onDenial?: (denial: AutoModeDenial) => void;
-  /** Said by the user before the call, so it reaches the classifier's window. */
+
   opening?: string;
 }): Promise<FakeUI> {
   const mode = new AutoMode({
@@ -143,7 +133,6 @@ describe("where the ledger lives", () => {
   });
 
   test("auto mode's own files are protected wherever they sit, ledger included", () => {
-    // The record must not become a path an agent writes policy through.
     expect(locatePath("/work/repo", "/work/repo/attn-automode-denials.jsonl").location).toBe("protected");
     expect(locatePath("/work/repo", "/work/repo/attn-automode.json").location).toBe("protected");
     expect(locatePath("/work/repo", "/work/repo/attn-automode-denials.jsonl.1").location).toBe("protected");
@@ -171,9 +160,6 @@ describe("what a denial leaves behind", () => {
   });
 
   test("the record keeps the exact prompt the layer was judged on", async () => {
-    // The reason says what came back; without what went in there is no telling
-    // a wrong verdict from a window that never carried the sentence granting
-    // the work, which is the 2026-08-22 episode.
     const path = tempPath();
     await denyOneCall({ path, opening: "you may force-push this branch, it is mine" });
 
@@ -185,8 +171,6 @@ describe("what a denial leaves behind", () => {
   });
 
   test("a call no classifier judged carries no prompt", async () => {
-    // A static rule asked nothing, so there is nothing to keep. Writing an
-    // empty one would read as a classifier that saw nothing.
     const path = tempPath();
     const mode = new AutoMode({
       config: { ...defaultAutoModeConfig, hardDeny: ["rm -rf *"] },
@@ -205,11 +189,6 @@ describe("what a denial leaves behind", () => {
   });
 
   test("a report that reaches a relay and dies there still leaves the record", async () => {
-    // The 2026-08-17 episode's shape: the denial left the session and nothing
-    // on the other side kept it. A relay that refuses the report stands in for
-    // the socket a plugin reload removed — bun's runner cannot host a failed
-    // unix connect, and the two are the same thing from here: the report is
-    // gone and nothing tells the session so.
     const socketPath = join(mkdtempSync(join(tmpdir(), "attn-pi-lost-")), "s.sock");
     const relay = new RelayServer({
       socketPath,
@@ -249,7 +228,6 @@ describe("what a denial leaves behind", () => {
   });
 
   test("a record that cannot be written is said out loud, and the call stays blocked", async () => {
-    // A directory where the file should be: the write fails, nothing else does.
     const path = tempPath();
     const mode = new AutoMode({
       config: defaultAutoModeConfig,
@@ -292,25 +270,18 @@ describe("what the ledger admits it lost", () => {
     ledger.record(denial({ toolCallId: "one" }));
     ledger.record(denial({ toolCallId: "two" }));
 
-    // Both records are still on disk, one per generation.
     expect(readRecords(`${path}.1`).map((record) => record.tool_call_id)).toEqual(["one"]);
     expect(readRecords(path).map((record) => record.tool_call_id)).toEqual(["two"]);
     expect(readMarkers(path)).toEqual([]);
     expect(droppedAcrossGenerations(path)).toBe(0);
   });
 
-  // The count the reader computes is the sum of the markers across BOTH
-  // generations (internal/automode/denialledger.go), so a marker that folded in
-  // an earlier one would be counted twice and the error would compound with
-  // every rotation. This drives the real writer through three rotations and
-  // does the reader's arithmetic on what it wrote.
   test("a dropped generation is counted once, however many rotations came before", () => {
     const path = tempPath();
     const ledger = new DenialLedger(path, "sess-1", 100);
 
     for (const id of ["one", "two", "three", "four"]) ledger.record(denial({ toolCallId: id }));
 
-    // "three" and "four" are still on disk, so "one" and "two" are the loss.
     expect(readRecords(`${path}.1`).map((record) => record.tool_call_id)).toEqual(["three"]);
     expect(readRecords(path).map((record) => record.tool_call_id)).toEqual(["four"]);
     expect(droppedAcrossGenerations(path)).toBe(2);
@@ -321,13 +292,11 @@ describe("what the ledger admits it lost", () => {
     expect(droppedAcrossGenerations(path)).toBe(3);
   });
 
-  // Every session in a profile appends to one ledger. Losing a denial to the
-  // bookkeeping around denials is the failure this file exists to end.
   test("a generation another session rotated out from under this one costs no record", () => {
     const path = tempPath();
     const ledger = new DenialLedger(path, "sess-1", 100);
     ledger.record(denial({ toolCallId: "one" }));
-    // What a concurrent rotation leaves behind: the active file is gone.
+
     renameSync(path, `${path}.1`);
 
     expect(() => ledger.record(denial({ toolCallId: "two" }))).not.toThrow();
@@ -341,14 +310,10 @@ describe("what the ledger admits it lost", () => {
 
     ledger.record(denial());
 
-    // The marker rode into the rotated generation, where the reader still sums
-    // it. The new active file holds the record and no marker of its own: the
-    // generation it displaced held no denials.
     expect(readRecords(path)).toHaveLength(1);
     expect(readMarkers(path)).toEqual([]);
     expect(droppedAcrossGenerations(path)).toBe(3);
 
-    // Rotating again destroys that generation, so its claim moves forward once.
     ledger.record(denial({ toolCallId: "second" }));
     expect(droppedAcrossGenerations(path)).toBe(3);
   });

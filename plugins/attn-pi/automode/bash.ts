@@ -1,9 +1,3 @@
-// The static read-only bash set. Every entry here runs UNJUDGED, so declining
-// is cheap and being wrong the other way is not. Two rules keep it honest: a
-// command that can be talked into writing carries the flags that make it
-// read-only, and a command that can run another command is not in the set.
-
-/** Reaching the network is never read-only, whatever the command looks like. */
 export const networkCommands: readonly string[] = [
   "curl",
   "wget",
@@ -25,9 +19,8 @@ export const networkCommands: readonly string[] = [
 ];
 
 type ReadOnlyCommand = {
-  /** Flags that turn this command into a writer. */
   forbiddenFlags?: readonly string[];
-  /** When present, only these subcommands are read-only. */
+
   subcommands?: readonly string[];
 };
 
@@ -67,7 +60,6 @@ export const readOnlyCommands: Readonly<Record<string, ReadOnlyCommand>> = {
   git: { subcommands: ["status", "log", "diff", "show", "blame", "rev-parse", "ls-files", "describe", "shortlog"] },
 };
 
-/** Anything that makes one command line several, or text this matcher never sees. */
 const controlCharacters = [";", "&", ">", "<", "`", "$", "(", ")", "{", "}", "\n", "\r", "\\"];
 
 export type BashClassification =
@@ -96,7 +88,6 @@ export function classifyBashCommand(command: string): BashClassification {
   return { kind: "read-only" };
 }
 
-/** Scans the whole line, so a network call cannot ride in as a later element. */
 function networkCommandIn(command: string): string | undefined {
   for (const word of command.split(/[^A-Za-z0-9_.-]+/)) {
     if (networkCommands.includes(word.toLowerCase())) return word.toLowerCase();
@@ -127,7 +118,6 @@ function readOnlySegmentFailure(segment: string): string | undefined {
   return undefined;
 }
 
-/** `/usr/bin/git` and `git` are the same command. */
 function commandName(word: string): string {
   const parts = word.split("/");
   return (parts[parts.length - 1] ?? word).toLowerCase();

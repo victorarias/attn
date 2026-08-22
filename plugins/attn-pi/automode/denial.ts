@@ -1,14 +1,9 @@
-// The text a blocked tool call hands back to the model: what was blocked, why,
-// and what unblocks it. That last one has three answers and the wrong one costs
-// the user a turn.
-
 export type Denial = {
-  /** The call, one line (see policy.ts's describeCall). */
   action: string;
   reason: string;
-  /** False when nothing judged this call: a retry is the way through, not approval. */
+
   judged?: boolean;
-  /** False when approval cannot lift it: a static rule, or a boundary verdict. */
+
   clearable?: boolean;
 };
 

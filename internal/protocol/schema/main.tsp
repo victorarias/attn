@@ -5291,7 +5291,7 @@ model AppRollbackResult {
 // ============================================================================
 //
 // pi's permission system, configured attn-side. Design:
-// docs/plans/2026-08-16-pi-auto-mode.md.
+// plugins/attn-pi/AGENTS.md, "Auto mode".
 //
 // The surface is deliberately split in two, and the split IS the security
 // design. These commands — everything an agent can reach over the unix socket —

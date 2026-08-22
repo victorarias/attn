@@ -1,9 +1,3 @@
-// A blocked call never reaches pi's `tool_result` handler (pi answers it
-// inline, `kind: "immediate"`), so a denial's classification tokens have no
-// result to ride. They wait here and join the next one: the session total is
-// right, the per-call attribution is not, and a session ending on a denial
-// leaves that last classification unreported.
-
 export type UsageLike = {
   input?: number;
   output?: number;
@@ -21,7 +15,6 @@ export class UsageLedger {
     this.pending = mergeUsage(this.pending, usage);
   }
 
-  /** Takes everything held; the caller now owns reporting it. */
   drain(): UsageLike | undefined {
     const held = this.pending;
     this.pending = undefined;

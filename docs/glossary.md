@@ -945,7 +945,7 @@ launch environment is the `ATTN_NISSE_*` block; the plugin that registers it is
 the session's working directory runs free), a classifier for everything those
 rules cannot place, and denials the agent answers conversationally rather than
 through a dialog. Design:
-[docs/plans/2026-08-16-pi-auto-mode.md](plans/2026-08-16-pi-auto-mode.md).
+[plugins/attn-pi/AGENTS.md](../plugins/attn-pi/AGENTS.md).
 
 Its **config** is daemon-owned and global: the environment prose the classifier
 reads about this machine, the allow and hard-deny patterns, the classifier and

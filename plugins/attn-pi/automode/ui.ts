@@ -1,17 +1,11 @@
-// What auto mode shows a person, through a duck-typed slice of pi's
-// ExtensionUIContext (pi 0.83.0). Everything here is set on a transition:
-// nothing repaints on a timer, and a quiet session draws nothing.
 import type { AutoModeDenial } from "./index";
 import type { BreakerState } from "./session";
 
-/** Keys are namespaced: a user's own extensions share these registries. */
 export const autoModeStatusKey = "attn-auto-mode";
 export const autoModeDenialWidgetKey = "attn-auto-mode-denials";
 
-/** Shown for the ~2s a classification takes, so it does not read as a hang. */
 export const classifyingWorkingMessage = "auto mode is checking this call…";
 
-/** Denials the widget lists in full before it starts counting the rest. */
 export const denialWidgetLimit = 5;
 
 export type AutoModeUILike = {
@@ -22,7 +16,6 @@ export type AutoModeUILike = {
   confirm(title: string, message: string): Promise<boolean>;
 };
 
-/** The surfaces only. The model gets the call in full: `denialToolResult` does not clamp. */
 export const denialActionCharLimit = 80;
 
 export function autoModeStatusText(enabled: boolean): string {
@@ -37,7 +30,6 @@ function clamp(text: string): string {
   return text.length <= denialActionCharLimit ? text : `${text.slice(0, denialActionCharLimit - 1)}…`;
 }
 
-/** The denials since the user last spoke, which is what clears both. */
 export function denialWidgetLines(denials: readonly AutoModeDenial[]): string[] {
   if (denials.length === 0) return [];
   const shown = denials.slice(-denialWidgetLimit);
@@ -63,7 +55,6 @@ function nothingJudged(denial: AutoModeDenial): boolean {
   return denial.rule === "classifier-unavailable";
 }
 
-/** In the flavour the episode earned: an outage is not twenty refusals. */
 export function breakerQuestion(breaker: BreakerState): { title: string; message: string } {
   if (breaker.outage) {
     return {

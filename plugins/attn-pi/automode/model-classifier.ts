@@ -1,15 +1,3 @@
-// One completion on the configured model (2a), and a second on the escalation
-// model when the first could not decide or asked for a review (2b).
-//
-// Each layer's model list is walked only when a model cannot be REACHED. A
-// model that answers ends the walk whatever it answered — asking the next one
-// would be shopping for a different verdict.
-//
-// Goes through `getProvider(...).streamSimple(...)`, pi's own simple path,
-// which clamps thinking to what the model supports. The flatter
-// `ModelRegistry.complete()` does not: measured on glm-5.3 with the same
-// prompt, 354 output tokens and 5.7s against 60 and 2.9s here (2026-08-17).
-// Duck-typed against pi 0.83.0, so `bun test` covers this with no network.
 import type { Classifier, ClassifierPrompt, ClassifierRequest, ClassifierVerdict } from "./classifier";
 import type { AutoModeConfig } from "./config";
 import {
@@ -22,10 +10,8 @@ import {
 import { describeCall } from "./policy";
 import type { UsageLike } from "./usage";
 
-/** A floor, not a pin: pi raises it to the model's own minimum. */
 export const classifierThinkingLevel = "minimal";
 
-/** The call and one immediate retry: enough for a blip, not enough to hide an outage. */
 export const attemptsPerModel = 2;
 
 export type ModelLike = { provider: string; id: string; baseUrl?: string };
@@ -72,7 +58,6 @@ export type RequestAuthLike = {
 
 export type ProviderAuthLike = { auth?: { baseUrl?: string } };
 
-/** The ModelRegistry methods a classification needs. */
 export type ModelRegistryLike = {
   find(provider: string, modelId: string): ModelLike | undefined;
   getProvider(provider: string): ProviderLike | undefined;
@@ -83,7 +68,7 @@ export type ModelRegistryLike = {
 export type ModelClassifierOptions = {
   registry: ModelRegistryLike;
   config: AutoModeConfig;
-  /** Every completion's usage, for the ledger that folds it into the session. */
+
   onUsage?: (usage: UsageLike) => void;
 };
 
@@ -113,7 +98,7 @@ export class ModelClassifier implements Classifier {
     });
     if (firstAnswer.answered === false) return unavailableVerdict(firstAnswer.reason, firstPrompt);
     const first = firstAnswer.parsed;
-    // A confident deny never escalates: the user overturns one by saying so.
+
     if (first.verdict === "deny" || (first.verdict === "allow" && !first.highStakes)) return narrow(first, firstPrompt);
 
     const secondPrompt: ClassifierPrompt = {
@@ -141,7 +126,6 @@ export class ModelClassifier implements Classifier {
     return narrow(second, secondPrompt);
   }
 
-  /** The first model in the list that answers, or the report that none could be reached. */
   private async judge(input: {
     models: readonly string[];
     layer: LayerName;
@@ -156,7 +140,6 @@ export class ModelClassifier implements Classifier {
         try {
           result = await this.complete({ ...input, modelSpec });
         } catch (error) {
-          // An abort is the user taking their turn back, not a verdict.
           if (input.signal?.aborted) throw error;
           lastFailure = `${modelSpec}: ${message(error)}`;
           continue;
@@ -175,7 +158,6 @@ export class ModelClassifier implements Classifier {
     return { answered: false, reason: unavailableReason(input.layer, input.models, lastFailure) };
   }
 
-  /** Everything ModelRuntime.prepareRequest does, from the extension's registry. */
   private async complete(input: {
     modelSpec: string;
     layer: LayerName;
@@ -222,10 +204,8 @@ export class ModelClassifier implements Classifier {
 
 type LayerName = "classifier" | "escalation";
 
-/** What one layer produced: a model's answer, or nobody's. */
 type LayerAnswer = { answered: true; parsed: ParsedVerdict } | { answered: false; reason: string };
 
-/** Names the layer, what was tried and what the last endpoint said. */
 function unavailableReason(layer: LayerName, models: readonly string[], lastFailure: string): string {
   const tried = models.length > 0 ? models.join(", ") : "(no model configured)";
   return (
@@ -236,7 +216,6 @@ function unavailableReason(layer: LayerName, models: readonly string[], lastFail
   );
 }
 
-/** The prompt rides along even here: nothing read it, and that is the finding. */
 function unavailableVerdict(reason: string, prompt: ClassifierPrompt): ClassifierVerdict {
   return { verdict: "deny", layer: prompt.layer, prompt, reason, unavailable: true };
 }

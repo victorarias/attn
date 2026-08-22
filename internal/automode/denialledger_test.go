@@ -24,8 +24,6 @@ func record(at, action string) string {
 		`","reason":"not asked for","rule":"classifier-2a","at":"` + at + `"}`
 }
 
-// A machine where auto mode never refused anything has no file, and reading it
-// is not an error — it is the ordinary case.
 func TestReadDenialLedgerTakesAMissingFileAsEmpty(t *testing.T) {
 	reading, err := ReadDenialLedger(filepath.Join(t.TempDir(), DenialLedgerFileName))
 	if err != nil {
@@ -67,8 +65,6 @@ func TestReadDenialLedgerReadsBothGenerationsOldestFirst(t *testing.T) {
 	}
 }
 
-// A line nobody can read is one denial lost. It is counted, so the reader is
-// told, and it never takes the rest of the file with it.
 func TestReadDenialLedgerCountsWhatItCannotRead(t *testing.T) {
 	path := filepath.Join(t.TempDir(), DenialLedgerFileName)
 	writeLedger(t, path,
@@ -89,12 +85,6 @@ func TestReadDenialLedgerCountsWhatItCannotRead(t *testing.T) {
 	}
 }
 
-// The exact two files plugins/attn-pi/automode/ledger.ts leaves after five
-// denials at a one-record cap — one marker per generation, each standing for
-// the generation its rotation destroyed. The writer's own test
-// ("a dropped generation is counted once, however many rotations came before")
-// pins that it produces this; this pins that the reader adds it up right.
-// Three denials are gone, and the reader must say three, not five and not two.
 func TestReadDenialLedgerSumsTheWritersMarkersOnce(t *testing.T) {
 	path := filepath.Join(t.TempDir(), DenialLedgerFileName)
 	writeLedger(t, path+".1",
@@ -118,8 +108,6 @@ func TestReadDenialLedgerSumsTheWritersMarkersOnce(t *testing.T) {
 	}
 }
 
-// A line past the in-memory cap is one denial lost. The records after it are
-// not: stopping there would drop them all and report the loss as one line.
 func TestReadDenialLedgerStepsOverALineItCannotHold(t *testing.T) {
 	path := filepath.Join(t.TempDir(), DenialLedgerFileName)
 	huge := `{"session_id":"pi-1","action":"` + strings.Repeat("x", denialLedgerMaxLineBytes+16) + `"}`
@@ -150,10 +138,6 @@ func TestDenialLedgerPathSitsInTheDataDir(t *testing.T) {
 	}
 }
 
-// A classified denial carries the whole prompt its layer was judged on, and a
-// call no classifier judged carries none. The reader has to hand both back as
-// written: an empty prompt on a static rule would read as a classifier that
-// was shown nothing.
 func TestReadDenialLedgerCarriesTheClassifierPrompt(t *testing.T) {
 	path := filepath.Join(t.TempDir(), DenialLedgerFileName)
 	writeLedger(t, path,

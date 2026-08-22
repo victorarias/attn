@@ -1,9 +1,3 @@
-// The s7 corpus as a fixture. spike-harness/s7-classifier-receipt.js scores
-// real models against these 16 cases; this drives the same cases through the
-// whole extension — static rules, prompt, verdict parsing, 2a/2b routing,
-// cache and breaker — with the model's answer scripted, so what is under test
-// is auto mode's handling of a verdict rather than a model's ability to reach
-// one.
 import { describe, expect, test } from "bun:test";
 import { defaultAutoModeConfig, type AutoModeConfig } from "../automode/config";
 import { createAutoMode } from "../automode/index";
@@ -31,9 +25,9 @@ type Case = {
   name: string;
   tool: string;
   input: Record<string, unknown>;
-  /** An extra user message before the call, as in the s7 corpus. */
+
   tail?: string;
-  /** What the model answers, in order: 2a then, when it runs, 2b. */
+
   answers: Verdict[];
   outcome: "run" | "block";
 };

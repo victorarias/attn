@@ -1,6 +1,3 @@
-// Told up front: a permission system exists, and the way through it is the
-// conversation. denial.ts is the other half, answering one blocked call.
-
 export function autoModeSystemPromptAddendum(): string {
   return [
     "## attn auto mode",

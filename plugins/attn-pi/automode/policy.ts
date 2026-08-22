@@ -1,20 +1,14 @@
-// Everything auto mode answers without a model. Pure and synchronous, and the
-// order IS the policy (docs/plans/2026-08-16-pi-auto-mode.md, "Decision path"):
-// denies, then the allow list, then the static rules.
 import { classifyBashCommand } from "./bash";
 import { matchesAnyPattern, type AutoModeConfig } from "./config";
 import { locatePath } from "./paths";
 
-/** A pending pi tool call, narrowed to what the tree reads. */
 export type ToolCall = {
   toolName: string;
   input: Record<string, unknown>;
 };
 
-/** Tools that only ever read. */
 export const readOnlyTools: readonly string[] = ["read", "grep", "find", "ls"];
 
-/** Tools whose safety is decided by the path they name. */
 export const pathTools: readonly string[] = ["write", "edit"];
 
 export type StaticRule =
@@ -101,19 +95,16 @@ function decideBash(call: ToolCall): StaticDecision {
   return { outcome: "classify", rule: "unjudged-bash", reason: classification.reason };
 }
 
-/** The bare command for `bash`, `<tool> <path-or-pattern>` for everything else. */
 export function callSignature(call: ToolCall): string {
   if (call.toolName === "bash") return stringInput(call, "command").trim();
   const argument = stringInput(call, "path") || stringInput(call, "pattern");
   return argument === "" ? call.toolName : `${call.toolName} ${argument}`;
 }
 
-/** The cache key: one call's signature with whitespace runs collapsed. */
 export function normalizedIntent(call: ToolCall): string {
   return `${call.toolName} ${callSignature(call).replace(/\s+/g, " ").trim()}`;
 }
 
-/** One line naming the call, for the denial the model reads. */
 export function describeCall(call: ToolCall): string {
   const signature = callSignature(call).replace(/\s+/g, " ").trim();
   return call.toolName === "bash" ? `bash: ${signature}` : signature;

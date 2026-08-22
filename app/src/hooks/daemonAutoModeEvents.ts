@@ -1,11 +1,3 @@
-// pi auto mode: the four results the auto mode settings section waits on.
-//
-// Its own module rather than a case in the hook's switch, for the same reason
-// daemonBusEvents.ts is one — the domain is self-contained. Reached from the
-// switch's `default` chain.
-//
-// Design: docs/plans/2026-08-16-pi-auto-mode.md.
-
 import type {
   AutoModeConfigInfo,
   AutoModeDenialInfo,
@@ -15,27 +7,22 @@ import { type PendingRequests, settlePendingRequest } from './daemonPendingReque
 
 export type { AutoModeConfigInfo, AutoModeDenialInfo, AutoModeProposalInfo };
 
-/** The promoted policy plus everything waiting on a human. */
 export interface AutoModeState {
   config: AutoModeConfigInfo;
-  /** Pending only — the daemon resolves promoted and discarded ones away. */
+
   proposals: AutoModeProposalInfo[];
   denials: AutoModeDenialInfo[];
 }
 
-/** What a direct list edit answers with: the config it produced. */
 export interface AutoModePatternEdit {
   config: AutoModeConfigInfo;
 }
 
-/** What a promote answers with: the resolved proposal and the config it produced. */
 export interface AutoModePromotion {
   proposal: AutoModeProposalInfo | null;
   config: AutoModeConfigInfo | null;
 }
 
-// A loosely typed view of the wire event: these arrive as parsed JSON, so every
-// field is checked rather than asserted.
 interface AutoModeDaemonEvent {
   event?: string;
   success?: boolean;
@@ -83,10 +70,6 @@ const toPromotion = (event: AutoModeDaemonEvent): AutoModePromotion => ({
   config: event.config === undefined ? null : toConfig(event.config),
 });
 
-/**
- * Settles an auto mode result, or returns false for an event this module does
- * not own so the caller can keep looking.
- */
 export function handleAutoModeDaemonEvent(
   event: AutoModeDaemonEvent,
   pending: PendingRequests,
@@ -110,9 +93,7 @@ export function handleAutoModeDaemonEvent(
         'Promoting the proposal failed',
       );
       return true;
-    // One event answers both edits, so the settle is tried under each command's
-    // key; only the one actually in flight has a waiter, and settlePendingRequest
-    // reports a miss rather than treating it as a failure.
+
     case 'automode_pattern_result': {
       const settled = settlePendingRequest(
         pending,

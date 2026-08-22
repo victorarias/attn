@@ -328,10 +328,6 @@ describe("call signatures", () => {
   });
 });
 
-// The invariant behind the static rules: nothing that resolves outside the
-// working directory may run without the classifier having judged it. This
-// walks generated paths rather than a list, because the interesting failures
-// are the ones nobody thought to write down.
 describe("property: a path outside the working directory never runs statically", () => {
   const segments = ["..", ".", "src", "work", "repo", "repository", "a b", ".git", ".env", "~", "", "-", "nested"];
 
@@ -366,8 +362,7 @@ describe("property: a path outside the working directory never runs statically",
         expect(decision.outcome).not.toBe("run");
       }
     }
-    // Guard against a generator that only ever produced in-cwd paths, which
-    // would make every assertion above vacuous.
+
     expect(outside).toBeGreaterThan(100);
   });
 });

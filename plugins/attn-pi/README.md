@@ -34,7 +34,7 @@ it on:
 ```
 
 Every field is optional; the models default to the ones the classifier receipt
-in `docs/plans/2026-08-16-pi-auto-mode.md` picked. A file without
+in `spike-harness/s7-classifier-receipt.js` picked. A file without
 `enabled_default` configures auto mode without turning it on.
 
 Each layer's models are an ordered list: the first entry judges, and the rest

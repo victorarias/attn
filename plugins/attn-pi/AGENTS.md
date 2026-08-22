@@ -287,8 +287,9 @@ agent unchanged; everything here that says nisse is this agent in particular.
 
 `automode/` is pi's permission system: a set of static rules plus a
 classifier for everything those rules cannot place, denied conversationally
-rather than through dialogs. Design, receipts and slices:
-[docs/plans/2026-08-16-pi-auto-mode.md](../../docs/plans/2026-08-16-pi-auto-mode.md).
+rather than through dialogs. This section is the design of record; the slice
+plans live under `docs/plans/` and the classifier receipt is
+`spike-harness/s7-classifier-receipt.js`.
 
 - **The decision order in `policy.ts` IS the policy.** Anything added to the
   static rules runs unjudged, so the read-only sets are conservative by

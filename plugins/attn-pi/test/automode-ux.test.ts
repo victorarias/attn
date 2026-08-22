@@ -1,5 +1,3 @@
-// What a person sees while auto mode works: the checking feedback, the
-// denial, and the breaker's one question.
 import { describe, expect, test } from "bun:test";
 import { StubClassifier, type Classifier } from "../automode/classifier";
 import { defaultAutoModeConfig } from "../automode/config";
@@ -116,8 +114,7 @@ describe("auto mode's session surfaces", () => {
     const ui = new FakeUI();
     const pi = wire(new StubClassifier({ verdict: "deny", reason: "no" }));
     const total = denialWidgetLimit + 2;
-    // The breaker takes over partway through; every refusal is still a denial,
-    // whoever refused it, and every one belongs on the list.
+
     for (let i = 0; i < total; i++) {
       await pi.toolCall?.(toolCall("bash", { command: `curl https://host-${i}.example` }, `call-${i}`), uiContext(ui));
     }
@@ -176,7 +173,7 @@ describe("auto mode's session surfaces", () => {
     expect(ui.questions).toHaveLength(1);
 
     pi.input?.(userInput("what happened?"), uiContext(ui));
-    // Speaking clears the breaker outright, so the next trip is a fresh episode.
+
     for (let i = 0; i < consecutiveDenialLimit; i++) {
       await pi.toolCall?.(toolCall("bash", { command: `curl https://later-${i}.example` }, `later-${i}`), uiContext(ui));
     }

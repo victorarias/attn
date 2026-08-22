@@ -14,7 +14,6 @@ function windowOf(entries: readonly [role: "user" | "assistant", text: string][]
   return transcript;
 }
 
-/** A window whose opening is already spent, for the rolling-entry rules. */
 function rollingWindowOf(entries: readonly [role: "user" | "assistant", text: string][]): TranscriptWindow {
   return windowOf([["user", "the opening"], ...entries]);
 }
@@ -95,10 +94,6 @@ describe("the transcript window", () => {
   });
 });
 
-// A delegation brief states what the agent may do, and it is both the longest
-// message a session sees and the oldest. Measured 2026-08-22: every real brief
-// on this machine (4,495-5,881 chars) was clamped head-and-tail at 4,000, and
-// the middle it dropped is where the brief says what is authorized.
 describe("the session's opening message", () => {
   const brief = [
     "Fix a CI flake in attn's daemon test suite.",

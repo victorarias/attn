@@ -19,18 +19,8 @@ import type { UsageLike } from "../automode/usage";
 
 type Call = { model: ModelLike; context: CompletionContext; options?: CompletionOptions };
 
-/**
- * A deny carries what its layer was sent, for the ledger. The routing tests
- * care only that it is there and names the right layer; the test below pins it
- * to the exact bytes the provider was handed.
- */
 const judgedOn = (layer: "2a" | "2b") => ({ layer, system: expect.any(String), user: expect.any(String) });
 
-/**
- * Fake pi ModelRegistry: answers each completion from a queued script and
- * records what it was asked, so a test can read the prompt the classifier
- * built without reaching a provider.
- */
 class FakeRegistry implements ModelRegistryLike {
   readonly calls: Call[] = [];
   auth: RequestAuthLike = { ok: true, apiKey: "key", headers: { "x-test": "1" } };
@@ -79,12 +69,10 @@ function says(text: string, usage?: UsageLike): CompletionResult {
   return { content: [{ type: "text", text }], usage, stopReason: "stop" };
 }
 
-/** One model's whole allowance of attempts, all of them thrown. */
 function errors(count: number, text: string): Error[] {
   return Array.from({ length: count }, () => new Error(text));
 }
 
-/** The same, as the provider answering with an error instead of throwing. */
 function providerErrors(count: number, text: string): CompletionResult[] {
   return Array.from({ length: count }, () => ({ stopReason: "error", errorMessage: text }));
 }

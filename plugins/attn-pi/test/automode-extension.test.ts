@@ -165,8 +165,6 @@ describe("auto mode extension", () => {
     expect(classifier.requests[0]?.transcript).toEqual([{ role: "user", text: "push it" }]);
   });
 
-  // The window stores a clamped form past the entry cap, so a dedupe comparing
-  // raw text would miss exactly the message big enough to swamp the window.
   test("an oversized message arriving on both seams is recorded once", async () => {
     const classifier = new StubClassifier({ verdict: "deny", reason: "no" });
     const pi = wire(classifier);
@@ -183,7 +181,7 @@ describe("auto mode extension", () => {
 
     pi.say("go ahead, force-push it", undefined, "extension");
     expect((await push())?.block).toBe(true);
-    // Answered from the deny cache: the extension's prompt did not drop it.
+
     expect(classifier.requests).toHaveLength(1);
 
     pi.say("go ahead, force-push it");

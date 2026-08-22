@@ -1,19 +1,13 @@
-// Per-session state: the conversation window, the verdict cache, and the
-// circuit breaker. The user speaking is auto mode's approval channel, so it
-// resets the deny cache and the breaker. The window is never reset.
 import type { Classifier, ClassifierPrompt } from "./classifier";
 import type { AutoModeConfig } from "./config";
 import { denialToolResult } from "./denial";
 import { decideStatically, describeCall, normalizedIntent, type StaticRule, type ToolCall } from "./policy";
 import { TranscriptWindow } from "./transcript";
 
-/** Denials in a row, without an allowed call between them. */
 export const consecutiveDenialLimit = 3;
 
-/** Denials since the user last said anything. */
 export const totalDenialLimit = 20;
 
-/** Who decided. `classifier-unavailable` is the one that is not a judgment. */
 export type DecisionRule =
   | StaticRule
   | "cached-allow"
@@ -32,9 +26,9 @@ export type SessionDecision =
       action: string;
       reason: string;
       toolResult: string;
-      /** Set only when a classifier ran for THIS call; a cached deny carries none. */
+
       prompt?: ClassifierPrompt;
-      /** False when the user's approval cannot lift this block. */
+
       clearable?: boolean;
     };
 
@@ -42,7 +36,7 @@ export type BreakerState = {
   consecutive: number;
   total: number;
   tripped: boolean;
-  /** Every block this episode was an outage, so it must not read as a refusal. */
+
   outage: boolean;
 };
 
@@ -72,14 +66,12 @@ export class AutoModeSession {
     };
   }
 
-  /** The user said something: their message may be the approval. */
   noteUserInput(text = ""): void {
     this.transcript.record("user", text);
     for (const [key, entry] of this.cache) if (entry.verdict === "deny") this.cache.delete(key);
     this.clearCounters();
   }
 
-  /** Counters only: resuming judges calls again, it approves nothing. */
   resumeAfterBreaker(): void {
     this.clearCounters();
   }
@@ -90,7 +82,6 @@ export class AutoModeSession {
     this.totalOutages = 0;
   }
 
-  /** The agent said something. Only what it SAID: never a tool result. */
   noteAssistantText(text: string): void {
     this.transcript.record("assistant", text);
   }
@@ -99,7 +90,6 @@ export class AutoModeSession {
     const staticDecision = decideStatically(call, this.config, options.cwd);
     if (staticDecision.outcome === "run") return this.allowed(staticDecision.rule);
     if (staticDecision.outcome === "block") {
-      // The tree is pure, so an approved retry blocks identically.
       return this.denied(call, staticDecision.rule, staticDecision.reason, { outage: false, clearable: false });
     }
 
@@ -125,7 +115,6 @@ export class AutoModeSession {
     });
     const prompt = judged.verdict === "deny" ? judged.prompt : undefined;
     if (judged.verdict === "deny" && judged.unavailable === true) {
-      // Uncached: a remembered outage would outlive the endpoint coming back.
       return this.denied(call, "classifier-unavailable", judged.reason, { outage: true, judged: false, prompt });
     }
     const rule: DecisionRule = judged.layer ? `classifier-${judged.layer}` : "classifier";
