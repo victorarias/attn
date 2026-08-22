@@ -26,7 +26,10 @@ change: >
   then refused the work for want of an authorization it had been handed and
   could not see. A session's opening message now keeps its own seat in that
   window, with its own much larger cap, so what the brief authorized arrives
-  whole however long the session runs. Finally, a blocked call's local record
+  whole however long the session runs. An answer auto mode cannot read as a
+  verdict is no longer remembered either. It already told the agent to retry,
+  and a remembered one answered the retry from the cache without a model ever
+  seeing the call again. Finally, a blocked call's local record
   now keeps the whole prompt the classifier was judged on, so a wrong verdict
   can be told apart from a conversation window that never carried the sentence
   that mattered. That is exactly what went wrong above, and it took replaying

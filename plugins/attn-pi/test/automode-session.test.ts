@@ -169,6 +169,20 @@ describe("verdict cache", () => {
     expect(decision.toolResult).toContain("could not judge");
   });
 
+  test("an answer that is not a verdict is not cached, so the retry it asks for reaches a model", async () => {
+    const classifier = new StubClassifier({
+      verdict: "deny",
+      layer: "2a",
+      unreadable: true,
+      reason: "the classifier answered something this cannot read as a verdict: hello",
+    });
+    const { session } = sessionWith(classifier);
+    await session.decide(bash("git push origin main"), { cwd });
+    const retry = await session.decide(bash("git push origin main"), { cwd });
+    expect(classifier.requests).toHaveLength(2);
+    expect(retry).toMatchObject({ outcome: "block", rule: "classifier-2a" });
+  });
+
   test("a model that looked and refused still points at the user's approval", async () => {
     const classifier = new StubClassifier({
       verdict: "deny",

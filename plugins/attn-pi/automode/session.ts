@@ -127,10 +127,13 @@ export class AutoModeSession {
         ? judged.reason
         : `auto mode could not judge this call confidently${judged.reason ? `: ${judged.reason}` : ""}`;
     const boundary = judged.verdict === "deny" && judged.boundary === true;
-    this.cache.set(intent, { verdict: "deny", reason, ...(boundary ? { boundary: true } : {}) });
+    const unreadable = judged.verdict === "deny" && judged.unreadable === true;
+    if (!unreadable) {
+      this.cache.set(intent, { verdict: "deny", reason, ...(boundary ? { boundary: true } : {}) });
+    }
     return this.denied(call, rule, reason, {
       outage: false,
-      judged: judged.verdict !== "deny" || judged.unreadable !== true,
+      judged: !unreadable,
       clearable: !boundary,
       prompt,
     });
