@@ -86,6 +86,10 @@ var wireFixtures = map[string]wireFixture{
 		events:  []string{protocol.EventSessionStateChanged},
 		subject: (*wireWorld).session,
 	},
+	FactSessionTerminalBuildChanged: {
+		events:  []string{protocol.EventSessionStateChanged},
+		subject: (*wireWorld).session,
+	},
 	// The one session fact that does not re-push the session: the app is told
 	// its annotatable window moved and re-reads it with session_messages_get.
 	FactSessionAssistantWindowChanged: {

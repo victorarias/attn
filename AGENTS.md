@@ -719,15 +719,31 @@ published asset for the new key yet), when the download/verify fails, or when
 `ATTN_VT_FROM_SOURCE=1` forces it. `GHOSTTY_VT_GOOS`/`GHOSTTY_VT_GOARCH` scope the
 script to a target when cross-building (the Makefile sets them).
 
-**Changing the VT source.** After editing the shared `ghostty-vt.pin`, rebuild
-the vendored browser core with `app/scripts/build-ghostty-vt-wasm.sh`; it also
-rewrites `app/vendor/ghostty-vt/ghostty-vt.lock`, which normal builds and tests
-verify against the pin, adapter, recipe, and binary. Then run
-`make publish-native-vt` (`scripts/publish-libghostty-vt.sh`): it cross-builds **every** supported
-native target from one host (needs zig 0.16.x and an authenticated `gh`), uploads
-all the keyed assets, and rewrites `ghostty-vt-native.lock` with the shared key +
-per-platform shas. **Commit both regenerated locks when the shared pin changes**
-— the build depends on them, so committing them is what makes every checkout
-reject stale artifacts. Shared native logic lives in
-`scripts/lib/libghostty-vt.sh`. See
+**Changing the VT source.** The pin must be the commit upstream's rolling `tip`
+release was last built from, and never a ghostty tag: only `tip` publishes
+`ghostty-vt.wasm`, and its assets are overwritten on every commit to main, so
+the bytes for any older commit are simply gone. Read `tip`'s target commit,
+write it to `ghostty-vt.pin`, and mirror in the same sitting.
+
+Then, in order:
+
+1. `make publish-ghostty-vt-wasm` (`scripts/publish-ghostty-vt-wasm.sh`) mirrors
+   upstream's prebuilt browser module under a pin-keyed name we control and
+   rewrites `ghostty-vt-wasm.lock`. It refuses when the pin disagrees with tip.
+2. `make publish-native-vt` (`scripts/publish-libghostty-vt.sh`) cross-builds
+   **every** supported native target from one host (needs zig 0.16.x and an
+   authenticated `gh`), uploads the keyed assets, and rewrites
+   `ghostty-vt-native.lock` with the shared key + per-platform shas.
+
+**Commit both regenerated locks when the shared pin changes**: the build depends
+on them, so committing them is what makes every checkout reject stale artifacts.
+Shared native logic lives in `scripts/lib/libghostty-vt.sh`.
+
+A bump moves terminal behavior and can move the wasm ABI, so expect to re-take
+receipts rather than only re-run tests. `app/src/ghostty/abi.layout.test.ts`
+checks the transcribed struct offsets against the module's own
+`ghostty_type_json`; `go test ./internal/pty -run TestKittyWireRewriteCorpus
+-update` regenerates the parity corpus, which the wasm side then has to agree
+with; and the tripwire comments in `internal/pty/wirefeed.go` cite measurements
+at a named pin. See
 [docs/plans/2026-07-22-server-authoritative-terminal.md](docs/plans/2026-07-22-server-authoritative-terminal.md).

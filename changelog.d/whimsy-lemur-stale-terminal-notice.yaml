@@ -1,0 +1,18 @@
+kind: added
+area: terminal
+change: >
+  A session whose pty-worker was started before an update that moved the
+  terminal engine now shows a notice on its pane saying it is running an
+  older terminal, pointing at the sidebar's ••• menu and Reload session,
+  and saying future updates handle it automatically. Dismissible, and it
+  clears on its own once the session is reloaded.
+symptom: >
+  Updating the app while sessions were open left those sessions parsing
+  with the old terminal while the app rendered with the new one. Nothing
+  said so, and the pane could come back garbled after an image or a
+  redraw with no way to fix it short of guessing at a reload.
+notes: >
+  Judged from a build tag derived from the two ghostty locks, not from
+  the attn version, so an ordinary release disturbs no running session.
+  The in-place worker upgrade that makes this invisible is the follow-up
+  the notice's last line promises; it must land in the same release.

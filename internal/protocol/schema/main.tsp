@@ -174,6 +174,7 @@ model Session {
   cost_usd?: float64;           // Accrued token cost in USD. Present only after usage exists and every observed model has a price.
   cost_unknown?: boolean;       // True after usage exists when any observed model has no price. Mutually exclusive with cost_usd; both absent means no usage yet.
   automation?: AutomationProvenance; // Present when this session was launched by an automation; latest run wins for a continuity thread.
+  terminal_build_stale?: boolean; // True when this session's pty-worker was built against a different libghostty-vt than the daemon, which happens when the app updates under a running session. The two then hold different terminal implementations and stop agreeing about the grid, so the app offers a reload. Derived at broadcast from the format tag the worker reports at its handshake; never stored, and absent for every same-build session, which is all of them outside an upgrade window.
   todos?: string[];             // Optional: can be empty/absent
   last_seen: string;            // ISO timestamp, always set
 }

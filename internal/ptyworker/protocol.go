@@ -226,6 +226,16 @@ type HelloResult struct {
 	RPCMinor         int    `json:"rpc_minor"`
 	DaemonInstanceID string `json:"daemon_instance_id"`
 	SessionID        string `json:"session_id"`
+	// SnapshotFormat is the worker's buildinfo.SnapshotFormat: the identity of
+	// the libghostty-vt pair this worker was built against. A worker outlives an
+	// install, so after a ghostty bump the daemon and the worker hold different
+	// terminal implementations and stop agreeing about the grid. The daemon
+	// compares this against its own and tells the app to offer a reload.
+	//
+	// Additive: every worker built before this field omits it, and an absent
+	// format reads as a mismatch. That is the point: those are exactly the
+	// workers a bump strands.
+	SnapshotFormat string `json:"snapshot_format,omitempty"`
 }
 
 type InfoResult struct {

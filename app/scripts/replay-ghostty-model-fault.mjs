@@ -226,7 +226,7 @@ async function createTerminal(cols, rows) {
   });
   const e = instance.exports;
   const dv = () => new DataView(e.memory.buffer);
-  const scratch = e.ghostty_wasm_alloc_u8_array(16);
+  const scratch = e.ghostty_wasm_alloc(16);
 
   const out = e.ghostty_wasm_alloc_opaque();
   e.ghostty_terminal_new(0, out, cols, rows);
@@ -238,10 +238,10 @@ async function createTerminal(cols, rows) {
     write(data) {
       const payload = typeof data === 'string' ? new TextEncoder().encode(data) : data;
       if (payload.length === 0) return;
-      const ptr = e.ghostty_wasm_alloc_u8_array(payload.length);
+      const ptr = e.ghostty_wasm_alloc(payload.length);
       new Uint8Array(e.memory.buffer).set(payload, ptr);
       e.ghostty_terminal_vt_write(handle, ptr, payload.length);
-      e.ghostty_wasm_free_u8_array(ptr, payload.length);
+      e.ghostty_wasm_free(ptr, payload.length);
     },
     resize(nextCols, nextRows) {
       e.ghostty_terminal_resize(handle, nextCols, nextRows);

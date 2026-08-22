@@ -269,6 +269,18 @@ type KittyImageProvider interface {
 	KittyImage(ctx context.Context, sessionID string, imageID uint32) (pty.KittyImage, error)
 }
 
+// TerminalBuildProvider reports the libghostty-vt build identity a live
+// session's terminal was compiled against (buildinfo.SnapshotFormat). A worker
+// process outlives an install, so after a ghostty bump the daemon and a
+// still-running worker hold different terminal implementations and stop
+// agreeing about the grid; the daemon compares the two and has the app offer a
+// reload. known is false while the answer is still unknown, which is not a
+// verdict. Backends without a separate process implement it by answering for
+// themselves.
+type TerminalBuildProvider interface {
+	SessionTerminalBuild(sessionID string) (format string, known bool)
+}
+
 type SessionLivenessProber interface {
 	SessionLikelyAlive(ctx context.Context, sessionID string) (bool, error)
 }

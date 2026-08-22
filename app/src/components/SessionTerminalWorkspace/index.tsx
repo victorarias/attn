@@ -1,6 +1,7 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { type BlockStateSnapshot, type GhosttyTerminalHandle, type PlacementStateSnapshot } from '../GhosttyTerminal';
 import { AnnotatedTerminal, type SessionAnnotationApi } from '../TerminalAnnotations/AnnotatedTerminal';
+import { TerminalStaleBuildNotice } from '../TerminalStaleBuildNotice';
 import { RenamePopover } from '../RenamePopover';
 import { StateIndicator } from '../StateIndicator';
 import { useShortcut } from '../../shortcuts/useShortcut';
@@ -138,6 +139,10 @@ interface SessionTerminalWorkspaceProps {
     // True while the user's standing dismissal covers this session's next
     // auto-settle. Excludes both of the above: arming is what stops the timer.
     autoSettleDismissArmed?: boolean;
+    // True when this session's pty-worker holds a different libghostty-vt than
+    // the app, which happens when the app updates under a running session. The
+    // daemon judges it; the pane only offers the reload that fixes it.
+    terminalBuildStale?: boolean;
     isActive?: boolean;
     presentation?: Presentation;
     // The seed this session reports to, when a delegation bound one. Drives the
@@ -292,6 +297,10 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
     // Drag-to-dock state. The tile stays docked in the daemon tree throughout
     // the drag — this is a transient preview (ghost + target highlight) that
     // resolves to a single dock command on drop.
+    // Sessions whose older-terminal notice the user has waved off. Local and
+    // per-mount on purpose: the daemon's verdict is the durable half, and the
+    // condition ends for good the moment the session is reloaded.
+    const [staleBuildDismissed, setStaleBuildDismissed] = useState<ReadonlySet<string>>(() => new Set());
     const [draggingLeafId, setDraggingLeafId] = useState<string | null>(null);
     const [dockTarget, setDockTarget] = useState<DockTarget | null>(null);
     const [ghostPos, setGhostPos] = useState<{ x: number; y: number } | null>(null);
@@ -1029,6 +1038,11 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
               ) : null}
             </div>
             <div className="workspace-pane-body">
+              {paneSession?.terminalBuildStale && !staleBuildDismissed.has(agentPane.sessionId) ? (
+                <TerminalStaleBuildNotice
+                  onDismiss={() => setStaleBuildDismissed((prev) => new Set(prev).add(agentPane.sessionId))}
+                />
+              ) : null}
               {isPaneStarting || isPaneFailed ? (
                 <div className={`workspace-pane-status workspace-pane-status--${paneStatus}`}>
                   <span className="workspace-pane-status-spinner" aria-hidden="true" />
@@ -1149,6 +1163,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
       enabled,
       focusLeaf,
       handleGhosttyTerminalReady,
+      staleBuildDismissed,
       paneFrameStyle,
       panePaths,
       renderedPaneBounds,

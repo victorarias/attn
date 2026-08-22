@@ -42,8 +42,10 @@ const (
 	kittyResyncStampWithoutDelta = "kitty_stamp_without_delta"
 	// kittyResyncMarginMode: DECLRMM (DEC mode 69) was on. A margin-box scroll
 	// moves text without moving rows, so the tracked pair reads no scroll and no
-	// SU goes out. Measured: margins `\x1b[4;14s` + placement at the box bottom
-	// climbs the worker's text two rows while the client's stays put. Fires on
+	// SU goes out. Measured at da5ddcb: margins `\x1b[4;14s` + placement at the
+	// box bottom climbs the worker's text a row while the client's stays put
+	// (it was two rows at d760ee9; how far a placement scrolls is upstream's
+	// call, the divergence is not). Fires on
 	// every described dispatch while margins are on — a tripwire, not a repair;
 	// no emitter in the A4 sweep enables DECLRMM.
 	kittyResyncMarginMode = "kitty_layout_margin_mode"
@@ -51,18 +53,31 @@ const (
 	// express (ghostty clamps SU to the scroll region height), so the client's
 	// history would come out short. A tripwire on this ghostty pin: a placement's
 	// scroll no longer tracks the row count `r=` claims and stays inside the
-	// screen, so `r=` — the only knob that dials it — no longer reaches. Probed
-	// at 164 shapes (heights 1..40 and 2^n up to 129, cursor at the top, second
-	// row, and last row, on 2-, 3-, 4-, 8- and 12-row screens): none reached
-	// this, and worker and wire agreed on every one. It stays because the
-	// divergence it names is silent and a pin bump restoring proportional
-	// scrolling would ship it.
+	// screen, so `r=`, the only knob that dials it, no longer reaches. Re-probed
+	// at da5ddcb over 645 shapes (heights 1..40 plus 64, 128 and 129, cursor on
+	// the first, second and last row, on 2-, 3-, 4-, 8- and 12-row screens):
+	// none reached this, and worker and client agreed on every one. It stays
+	// because the divergence it names is silent and a pin bump restoring
+	// proportional scrolling would ship it.
 	kittyResyncScrollClamped = "kitty_layout_scroll_clamped"
 	// kittyResyncPendingWrap: the cursor sat in the LAST COLUMN, where a
-	// dispatch may consume a pending-wrap bit CursorPos cannot see. Measured:
-	// print a screen's width, place an image, print one more character — the
-	// worker stays on row 0, the client wraps to row 1. Fires on the column
-	// itself; every emitter in the A4 sweep positions the cursor first.
+	// dispatch may consume a pending-wrap bit CursorPos cannot see. That
+	// divergence was measured at d760ee9: print a screen's width, place an
+	// image, print one more character, and the worker stayed on row 0 while the
+	// client wrapped to row 1.
+	//
+	// At da5ddcb it is gone. Re-probed over 336 shapes (2-, 3-, 8-, 20- and
+	// 80-column screens of 2, 3, 8 and 24 rows, images 1..3 cells wide by 1..3
+	// rows, on the first and last row): the placement's own cursor move now
+	// describes the wrap, and worker and client agreed on every one.
+	//
+	// It stays, and the cost of that is worth naming: this fires on the COLUMN,
+	// not on a measured divergence, so it resyncs on 336 of 336. It is free only
+	// because no emitter in the A4 sweep places an image without positioning the
+	// cursor first. What it buys is that nothing exposes the pending-wrap bit,
+	// so 336 agreeing shapes do not prove the wire describes it in general, and
+	// the failure it names is silent. Removing it is a decision about trusting
+	// the description, on its own evidence.
 	kittyResyncPendingWrap = "kitty_layout_pending_wrap"
 )
 

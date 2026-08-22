@@ -722,13 +722,18 @@ func TestWireFeedResyncsWhileLeftRightMarginsAreSet(t *testing.T) {
 	}
 	// Described in full anyway: the cursor moves are the part of the measurement
 	// margins do not spoil, and they are worth having until the snapshot lands.
-	// The one thing missing against the control is its SU — the scroll that
+	// The one thing missing against the control is its SU, the scroll that
 	// happened inside the margin box and that nothing on this side could see,
 	// which is the whole reason the reason string exists.
-	if got, want := string(control.lastWire), string(wireST)+"\x1b[2S\x1b[1A\x1b[2C"; got != want {
-		t.Fatalf("control wire = %q, want %q: without margins the same placement scrolls two rows and says so", got, want)
+	//
+	// Both byte strings are receipts taken against the pinned ghostty; how far
+	// a placement scrolls is upstream's call, so a pin bump moves them. What
+	// must survive a bump is the difference: the control carries an SU and the
+	// tripwire carries the same cursor moves without it.
+	if got, want := string(control.lastWire), string(wireST)+"\x1b[1S\x1b[2C"; got != want {
+		t.Fatalf("control wire = %q, want %q: without margins the same placement scrolls a row and says so", got, want)
 	}
-	if got, want := string(m.lastWire), string(wireST)+"\x1b[1A\x1b[2C"; got != want {
+	if got, want := string(m.lastWire), string(wireST)+"\x1b[2C"; got != want {
 		t.Errorf("wire = %q, want the control's cursor moves without its SU (%q): a resync is not a stop order",
 			got, want)
 	}
@@ -772,20 +777,30 @@ func TestWireFeedResyncsWithACursorInTheLastColumn(t *testing.T) {
 		t.Fatalf("resync = %q, want %q: the placement consumed a pending wrap nothing could measure",
 			m.lastResync, kittyResyncPendingWrap)
 	}
-	// Described in full, same as the margin tripwire: the measurement read the
-	// same column and row on both sides of the dispatch, so there is no movement
-	// to describe and the wire carries the abort alone. A resync is not a stop
-	// order — it is what repairs what the description could not say.
-	if got, want := string(m.lastWire), string(wireST); got != want {
-		t.Errorf("wire = %q, want %q: the dispatch is still described, and it measured no movement", got, want)
+	// Described in full, same as the margin tripwire. At the pinned ghostty the
+	// measurement now catches the wrap itself: the cursor moves down a row and
+	// back to column 0, which is exactly what the deferred wrap did.
+	if got, want := string(m.lastWire), string(wireST)+"\x1b[1B\x1b[19D"; got != want {
+		t.Errorf("wire = %q, want %q: the dispatch is still described, wrap included", got, want)
 	}
 
+	// And so both sides converge. That was NOT true at the previous pin, where
+	// the placement consumed the wrap invisibly and the two cursors parted
+	// company here; upstream moved, and this case stopped demonstrating the
+	// divergence the resync exists for.
+	//
+	// The resync stays anyway, and this asserts it stays: no accessor exposes
+	// the pending-wrap bit, so nothing proves the measurement covers it in
+	// general. One case converging at one pin is not that proof. Whether the
+	// resync still earns its cost is a question to answer on its own, with a
+	// case that still diverges, not as a side effect of a bump.
 	m.write("y")
 	wx, wy := m.worker.CursorPos()
 	cx, cy := m.client.CursorPos()
-	if wx == cx && wy == cy {
-		t.Errorf("the cursors agree at (%d,%d), so the case no longer exercises a consumed pending wrap", wx, wy)
+	if wx != cx || wy != cy {
+		t.Errorf("cursors = worker (%d,%d), client (%d,%d): the wire described the wrap, so they must agree", wx, wy, cx, cy)
 	}
+	m.agree(t, "after a placement consumed the pending wrap")
 }
 
 // A limit someone can hit is a limit they must see. Ghostty refuses an image

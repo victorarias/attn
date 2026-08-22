@@ -44,6 +44,12 @@ export interface Session {
     readonly state_reason?: string;
     readonly state_since: string;
     readonly state_updated_at: string;
+    /**
+     * True when this session's pty-worker was built against a different
+     * libghostty-vt than the daemon, which happens when the app updates under a
+     * running session. The app offers a reload; nothing else needs to act on it.
+     */
+    readonly terminal_build_stale?: boolean;
     readonly ticket_unread?: boolean;
     readonly todos?: readonly string[];
     readonly turn_opened_at?: string;
