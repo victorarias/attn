@@ -1,0 +1,8 @@
+kind: fixed
+area: app
+change: >
+  The dashboard header no longer animates its gradient. The header text
+  painted every frame for as long as attn was open, including while another
+  view was on top of it, because the dashboard is always mounted and the
+  animated property cannot be composited. On an idle window with no sessions
+  that cost 14.0% of a CPU core; it is now 2.1%.
