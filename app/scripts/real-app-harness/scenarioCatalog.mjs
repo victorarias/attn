@@ -167,6 +167,11 @@ export const scenarioCatalog = [
     command: ['pnpm', 'run', 'real-app:scenario-terminal-block-copy'],
   },
   {
+    id: 'terminal-scrollback-colors',
+    label: 'Terminal scrollback keeps indexed and truecolor cell colors',
+    command: ['pnpm', 'run', 'real-app:scenario-terminal-scrollback-colors'],
+  },
+  {
     id: 'terminal-annotations',
     label: 'Annotate a live claude turn; it survives the next turn and an app relaunch',
     command: ['pnpm', 'run', 'real-app:scenario-terminal-annotations'],

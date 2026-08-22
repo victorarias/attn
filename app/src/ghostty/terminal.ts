@@ -12,6 +12,7 @@ import {
   COLORS_OFF_CURSOR,
   COLORS_OFF_CURSOR_HAS_VALUE,
   COLORS_OFF_FOREGROUND,
+  COLORS_OFF_PALETTE,
   COLORS_SIZE,
   CURSOR_STYLE_BAR,
   CURSOR_STYLE_UNDERLINE,
@@ -48,12 +49,18 @@ import {
   SNAPSHOT_DATA_PROGRESS_ROWS,
   STYLE_OFF_BLINK,
   STYLE_OFF_BOLD,
+  STYLE_OFF_BG,
+  STYLE_OFF_BG_KIND,
   STYLE_OFF_FAINT,
+  STYLE_OFF_FG,
+  STYLE_OFF_FG_KIND,
   STYLE_OFF_INVERSE,
   STYLE_OFF_INVISIBLE,
   STYLE_OFF_ITALIC,
   STYLE_OFF_STRIKETHROUGH,
   STYLE_OFF_UNDERLINE,
+  STYLE_COLOR_PALETTE,
+  STYLE_COLOR_RGB,
   STYLE_SIZE,
   TERMINAL_DATA_ACTIVE_SCREEN,
   TERMINAL_DATA_COLS,
@@ -672,6 +679,41 @@ export class GhosttyTerminal {
     return { fg, bg: { r: bgBytes[0], g: bgBytes[1], b: bgBytes[2] } };
   }
 
+  /**
+   * The resolved 256-color palette, for decoding scrollback style slots. Read
+   * once per getScrollbackLine call; the returned view aliases wasm memory and
+   * is only valid until the next allocation-growing call.
+   */
+  private renderPalette(): Uint8Array | null {
+    this.sync();
+    this.dv().setUint32(this.pColors, COLORS_SIZE, true);
+    if (this.e.ghostty_render_state_colors_get(this.state, this.pColors) !== GHOSTTY_SUCCESS) return null;
+    return new Uint8Array(this.e.memory.buffer, this.pColors + COLORS_OFF_PALETTE, 256 * 3);
+  }
+
+  /** Fill a cell's fg/bg from its style struct's color slots (see abi.ts). */
+  private applyStyleColors(cell: GhosttyCell, defaults: { fg: RGB; bg: RGB }, palette: Uint8Array | null): void {
+    const dv = this.dv();
+    const resolve = (kindOff: number, valueOff: number, def: RGB): RGB => {
+      const kind = dv.getUint32(this.pStyle + kindOff, true);
+      if (kind === STYLE_COLOR_RGB) {
+        const value = dv.getUint32(this.pStyle + valueOff, true);
+        return { r: value & 0xff, g: (value >>> 8) & 0xff, b: (value >>> 16) & 0xff };
+      }
+      if (kind === STYLE_COLOR_PALETTE && palette) {
+        const index = dv.getUint32(this.pStyle + valueOff, true);
+        if (index < 256) {
+          return { r: palette[index * 3], g: palette[index * 3 + 1], b: palette[index * 3 + 2] };
+        }
+      }
+      return def;
+    };
+    const fg = resolve(STYLE_OFF_FG_KIND, STYLE_OFF_FG, defaults.fg);
+    cell.fg_r = fg.r; cell.fg_g = fg.g; cell.fg_b = fg.b;
+    const bg = resolve(STYLE_OFF_BG_KIND, STYLE_OFF_BG, defaults.bg);
+    cell.bg_r = bg.r; cell.bg_g = bg.g; cell.bg_b = bg.b;
+  }
+
   getColors(): RenderStateColors {
     this.sync();
     this.dv().setUint32(this.pColors, COLORS_SIZE, true);
@@ -766,6 +808,7 @@ export class GhosttyTerminal {
   getScrollbackLine(offset: number): GhosttyCell[] | null {
     if (offset < 0 || offset >= this.getScrollbackLength()) return null;
     const defaults = this.defaultColors();
+    const palette = this.renderPalette();
     const line: GhosttyCell[] = new Array(this._cols);
     for (let x = 0; x < this._cols; x += 1) {
       const cell = newCell();
@@ -785,6 +828,7 @@ export class GhosttyTerminal {
         this.dv().setUint32(this.pStyle, STYLE_SIZE, true);
         if (this.e.ghostty_grid_ref_style(this.pRef, this.pStyle) === GHOSTTY_SUCCESS) {
           cell.flags = this.styleFlags(this.pStyle);
+          this.applyStyleColors(cell, defaults, palette);
         }
       }
       const graphemes = this.graphemeCodepoints(this.pRef);
