@@ -1154,6 +1154,13 @@ func TestDispatchLeavesAParkedRuntimeParked(t *testing.T) {
 		return ok && snapshot.Phase == supervise.PhaseParked
 	})
 	parked, _ := d.appRuntimeSnapshot()
+	// The supervisor sets the parked phase and releases its lock before calling
+	// OnGiveUp, so the phase above is visible a moment before the notification
+	// exists — under a loaded runner the write can still be in flight when the
+	// one-notification pin below runs. Wait for the write itself.
+	waitFor(t, "the app-runtime-parked notification to be written", func() bool {
+		return len(appNotifications(t, d, notificationKindAppRuntimeParked)) == 1
+	})
 
 	for seq := int64(1); seq <= 3; seq++ {
 		err := d.deliverAppEvent(context.Background(), "greeter", appEvent("ticket.created", "tk-1", seq))
