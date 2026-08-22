@@ -3,7 +3,10 @@ import type { ClassifierRequest } from "../automode/classifier";
 import { defaultAutoModeConfig, type AutoModeConfig } from "../automode/config";
 import {
   attemptsPerModel,
+  classifierCacheRetention,
   classifierThinkingLevel,
+  harmMaxTokens,
+  intentMaxTokens,
   ModelClassifier,
   type CompletionContext,
   type CompletionOptions,
@@ -13,17 +16,14 @@ import {
   type ProviderLike,
   type RequestAuthLike,
 } from "../automode/model-classifier";
-import { classifierSystemPrompt, parseVerdict } from "../automode/prompt";
+import { blockLine, parseSeverity, stageOneAllowCeiling } from "../automode/prompt";
 import type { TranscriptEntry } from "../automode/transcript";
 import type { UsageLike } from "../automode/usage";
 
 type Call = { model: ModelLike; context: CompletionContext; options?: CompletionOptions };
 
-/**
- * Fake pi ModelRegistry: answers each completion from a queued script and
- * records what it was asked, so a test can read the prompt the classifier
- * built without reaching a provider.
- */
+const judgedOn = (layer: "harm" | "intent") => ({ layer, system: expect.any(String), user: expect.any(String) });
+
 class FakeRegistry implements ModelRegistryLike {
   readonly calls: Call[] = [];
   auth: RequestAuthLike = { ok: true, apiKey: "key", headers: { "x-test": "1" } };
@@ -72,18 +72,25 @@ function says(text: string, usage?: UsageLike): CompletionResult {
   return { content: [{ type: "text", text }], usage, stopReason: "stop" };
 }
 
-/** One model's whole allowance of attempts, all of them thrown. */
 function errors(count: number, text: string): Error[] {
   return Array.from({ length: count }, () => new Error(text));
 }
 
-/** The same, as the provider answering with an error instead of throwing. */
 function providerErrors(count: number, text: string): CompletionResult[] {
   return Array.from({ length: count }, () => ({ stopReason: "error", errorMessage: text }));
 }
 
-function verdictJSON(verdict: string, reason: string, highStakes = false): CompletionResult {
-  return says(JSON.stringify({ verdict, reason, high_stakes: highStakes }));
+function graded(severity: number, category?: string, usage?: UsageLike): CompletionResult {
+  const tail = category ? `<category>${category}</category>` : "";
+  return says(`<severity>${severity}</severity>${tail}`, usage);
+}
+
+const routine = () => graded(stageOneAllowCeiling - 5);
+
+const dangerous = () => graded(stageOneAllowCeiling + 20);
+
+function messagesOf(call: Call | undefined): string[] {
+  return (call?.context.messages ?? []).map((message) => message.content[0]?.text ?? "");
 }
 
 function request(overrides: Partial<ClassifierRequest> = {}): ClassifierRequest {
@@ -100,47 +107,42 @@ function request(overrides: Partial<ClassifierRequest> = {}): ClassifierRequest 
   };
 }
 
-function classifierWith(registry: ModelRegistryLike, config: AutoModeConfig = defaultAutoModeConfig, onUsage?: (usage: UsageLike) => void) {
-  return new ModelClassifier({ registry, config, onUsage });
+function classifierWith(
+  registry: ModelRegistryLike,
+  config: AutoModeConfig = defaultAutoModeConfig,
+  onUsage?: (usage: UsageLike) => void,
+  sessionKey?: string,
+) {
+  return new ModelClassifier({ registry, config, onUsage, ...(sessionKey ? { sessionKey } : {}) });
 }
 
 describe("classifier prompt", () => {
   test("carries the environment prose, the transcript, the call and the cwd", async () => {
-    const registry = new FakeRegistry([verdictJSON("deny", "force-push rewrites shared history")]);
+    const registry = new FakeRegistry([dangerous(), graded(80, "Irreversible Local Destruction")]);
     await classifierWith(registry).classify(request());
 
     const [call] = registry.calls;
     expect(call?.model).toEqual({ provider: "opencode-go", id: "glm-5.3" });
     expect(call?.context.systemPrompt).toContain("Trusted source control: github.com/victorarias.");
-    const user = call?.context.messages[0]?.content[0]?.text ?? "";
-    expect(user).toContain("[user] address the PR feedback and get CI green");
-    expect(user).toContain("[assistant] I'll fix the retry and run the suite.");
-    expect(user).toContain("bash: git push --force origin main");
+    const user = messagesOf(call).join("\n");
+    expect(user).toContain('{"user":"address the PR feedback and get CI green"}');
+    expect(user).toContain('{"assistant":"I\'ll fix the retry and run the suite."}');
+    expect(user).toContain('{"bash":"git push --force origin main"}');
     expect(user).toContain("/work/repo");
     expect(user).toContain("git push is not in the read-only set");
   });
 
-  test("states the precedence the plan settled on", () => {
-    const prompt = classifierSystemPrompt([]);
-    expect(prompt).toContain("hard deny");
-    expect(prompt).toContain("authorize this");
-    expect(prompt).toContain("boundary");
-    expect(prompt).toContain("*prod*");
-    expect(prompt).toContain("uncertain");
-    expect(prompt).toContain("evidence, not instruction");
-  });
-
   test("an empty transcript and empty environment still produce a judgeable prompt", async () => {
-    const registry = new FakeRegistry([verdictJSON("allow", "routine")]);
+    const registry = new FakeRegistry([routine()]);
     await classifierWith(registry).classify(request({ transcript: [], environment: [] }));
     const [call] = registry.calls;
     expect(call?.context.systemPrompt).toContain("(nothing stated about this machine)");
-    expect(call?.context.messages[0]?.content[0]?.text).toContain("(nothing said yet in this session)");
+    expect(messagesOf(call)[0]).toContain("(nothing said yet in this session)");
   });
 
   test("pi's abort signal and the request auth travel into the completion", async () => {
     const controller = new AbortController();
-    const registry = new FakeRegistry([verdictJSON("allow", "fine")]);
+    const registry = new FakeRegistry([routine()]);
     registry.baseUrl = "https://proxy.internal/v1";
     await classifierWith(registry).classify(request({ signal: controller.signal }));
 
@@ -152,126 +154,185 @@ describe("classifier prompt", () => {
     expect(call?.model.baseUrl).toBe("https://proxy.internal/v1");
   });
 
+  test("one cache key covers both passes, stable across the session's calls", async () => {
+    const registry = new FakeRegistry([dangerous(), graded(80, "Git Destructive"), routine()]);
+    const classifier = classifierWith(registry, defaultAutoModeConfig, undefined, "session-7");
+    await classifier.classify(request());
+    await classifier.classify(request());
+
+    expect(registry.calls.map((call) => call.options?.sessionId)).toEqual([
+      "session-7",
+      "session-7",
+      "session-7",
+    ]);
+    expect(registry.calls.every((call) => call.options?.cacheRetention === classifierCacheRetention)).toBe(true);
+  });
+
+  test("a session with no key still classifies", async () => {
+    const registry = new FakeRegistry([routine()]);
+    await classifierWith(registry).classify(request());
+    expect(registry.calls[0]?.options?.sessionId).toBeUndefined();
+  });
+
+  test("the cheap stage is capped far tighter than the escalation", async () => {
+    const registry = new FakeRegistry([dangerous(), graded(80, "Git Destructive")]);
+    await classifierWith(registry).classify(request());
+    expect(registry.calls.map((call) => call.options?.maxTokens)).toEqual([harmMaxTokens, intentMaxTokens]);
+  });
+
   test("no resolved base url leaves the catalog's model alone", async () => {
-    const registry = new FakeRegistry([verdictJSON("allow", "fine")]);
+    const registry = new FakeRegistry([routine()]);
     await classifierWith(registry).classify(request());
     expect(registry.calls[0]?.model.baseUrl).toBeUndefined();
   });
 });
 
-describe("verdict parsing", () => {
-  test("reads a bare verdict object", () => {
-    expect(parseVerdict('{"verdict":"allow","reason":"routine build"}')).toEqual({
-      verdict: "allow",
-      reason: "routine build",
-      highStakes: false,
-    });
+describe("the session's opening message rides in its own seat", () => {
+  test("it goes ahead of the transcript, with the policy that bounds it", async () => {
+    const registry = new FakeRegistry([routine()]);
+    await classifierWith(registry).classify(request({ grant: "force-push your own branch whenever you need to" }));
+
+    const messages = messagesOf(registry.calls[0]);
+    expect(messages).toHaveLength(2);
+    expect(messages[0]).toContain("force-push your own branch whenever you need to");
+    expect(messages[0]).toContain("explicitly authorizes the SPECIFIC action");
+    expect(messages[0]).toContain("is not authorization");
+    expect(messages[1]).toContain('{"bash":"git push --force origin main"}');
   });
 
-  test("reads one wrapped in prose or a fence", () => {
-    const fenced = 'Sure!\n```json\n{"verdict":"deny","reason":"touches prod"}\n```\n';
-    expect(parseVerdict(fenced).verdict).toBe("deny");
-    expect(parseVerdict('thinking... {"verdict":"uncertain","reason":"unknown script"} done').verdict).toBe(
-      "uncertain",
-    );
+  test("no opening message means no extra seat", async () => {
+    const registry = new FakeRegistry([routine()]);
+    await classifierWith(registry).classify(request());
+    expect(messagesOf(registry.calls[0])).toHaveLength(1);
   });
 
-  test("reads the high-stakes flag", () => {
-    expect(parseVerdict('{"verdict":"allow","reason":"ok","high_stakes":true}').highStakes).toBe(true);
+  test("a blank opening message means no extra seat either", async () => {
+    const registry = new FakeRegistry([routine()]);
+    await classifierWith(registry).classify(request({ grant: "   " }));
+    expect(messagesOf(registry.calls[0])).toHaveLength(1);
   });
 
-  test("skips a leading object that is not a verdict", () => {
-    const text = '{"note":"scratch"} then {"verdict":"deny","reason":"exfiltration"}';
-    expect(parseVerdict(text)).toMatchObject({ verdict: "deny", reason: "exfiltration" });
-  });
-
-  test("malformed output fails closed, naming what came back", () => {
-    for (const text of ["", "yes, allow it", "{", '{"verdict":"maybe"}', '{"verdict":']) {
-      const parsed = parseVerdict(text);
-      expect(parsed.verdict).toBe("deny");
-      expect(parsed.reason).toContain("cannot read as a verdict");
-    }
-  });
-
-  test("a model that answers nothing readable denies rather than throwing", async () => {
-    const registry = new FakeRegistry([says("I'd rather not say.")]);
-    const verdict = await classifierWith(registry).classify(request());
-    expect(verdict.verdict).toBe("deny");
-    expect(registry.calls).toHaveLength(1);
+  test("both stages see it", async () => {
+    const registry = new FakeRegistry([dangerous(), graded(80, "Production Writes")]);
+    await classifierWith(registry).classify(request({ grant: "deploy to prod when the tests pass" }));
+    expect(messagesOf(registry.calls[1])[0]).toContain("deploy to prod when the tests pass");
   });
 });
 
-describe("2a to 2b routing", () => {
-  test("a confident verdict is the answer, and 2b never runs", async () => {
-    const registry = new FakeRegistry([verdictJSON("allow", "routine work in the working directory")]);
+describe("severity parsing", () => {
+  test("reads a bare severity tag", () => {
+    expect(parseSeverity("<severity>7</severity>")).toEqual({ severity: 7 });
+  });
+
+  test("reads a decimal and an unclosed tag", () => {
+    expect(parseSeverity("<severity>12.5</severity>")?.severity).toBe(12.5);
+    expect(parseSeverity("<severity>40")?.severity).toBe(40);
+  });
+
+  test("reads the category beside the severity", () => {
+    expect(parseSeverity("<severity>90</severity><category>Data Exfiltration</category>")).toEqual({
+      severity: 90,
+      category: "Data Exfiltration",
+    });
+  });
+
+  test("keeps the reasoning that came with it, and does not read a severity out of it", () => {
+    const text = "<thinking>the user never named <severity>1</severity> anything</thinking><severity>88</severity>";
+    expect(parseSeverity(text)).toEqual({
+      severity: 88,
+      thinking: "the user never named <severity>1</severity> anything",
+    });
+  });
+
+  test("two severities are no answer at all", () => {
+    expect(parseSeverity("<severity>10</severity> or maybe <severity>90</severity>")).toBeUndefined();
+  });
+
+  test("an unclosed thinking block is no answer", () => {
+    expect(parseSeverity("<thinking>still going <severity>10</severity>")).toBeUndefined();
+  });
+
+  test("output with no severity at all is no answer", () => {
+    for (const text of ["", "I'd rather not say.", "{", "severity: high"]) {
+      expect(parseSeverity(text)).toBeUndefined();
+    }
+  });
+});
+
+describe("the harm stage and the intent stage", () => {
+  test("harm below the ceiling allows, and the intent stage never runs", async () => {
+    const registry = new FakeRegistry([graded(stageOneAllowCeiling)]);
     expect(await classifierWith(registry).classify(request())).toEqual({
       verdict: "allow",
-      layer: "2a",
-      reason: "routine work in the working directory",
+      layer: "harm",
+      severity: stageOneAllowCeiling,
     });
     expect(registry.calls).toHaveLength(1);
   });
 
-  test("uncertain escalates to the escalation model", async () => {
-    const registry = new FakeRegistry([
-      verdictJSON("uncertain", "cannot tell what the script does"),
-      verdictJSON("deny", "an unreviewed script can do anything"),
-    ]);
-    const verdict = await classifierWith(registry).classify(request());
-    expect(verdict).toEqual({ verdict: "deny", layer: "2b", reason: "an unreviewed script can do anything" });
+  test("harm above the ceiling goes to the intent model, which can still clear it", async () => {
+    const registry = new FakeRegistry([dangerous(), graded(blockLine)]);
+    expect(await classifierWith(registry).classify(request())).toEqual({
+      verdict: "allow",
+      layer: "intent",
+      severity: blockLine,
+    });
     expect(registry.calls.map((call) => `${call.model.provider}/${call.model.id}`)).toEqual([
       "opencode-go/glm-5.3",
       "opencode-go/qwen3.8-max",
     ]);
   });
 
-  test("the escalation prompt carries the first pass as one opinion", async () => {
-    const registry = new FakeRegistry([
-      verdictJSON("uncertain", "cannot tell what the script does"),
-      verdictJSON("allow", "the user asked for exactly this"),
-    ]);
+  test("past the block line the intent stage refuses, carrying the rule it named", async () => {
+    const registry = new FakeRegistry([dangerous(), graded(blockLine + 1, "Irreversible Local Destruction")]);
+    expect(await classifierWith(registry).classify(request())).toMatchObject({
+      verdict: "deny",
+      layer: "intent",
+      severity: blockLine + 1,
+      category: "Irreversible Local Destruction",
+      prompt: judgedOn("intent"),
+    });
+  });
+
+  // Both passes send the rulebook byte for byte, so the provider caches one
+  // copy per session. Only the last user message says which pass this is.
+  test("both passes share one system prompt, and the pass is named in the message", async () => {
+    const registry = new FakeRegistry([dangerous(), graded(90, "Data Exfiltration")]);
     await classifierWith(registry).classify(request());
-    const escalation = registry.calls[1]?.context.systemPrompt ?? "";
-    expect(escalation).toContain("cannot tell what the script does");
-    expect(escalation).toContain("Yours is final");
-    expect(registry.calls[1]?.context.messages[0]?.content[0]?.text).toEqual(
-      registry.calls[0]?.context.messages[0]?.content[0]?.text,
-    );
+    const first = registry.calls[0]?.context.systemPrompt;
+    expect(first).toContain("You are a security monitor");
+    expect(registry.calls[1]?.context.systemPrompt).toBe(first);
+    expect(messagesOf(registry.calls[0]).at(-1)).toContain("This is pass 1");
+    expect(messagesOf(registry.calls[1]).at(-1)).toContain("This is pass 2");
+    expect(messagesOf(registry.calls[1]).at(-1)).toContain("<thinking>");
   });
 
-  test("a confident verdict flagged high stakes is reviewed anyway", async () => {
+  test("the one hard block is the one denial an approval cannot lift", async () => {
+    const registry = new FakeRegistry([dangerous(), graded(98, "Data Exfiltration")]);
+    expect(await classifierWith(registry).classify(request())).toMatchObject({
+      verdict: "deny",
+      category: "Data Exfiltration",
+      boundary: true,
+    });
+  });
+
+  test("a soft block stays clearable by the user", async () => {
+    const registry = new FakeRegistry([dangerous(), graded(70, "Git Destructive")]);
+    expect(await classifierWith(registry).classify(request())).not.toHaveProperty("boundary");
+  });
+
+  test("the model's own reasoning becomes the reason the agent is told", async () => {
     const registry = new FakeRegistry([
-      verdictJSON("allow", "the user said to deploy", true),
-      verdictJSON("deny", "the target is a production namespace"),
+      dangerous(),
+      says("<thinking>main is shared and nobody asked for this</thinking><severity>80</severity><category>Irreversible Local Destruction</category>"),
     ]);
-    expect(await classifierWith(registry).classify(request())).toEqual({
-      verdict: "deny",
-      layer: "2b",
-      reason: "the target is a production namespace",
-    });
+    const verdict = await classifierWith(registry).classify(request());
+    expect(verdict.reason).toContain("Irreversible Local Destruction");
+    expect(verdict.reason).toContain("main is shared and nobody asked for this");
   });
 
-  test("a confident deny is final, high stakes or not: the user overturns it by saying so", async () => {
-    const registry = new FakeRegistry([verdictJSON("deny", "force-push rewrites shared history", true)]);
-    expect(await classifierWith(registry).classify(request())).toEqual({
-      verdict: "deny",
-      layer: "2a",
-      reason: "force-push rewrites shared history",
-    });
-    expect(registry.calls).toHaveLength(1);
-  });
-
-  test("uncertain out of 2b resolves to deny", async () => {
-    const registry = new FakeRegistry([verdictJSON("uncertain", "no idea"), verdictJSON("uncertain", "still no idea")]);
-    expect(await classifierWith(registry).classify(request())).toEqual({
-      verdict: "deny",
-      layer: "2b",
-      reason: "still no idea",
-    });
-  });
-
-  test("2b runs at most once", async () => {
-    const registry = new FakeRegistry([verdictJSON("uncertain", "a"), verdictJSON("uncertain", "b", true)]);
+  test("the intent stage runs at most once", async () => {
+    const registry = new FakeRegistry([dangerous(), graded(90, "Production Writes")]);
     await classifierWith(registry).classify(request());
     expect(registry.calls).toHaveLength(2);
   });
@@ -317,11 +378,25 @@ describe("classification failures fail closed", () => {
     expect(verdict.reason).toContain("provider unreachable");
   });
 
-  test("a provider error message denies rather than parsing as a verdict", async () => {
+  test("a provider error message denies rather than parsing as a severity", async () => {
     const registry = new FakeRegistry(providerErrors(attemptsPerModel, "404 model retired"));
     const verdict = await classifierWith(registry).classify(request());
     expect(verdict.verdict).toBe("deny");
     expect(verdict.reason).toContain("404 model retired");
+  });
+
+  test("an unreadable harm answer escalates rather than deciding", async () => {
+    const registry = new FakeRegistry([says("I'd rather not say."), graded(10)]);
+    expect(await classifierWith(registry).classify(request())).toMatchObject({ verdict: "allow", layer: "intent" });
+    expect(registry.calls).toHaveLength(2);
+  });
+
+  test("an unreadable intent answer denies, naming what came back", async () => {
+    const registry = new FakeRegistry([dangerous(), says("I'd rather not say.")]);
+    const verdict = await classifierWith(registry).classify(request());
+    expect(verdict).toMatchObject({ verdict: "deny", layer: "intent", unreadable: true });
+    expect(verdict.reason).toContain("cannot read as a severity");
+    expect(verdict.reason).toContain("I'd rather not say.");
   });
 
   test("an aborted turn is not a verdict: it travels as a throw", async () => {
@@ -337,6 +412,29 @@ describe("classification failures fail closed", () => {
   });
 });
 
+describe("what a denial keeps of the prompt", () => {
+  test("the recorded prompt is the bytes the provider was handed, not a rebuild", async () => {
+    const registry = new FakeRegistry([dangerous(), graded(90, "Production Writes")]);
+    const verdict = await classifierWith(registry).classify(request());
+    const sent = registry.calls[1]?.context;
+    expect(verdict).toMatchObject({
+      verdict: "deny",
+      prompt: { layer: "intent", system: sent?.systemPrompt, user: messagesOf(registry.calls[1]).join("\n\n") },
+    });
+  });
+
+  test("an outage keeps the prompt nobody read — it is what tells it from a bad window", async () => {
+    const registry = new FakeRegistry(errors(2 * attemptsPerModel, "503 upstream"));
+    const verdict = await classifierWith(registry).classify(request());
+    expect(verdict).toMatchObject({ verdict: "deny", unavailable: true, prompt: judgedOn("harm") });
+  });
+
+  test("an allow carries none: a call that ran needs no forensics", async () => {
+    const registry = new FakeRegistry([routine()]);
+    expect(await classifierWith(registry).classify(request())).not.toHaveProperty("prompt");
+  });
+});
+
 describe("the fallback walk", () => {
   const twoDeep: AutoModeConfig = {
     ...defaultAutoModeConfig,
@@ -346,50 +444,37 @@ describe("the fallback walk", () => {
   const specs = (registry: FakeRegistry) => registry.calls.map((call) => `${call.model.provider}/${call.model.id}`);
 
   test("an unreachable model is retried once, then the walk moves on", async () => {
-    const registry = new FakeRegistry([...errors(attemptsPerModel, "503 upstream"), verdictJSON("allow", "routine")]);
-    expect(await classifierWith(registry, twoDeep).classify(request())).toEqual({
+    const registry = new FakeRegistry([...errors(attemptsPerModel, "503 upstream"), routine()]);
+    expect(await classifierWith(registry, twoDeep).classify(request())).toMatchObject({
       verdict: "allow",
-      layer: "2a",
-      reason: "routine",
+      layer: "harm",
     });
     expect(specs(registry)).toEqual(["vendor/primary", "vendor/primary", "vendor/fallback"]);
   });
 
   test("a provider error advances the walk the same way a throw does", async () => {
-    const registry = new FakeRegistry([
-      ...providerErrors(attemptsPerModel, "503 Service Unavailable"),
-      verdictJSON("deny", "force-push rewrites shared history"),
-    ]);
-    expect(await classifierWith(registry, twoDeep).classify(request())).toEqual({
-      verdict: "deny",
-      layer: "2a",
-      reason: "force-push rewrites shared history",
-    });
+    const registry = new FakeRegistry([...providerErrors(attemptsPerModel, "503 Service Unavailable"), routine()]);
+    await classifierWith(registry, twoDeep).classify(request());
     expect(specs(registry)).toEqual(["vendor/primary", "vendor/primary", "vendor/fallback"]);
   });
 
   test("the retry is enough on its own: a blip never reaches the fallback", async () => {
-    const registry = new FakeRegistry([new Error("connection reset"), verdictJSON("allow", "routine")]);
+    const registry = new FakeRegistry([new Error("connection reset"), routine()]);
     await classifierWith(registry, twoDeep).classify(request());
     expect(specs(registry)).toEqual(["vendor/primary", "vendor/primary"]);
   });
 
-  test("a deny is a verdict, so the next model is never asked", async () => {
-    const registry = new FakeRegistry([verdictJSON("deny", "touches prod")]);
-    expect(await classifierWith(registry, twoDeep).classify(request())).toEqual({
-      verdict: "deny",
-      layer: "2a",
-      reason: "touches prod",
-    });
+  test("a severity is an answer, so the next model in the list is never asked", async () => {
+    const registry = new FakeRegistry([routine()]);
+    await classifierWith(registry, twoDeep).classify(request());
     expect(specs(registry)).toEqual(["vendor/primary"]);
   });
 
-  test("output that reads as no verdict is still an answer, and ends the walk", async () => {
-    const registry = new FakeRegistry([says("I'd rather not say.")]);
+  test("output that reads as no severity is still an answer, and ends the walk", async () => {
+    const registry = new FakeRegistry([says("I'd rather not say."), says("nor will I.")]);
     const verdict = await classifierWith(registry, twoDeep).classify(request());
     expect(verdict.verdict).toBe("deny");
-    expect(verdict.reason).toContain("cannot read as a verdict");
-    expect(specs(registry)).toEqual(["vendor/primary"]);
+    expect(specs(registry)).toEqual(["vendor/primary", "vendor/big"]);
   });
 
   test("an abort ends the walk instead of advancing it", async () => {
@@ -402,61 +487,52 @@ describe("the fallback walk", () => {
     expect(specs(registry)).toEqual(["vendor/primary"]);
   });
 
-  test("an exhausted list blocks as an outage, naming the layer, the models and the last failure", async () => {
+  test("an exhausted list blocks as an outage, naming the stage, the models and the last failure", async () => {
     const registry = new FakeRegistry([
       ...errors(attemptsPerModel, "503 upstream"),
       ...providerErrors(attemptsPerModel, "502 bad gateway"),
     ]);
     const verdict = await classifierWith(registry, twoDeep).classify(request());
-    expect(verdict).toMatchObject({ verdict: "deny", layer: "2a", unavailable: true });
-    expect(verdict.reason).toContain("classifier model (layer 2a)");
+    expect(verdict).toMatchObject({ verdict: "deny", layer: "harm", unavailable: true });
+    expect(verdict.reason).toContain("harm model");
     expect(verdict.reason).toContain("vendor/primary, vendor/fallback");
     expect(verdict.reason).toContain("502 bad gateway");
-    expect(verdict.reason).toContain("outage");
     expect(specs(registry)).toHaveLength(2 * attemptsPerModel);
   });
 
-  test("escalation walks its own list", async () => {
-    const registry = new FakeRegistry([
-      verdictJSON("uncertain", "cannot tell what the script does"),
-      ...errors(attemptsPerModel, "503 upstream"),
-      verdictJSON("allow", "the user asked for exactly this"),
-    ]);
-    expect(await classifierWith(registry, twoDeep).classify(request())).toEqual({
+  test("the intent stage walks its own list", async () => {
+    const registry = new FakeRegistry([dangerous(), ...errors(attemptsPerModel, "503 upstream"), graded(10)]);
+    expect(await classifierWith(registry, twoDeep).classify(request())).toMatchObject({
       verdict: "allow",
-      layer: "2b",
-      reason: "the user asked for exactly this",
+      layer: "intent",
     });
     expect(specs(registry)).toEqual(["vendor/primary", "vendor/big", "vendor/big", "vendor/bigger"]);
   });
 
-  test("an exhausted escalation list blocks as a 2b outage", async () => {
-    const registry = new FakeRegistry([
-      verdictJSON("uncertain", "cannot tell what the script does"),
-      ...errors(2 * attemptsPerModel, "503 upstream"),
-    ]);
+  test("an exhausted intent list blocks as an intent-stage outage", async () => {
+    const registry = new FakeRegistry([dangerous(), ...errors(2 * attemptsPerModel, "503 upstream")]);
     const verdict = await classifierWith(registry, twoDeep).classify(request());
-    expect(verdict).toMatchObject({ verdict: "deny", layer: "2b", unavailable: true });
-    expect(verdict.reason).toContain("escalation model (layer 2b)");
+    expect(verdict).toMatchObject({ verdict: "deny", layer: "intent", unavailable: true });
+    expect(verdict.reason).toContain("intent model");
     expect(verdict.reason).toContain("vendor/big, vendor/bigger");
   });
 
   test("a model missing from the catalog is walked past, not judged", async () => {
-    const registry = new FakeRegistry([verdictJSON("allow", "routine")], ["vendor/primary"]);
+    const registry = new FakeRegistry([routine()], ["vendor/primary"]);
     expect(await classifierWith(registry, twoDeep).classify(request())).toMatchObject({
       verdict: "allow",
-      layer: "2a",
+      layer: "harm",
     });
     expect(specs(registry)).toEqual(["vendor/fallback"]);
   });
 });
 
 describe("usage accounting", () => {
-  test("every layer's usage is reported", async () => {
+  test("every stage's usage is reported", async () => {
     const reported: UsageLike[] = [];
     const registry = new FakeRegistry([
-      says(JSON.stringify({ verdict: "uncertain", reason: "hm" }), { input: 900, output: 20, cost: { total: 0.0004 } }),
-      says(JSON.stringify({ verdict: "deny", reason: "no" }), { input: 950, output: 25, cost: { total: 0.0019 } }),
+      graded(60, undefined, { input: 900, output: 20, cost: { total: 0.0004 } }),
+      graded(80, "Production Writes", { input: 950, output: 25, cost: { total: 0.0019 } }),
     ]);
     await classifierWith(registry, defaultAutoModeConfig, (usage) => reported.push(usage)).classify(request());
     expect(reported).toHaveLength(2);
@@ -472,14 +548,55 @@ describe("usage accounting", () => {
 });
 
 describe("the transcript the classifier is handed", () => {
-  test("is rendered oldest first, one line per turn", async () => {
+  test("is projected oldest first, one object per turn", async () => {
     const transcript: TranscriptEntry[] = [
       { role: "user", text: "don't push until I review the diff" },
       { role: "assistant", text: "understood, I'll hold off." },
+      { role: "tool", text: "git status", tool: "bash" },
     ];
-    const registry = new FakeRegistry([verdictJSON("deny", "the user stated a boundary")]);
+    const registry = new FakeRegistry([routine()]);
     await classifierWith(registry).classify(request({ transcript }));
-    const user = registry.calls[0]?.context.messages[0]?.content[0]?.text ?? "";
-    expect(user.indexOf("[user] don't push")).toBeLessThan(user.indexOf("[assistant] understood"));
+    const user = messagesOf(registry.calls[0])[0] ?? "";
+    expect(user).toContain('{"user":"don\'t push until I review the diff"}');
+    expect(user).toContain('{"bash":"git status"}');
+    expect(user.indexOf('{"user":"don\'t push')).toBeLessThan(user.indexOf('{"assistant":"understood'));
+  });
+
+  test("carries no tool results, only what was said and what was run", async () => {
+    const registry = new FakeRegistry([routine()]);
+    await classifierWith(registry).classify(request());
+    expect(messagesOf(registry.calls[0])[0]).not.toContain("tool_result");
+  });
+});
+
+describe("a conversation the model will not take", () => {
+  const refusal = "prompt is too long: 412000 tokens > 200000 maximum";
+
+  test("is told apart from an outage, whichever way the provider reports it", async () => {
+    for (const answers of [errors(attemptsPerModel, refusal), providerErrors(attemptsPerModel, refusal)]) {
+      const verdict = await classifierWith(new FakeRegistry(answers)).classify(request());
+      expect(verdict.verdict).toBe("deny");
+      if (verdict.verdict !== "deny") return;
+      expect(verdict.tooLong).toBe(true);
+      expect(verdict.unavailable).toBeUndefined();
+      expect(verdict.reason).toContain("refused this conversation for its size");
+    }
+  });
+
+  test("stays an outage when any model failed for another reason", async () => {
+    const config: AutoModeConfig = { ...defaultAutoModeConfig, classifierModels: ["p/a", "p/b"] };
+    const registry = new FakeRegistry([...errors(attemptsPerModel, refusal), ...errors(attemptsPerModel, "ECONNRESET")]);
+    const verdict = await classifierWith(registry, config).classify(request());
+    if (verdict.verdict !== "deny") throw new Error("expected a deny");
+    expect(verdict.unavailable).toBe(true);
+    expect(verdict.tooLong).toBeUndefined();
+  });
+
+  test("is still walked across the model list, in case a bigger window takes it", async () => {
+    const config: AutoModeConfig = { ...defaultAutoModeConfig, classifierModels: ["p/small", "p/large"] };
+    const registry = new FakeRegistry([...errors(attemptsPerModel, refusal), routine()]);
+    const verdict = await classifierWith(registry, config).classify(request());
+    expect(verdict.verdict).toBe("allow");
+    expect(registry.calls.map((call) => call.model.id)).toEqual(["small", "small", "large"]);
   });
 });

@@ -1,0 +1,52 @@
+kind: fixed
+area: pi
+change: |
+  Auto mode's classifier was rebuilt after a day spent watching how Claude
+  Code's does the same job. What a pi session sees now:
+
+  - A delegation brief's authorization reaches the classifier. Every message
+    used to be cut to its head and tail, and the middle is where a brief says
+    what the agent may do. Measured over 29 sessions: every brief was long
+    enough to be cut, and no hand-typed prompt ever was. So the classifier
+    refused work it had been authorized to do, and could not see the
+    authorization.
+  - A blocked call now tells the agent what Claude Code tells it, in Claude
+    Code's own words: carry on with anything that does not depend on this,
+    reach the same goal another reasonable way if there is one, never tunnel
+    around the block, and stop and explain to the user when the capability is
+    genuinely needed. What we had invented instead was wrong for three kinds
+    of block and read as an invitation to argue with the guard.
+  - Two facts Claude Code does not have to carry ride along: a model auto mode
+    could not reach says nothing judged the call, and a refusal no approval
+    can lift says the remedy is the settings, not the conversation.
+  - Two passes ask two questions. The first grades how dangerous the action is
+    on its own, cheaply, ignoring what the user asked for; anything routine
+    runs without a second call. The second weighs the user's intent and
+    answers with the name of the rule it matched, which the block and the
+    record now carry.
+  - One refusal a conversation cannot lift: data leaving the machine. Turning
+    auto mode off used to be a second one. A user who says plainly what they
+    want can now clear it.
+  - Nothing about a verdict is remembered. Auto mode used to reuse an earlier
+    answer, so an approval could be ignored on the retry and an old yes could
+    outlive the conversation that earned it.
+  - A conversation too big for the classifier's model asks you. Auto mode does
+    not guess beforehand and does not judge on a piece of it. Say yes and the
+    call runs, say no and it stays blocked.
+  - Tool calls the agent already made are in the window, so the classifier
+    sees the work leading up to the call it is judging.
+  - The rules grew from twelve to about seventy, and each one now says what
+    the user has to name for an approval to clear it. Naming the task never
+    clears the dangerous step: "clean up the repo" does not authorize
+    discarding uncommitted work, and "get the deploy working" does not
+    authorize a rollback.
+  - Both passes now send the same rules, word for word, so a provider caches
+    one copy per session instead of two. The second call in a session costs a
+    fraction of the first.
+  - A blocked call's local record keeps the whole prompt it was judged on, so
+    a wrong verdict can be told apart from a window that never carried the
+    sentence that mattered.
+symptom: |
+  A classifier shown a trimmed conversation refused work the user had already
+  authorized in the part that was trimmed away, then told the agent to go ask
+  for an approval that could not have helped.

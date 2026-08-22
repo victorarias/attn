@@ -58,7 +58,7 @@ class CountingRegistry implements ModelRegistryLike {
 
 function denies(): CompletionResult {
   return {
-    content: [{ type: "text", text: JSON.stringify({ verdict: "deny", reason: "not asked for" }) }],
+    content: [{ type: "text", text: "<severity>80</severity><category>Irreversible Local Destruction</category>" }],
     stopReason: "stop",
   };
 }
@@ -229,8 +229,8 @@ describe("turning auto mode on and off", () => {
 
     const blocked = await pi.toolCall?.(push(), uiContext(new FakeUI()));
     expect(blocked?.block).toBe(true);
-    expect(blocked?.reason).toContain("not asked for");
-    expect(registry.calls).toBe(1);
+    expect(blocked?.reason).toContain("Irreversible Local Destruction");
+    expect(registry.calls).toBe(2);
   });
 
   test("a session with no model catalog refuses the call and names why", async () => {
@@ -285,8 +285,8 @@ describe("a denial leaving the session", () => {
       token: "tok-denial",
       tool: "bash",
       action: "bash: git push --force origin main",
-      reason: "not asked for",
-      rule: "classifier-2a",
+      reason: "the classifier placed this call at severity 80 under the Irreversible Local Destruction rule",
+      rule: "classifier-intent",
       at: expect.any(String),
     });
 

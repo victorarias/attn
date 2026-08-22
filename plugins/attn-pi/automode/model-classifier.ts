@@ -1,54 +1,28 @@
-// The classifier behind classifier.ts's interface: one completion on the
-// configured model (layer 2a), and a second on the escalation model when the
-// first could not decide or asked for a review (layer 2b).
-//
-// Each layer names an ordered list of models, and the list is walked only when
-// a model cannot be reached — a thrown request, `stopReason: "error"`, an
-// endpoint that is down. A model that ANSWERS ends the walk, whatever it
-// answered: a deny is a verdict, and asking the next model would be shopping
-// for a different one. Output that does not read as a verdict is still an
-// answer (parseVerdict turns it into a deny), so it does not advance either.
-// Each entry gets one immediate retry before the walk moves on, which is what
-// carries a session through a blip rather than an outage.
-//
-// It reaches the model through `registry.getProvider(...).streamSimple(...)`,
-// which is pi's own simple path — it clamps a thinking level to what the model
-// supports and fills in the per-API request options. The flatter
-// `ModelRegistry.complete()` (pi 0.84.2) is the RAW path and does neither, so
-// the model thinks unbounded: measured on glm-5.3 with the same prompt,
-// 354 output tokens and 5.7 s against 60 tokens and 2.9 s here (2026-08-17).
-// Request auth is assembled the way ModelRuntime.prepareRequest assembles it,
-// from the same registry, because the runtime itself is not on the extension
-// context.
-//
-// Duck-typed against pi's shapes (0.83.0, core/model-registry.ts) the same way
-// index.ts is duck-typed against ExtensionAPI, so `bun test` covers the whole
-// path with a fake registry and no network.
-import type { Classifier, ClassifierLayer, ClassifierRequest, ClassifierVerdict } from "./classifier";
+import type { Classifier, ClassifierLayer, ClassifierPrompt, ClassifierRequest, ClassifierVerdict } from "./classifier";
 import type { AutoModeConfig } from "./config";
 import {
-  classifierSystemPrompt,
+  blockLine,
   classifierUserPrompt,
-  escalationSystemPrompt,
-  parseVerdict,
-  type ParsedVerdict,
+  grantPrompt,
+  hardBlockRule,
+  classifierSystemPrompt,
+  parseSeverity,
+  stageOneAllowCeiling,
+  unreadableReason,
+  type ParsedSeverity,
+  type PromptInput,
 } from "./prompt";
-import { describeCall } from "./policy";
+import { callSignature } from "./policy";
 import type { UsageLike } from "./usage";
 
-/**
- * The floor. pi raises it to the model's own minimum — glm-5.3 refuses to stop
- * thinking at all and lands on "low" — so this asks for the cheapest verdict
- * each model can give rather than pinning a level no model has to honour.
- */
 export const classifierThinkingLevel = "minimal";
 
-/**
- * Attempts one model gets before the walk moves to the next: the call, and one
- * immediate retry. A retry costs one round trip and covers the blip that a
- * fallback list would otherwise answer by paying a slower model; a second one
- * would only make an outage take longer to admit to.
- */
+export const harmMaxTokens = 512;
+
+export const intentMaxTokens = 8_192;
+
+export const classifierCacheRetention = "long";
+
 export const attemptsPerModel = 2;
 
 export type ModelLike = { provider: string; id: string; baseUrl?: string };
@@ -66,6 +40,9 @@ export type CompletionContext = {
 
 export type CompletionOptions = {
   reasoning?: string;
+  maxTokens?: number;
+  cacheRetention?: string;
+  sessionId?: string;
   apiKey?: string;
   headers?: Record<string, string | null>;
   env?: Record<string, string>;
@@ -95,7 +72,6 @@ export type RequestAuthLike = {
 
 export type ProviderAuthLike = { auth?: { baseUrl?: string } };
 
-/** The ModelRegistry methods a classification needs. */
 export type ModelRegistryLike = {
   find(provider: string, modelId: string): ModelLike | undefined;
   getProvider(provider: string): ProviderLike | undefined;
@@ -106,7 +82,9 @@ export type ModelRegistryLike = {
 export type ModelClassifierOptions = {
   registry: ModelRegistryLike;
   config: AutoModeConfig;
-  /** Every completion's usage, for the ledger that folds it into the session. */
+
+  sessionKey?: string;
+
   onUsage?: (usage: UsageLike) => void;
 };
 
@@ -114,73 +92,95 @@ export class ModelClassifier implements Classifier {
   constructor(private readonly options: ModelClassifierOptions) {}
 
   async classify(request: ClassifierRequest): Promise<ClassifierVerdict> {
-    const userPrompt = classifierUserPrompt({
+    const input: PromptInput = {
       transcript: request.transcript ?? [],
       environment: request.environment,
-      action: describeCall(request.call),
+      action: callSignature(request.call),
+      tool: request.call.toolName,
       reason: request.reason,
       cwd: request.cwd,
-    });
+    };
+    const grant = request.grant?.trim();
+    const preamble = grant && grant !== "" ? [grantPrompt(grant)] : [];
 
-    const firstAnswer = await this.judge({
+    const systemPrompt = classifierSystemPrompt(request.environment);
+
+    const harmMessages = [...preamble, classifierUserPrompt(input, "harm")];
+    const harmPrompt: ClassifierPrompt = {
+      layer: "harm",
+      system: systemPrompt,
+      user: harmMessages.join("\n\n"),
+    };
+    const harm = await this.judge({
       models: this.options.config.classifierModels,
-      layer: "classifier",
-      systemPrompt: classifierSystemPrompt(request.environment),
-      userPrompt,
+      layer: "harm",
+      systemPrompt: harmPrompt.system,
+      messages: harmMessages,
+      maxTokens: harmMaxTokens,
+      ...(this.sessionId() ?? {}),
       signal: request.signal,
     });
-    if (firstAnswer.answered === false) return unavailableVerdict(firstAnswer.reason, "2a");
-    const first = firstAnswer.parsed;
-    // 2b reviews what 2a could not decide, and what it allowed while calling
-    // the call expensive to get wrong. A confident deny does not go: the user
-    // overturns one by saying so, and a second opinion buys them nothing but
-    // the wait.
-    if (first.verdict === "deny" || (first.verdict === "allow" && !first.highStakes)) return narrow(first, "2a");
+    if (harm.answered === false) return unansweredVerdict(harm, harmPrompt);
+    if (harm.parsed && harm.parsed.severity <= stageOneAllowCeiling) {
+      return { verdict: "allow", layer: "harm", severity: harm.parsed.severity };
+    }
 
-    const secondAnswer = await this.judge({
+    const intentMessages = [...preamble, classifierUserPrompt(input, "intent")];
+    const intentPrompt: ClassifierPrompt = {
+      layer: "intent",
+      system: systemPrompt,
+      user: intentMessages.join("\n\n"),
+    };
+    const intent = await this.judge({
       models: this.options.config.escalationModels,
-      layer: "escalation",
-      systemPrompt: escalationSystemPrompt(request.environment, first),
-      userPrompt,
+      layer: "intent",
+      systemPrompt: intentPrompt.system,
+      messages: intentMessages,
+      maxTokens: intentMaxTokens,
+      ...(this.sessionId() ?? {}),
       signal: request.signal,
     });
-    if (secondAnswer.answered === false) return unavailableVerdict(secondAnswer.reason, "2b");
-    const second = secondAnswer.parsed;
-    // Uncertain survived both passes: nobody is going to decide this, and a
-    // call auto mode cannot judge is refused.
-    if (second.verdict === "uncertain") {
+    if (intent.answered === false) return unansweredVerdict(intent, intentPrompt);
+    if (!intent.parsed) {
       return {
         verdict: "deny",
-        layer: "2b",
-        reason: second.reason === "" ? "neither classifier could judge this call" : second.reason,
+        layer: "intent",
+        prompt: intentPrompt,
+        reason: unreadableReason(intent.text),
+        unreadable: true,
       };
     }
-    return narrow(second, "2b");
+    return settle(intent.parsed, intentPrompt);
   }
 
-  /**
-   * One layer's answer: the first model in its list that answers at all, or
-   * the report that none of them could be reached.
-   */
+  // One key for both passes: they send the same system prompt, and the key is
+  // what routes them to the replica already holding it.
+  private sessionId(): { sessionId: string } | undefined {
+    const key = this.options.sessionKey?.trim();
+    return key ? { sessionId: key } : undefined;
+  }
+
   private async judge(input: {
     models: readonly string[];
-    layer: LayerName;
+    layer: ClassifierLayer;
     systemPrompt: string;
-    userPrompt: string;
+    messages: readonly string[];
+    maxTokens: number;
+    sessionId?: string;
     signal?: AbortSignal;
   }): Promise<LayerAnswer> {
     let lastFailure = "no model was configured for this layer";
+    let everyFailureTooLong = input.models.length > 0;
     for (const modelSpec of input.models) {
       for (let attempt = 0; attempt < attemptsPerModel; attempt += 1) {
         let result: CompletionResult;
         try {
           result = await this.complete({ ...input, modelSpec });
         } catch (error) {
-          // An abort is the user taking their turn back, not a verdict. It
-          // travels to index.ts, which blocks the call without charging the
-          // breaker, and it ends the walk: the turn it belonged to is over.
           if (input.signal?.aborted) throw error;
-          lastFailure = `${modelSpec}: ${message(error)}`;
+          const failure = message(error);
+          if (!promptIsTooLong(failure)) everyFailureTooLong = false;
+          lastFailure = `${modelSpec}: ${failure}`;
           continue;
         }
 
@@ -188,21 +188,27 @@ export class ModelClassifier implements Classifier {
 
         if (result.stopReason === "aborted") throw new Error("classification aborted");
         if (result.stopReason === "error") {
-          lastFailure = `${modelSpec}: ${result.errorMessage ?? "no reason given"}`;
+          const failure = result.errorMessage ?? "no reason given";
+          if (!promptIsTooLong(failure)) everyFailureTooLong = false;
+          lastFailure = `${modelSpec}: ${failure}`;
           continue;
         }
-        return { answered: true, parsed: parseVerdict(textOf(result)) };
+        const text = textOf(result);
+        return { answered: true, text, parsed: parseSeverity(text) };
       }
+    }
+    if (everyFailureTooLong) {
+      return { answered: false, tooLong: true, reason: tooLongReason(input.layer, lastFailure) };
     }
     return { answered: false, reason: unavailableReason(input.layer, input.models, lastFailure) };
   }
 
-  /** Everything ModelRuntime.prepareRequest does, from the extension's registry. */
   private async complete(input: {
     modelSpec: string;
-    layer: LayerName;
     systemPrompt: string;
-    userPrompt: string;
+    messages: readonly string[];
+    maxTokens: number;
+    sessionId?: string;
     signal?: AbortSignal;
   }): Promise<CompletionResult> {
     const registry = this.options.registry;
@@ -216,16 +222,24 @@ export class ModelClassifier implements Classifier {
     const auth = await registry.getApiKeyAndHeaders(model);
     if (!auth.ok) throw new Error(auth.error ?? `no credential for ${model.provider}`);
     const baseUrl = (await registry.getProviderAuth(model.provider))?.auth?.baseUrl;
+    const timestamp = Date.now();
 
     return provider
       .streamSimple(
         baseUrl ? { ...model, baseUrl } : model,
         {
           systemPrompt: input.systemPrompt,
-          messages: [{ role: "user", content: [{ type: "text", text: input.userPrompt }], timestamp: Date.now() }],
+          messages: input.messages.map((text) => ({
+            role: "user" as const,
+            content: [{ type: "text" as const, text }],
+            timestamp,
+          })),
         },
         {
           reasoning: classifierThinkingLevel,
+          maxTokens: input.maxTokens,
+          cacheRetention: classifierCacheRetention,
+          ...(input.sessionId ? { sessionId: input.sessionId } : {}),
           apiKey: auth.apiKey,
           headers: auth.headers,
           env: auth.env,
@@ -242,41 +256,62 @@ export class ModelClassifier implements Classifier {
   }
 }
 
-type LayerName = "classifier" | "escalation";
+type LayerAnswer =
+  | { answered: true; text: string; parsed: ParsedSeverity | undefined }
+  | { answered: false; reason: string; tooLong?: boolean };
 
-/** What one layer produced: a model's answer, or nobody's. */
-type LayerAnswer = { answered: true; parsed: ParsedVerdict } | { answered: false; reason: string };
+function promptIsTooLong(failure: string): boolean {
+  return /prompt is too long|context[_ ]length[_ ]exceeded|too many tokens|maximum context length/i.test(failure);
+}
 
-/**
- * The block a human reads when no model could be reached. It says which layer,
- * what was tried and what the last endpoint said, because the difference
- * between "a model refused this" and "nothing looked at this" decides whether
- * the user argues with the verdict or fixes the outage.
- */
-function unavailableReason(layer: LayerName, models: readonly string[], lastFailure: string): string {
-  const tried = models.length > 0 ? models.join(", ") : "(no model configured)";
+function tooLongReason(layer: ClassifierLayer, lastFailure: string): string {
   return (
-    `auto mode could not reach its ${layer} model (layer ${layer === "classifier" ? "2a" : "2b"}): ` +
-    `tried ${tried}, ${attemptsPerModel} attempts each; last failure: ${lastFailure}. ` +
-    `No model judged this call — auto mode fails closed when its classifier is unreachable, so this ` +
-    `is an outage and not a refusal. Say so to the user rather than retrying the call.`
+    `auto mode's ${layer} model refused this conversation for its size: ${lastFailure}. ` +
+    `Nothing judged the call and nothing refused the action - the classifier was never shown it.`
   );
 }
 
-function unavailableVerdict(reason: string, layer: ClassifierLayer): ClassifierVerdict {
-  return { verdict: "deny", layer, reason, unavailable: true };
+function unavailableReason(layer: ClassifierLayer, models: readonly string[], lastFailure: string): string {
+  const tried = models.length > 0 ? models.join(", ") : "(no model configured)";
+  return (
+    `auto mode could not reach its ${layer} model: ` +
+    `tried ${tried}, ${attemptsPerModel} attempts each; last failure: ${lastFailure}. ` +
+    `No model judged this call.`
+  );
 }
 
-function narrow(parsed: ParsedVerdict, layer: ClassifierLayer): ClassifierVerdict {
-  if (parsed.verdict === "allow") return { verdict: "allow", layer, reason: parsed.reason };
-  if (parsed.verdict === "deny") {
-    return {
-      verdict: "deny",
-      layer,
-      reason: parsed.reason === "" ? "the classifier refused this call" : parsed.reason,
-    };
+function unansweredVerdict(answer: { reason: string; tooLong?: boolean }, prompt: ClassifierPrompt): ClassifierVerdict {
+  if (answer.tooLong === true) {
+    return { verdict: "deny", layer: prompt.layer, prompt, reason: answer.reason, tooLong: true };
   }
-  return { verdict: "uncertain", layer, reason: parsed.reason };
+  return { verdict: "deny", layer: prompt.layer, prompt, reason: answer.reason, unavailable: true };
+}
+
+function settle(parsed: ParsedSeverity, prompt: ClassifierPrompt): ClassifierVerdict {
+  if (parsed.severity <= blockLine) {
+    return { verdict: "allow", layer: prompt.layer, severity: parsed.severity };
+  }
+  const category = parsed.category;
+  return {
+    verdict: "deny",
+    layer: prompt.layer,
+    prompt,
+    severity: parsed.severity,
+    reason: denyReason(parsed),
+    ...(category ? { category } : {}),
+    ...(isHardBlock(category) ? { boundary: true } : {}),
+  };
+}
+
+function isHardBlock(category: string | undefined): boolean {
+  return category !== undefined && category.toLowerCase() === hardBlockRule.toLowerCase();
+}
+
+function denyReason(parsed: ParsedSeverity): string {
+  const rule = parsed.category ? `the ${parsed.category} rule` : "auto mode's rules";
+  const thinking = parsed.thinking?.replace(/\s+/g, " ").trim();
+  const head = `the classifier placed this call at severity ${parsed.severity} under ${rule}`;
+  return thinking && thinking !== "" ? `${head}: ${thinking}` : head;
 }
 
 function textOf(result: CompletionResult): string {

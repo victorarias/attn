@@ -1,15 +1,3 @@
-// The static read-only bash set: the boring commands that carry normal work
-// and cannot change anything. Everything this file declines goes to the
-// classifier, so declining is cheap and being wrong in the other direction
-// is not — every entry here runs unjudged.
-//
-// Two rules keep the set honest. A command that can be talked into writing
-// (`sort -o`, `git branch -D`) carries the flags or subcommands that make it
-// read-only, not just its name. And a command that can run another command
-// (`env`, `xargs`, `find -exec`, `sh -c`) is not in the set at all: naming
-// the wrapper would let anything ride in behind it.
-
-/** Reaching the network is never read-only, whatever the command looks like. */
 export const networkCommands: readonly string[] = [
   "curl",
   "wget",
@@ -31,9 +19,8 @@ export const networkCommands: readonly string[] = [
 ];
 
 type ReadOnlyCommand = {
-  /** Flags that turn this command into a writer. */
   forbiddenFlags?: readonly string[];
-  /** When present, only these subcommands are read-only. */
+
   subcommands?: readonly string[];
 };
 
@@ -73,11 +60,6 @@ export const readOnlyCommands: Readonly<Record<string, ReadOnlyCommand>> = {
   git: { subcommands: ["status", "log", "diff", "show", "blame", "rev-parse", "ls-files", "describe", "shortlog"] },
 };
 
-/**
- * Characters that let one command line become several, redirect output, or
- * expand into text this matcher never sees. Any of them and the command is
- * not read-only, whatever the words around them say.
- */
 const controlCharacters = [";", "&", ">", "<", "`", "$", "(", ")", "{", "}", "\n", "\r", "\\"];
 
 export type BashClassification =
@@ -106,11 +88,6 @@ export function classifyBashCommand(command: string): BashClassification {
   return { kind: "read-only" };
 }
 
-/**
- * Scans the whole command line for a network command name rather than only
- * the leading word, so a network call cannot ride in as a later element of
- * something that otherwise parses as read-only.
- */
 function networkCommandIn(command: string): string | undefined {
   for (const word of command.split(/[^A-Za-z0-9_.-]+/)) {
     if (networkCommands.includes(word.toLowerCase())) return word.toLowerCase();
@@ -141,7 +118,6 @@ function readOnlySegmentFailure(segment: string): string | undefined {
   return undefined;
 }
 
-/** `/usr/bin/git` and `git` are the same command. */
 function commandName(word: string): string {
   const parts = word.split("/");
   return (parts[parts.length - 1] ?? word).toLowerCase();

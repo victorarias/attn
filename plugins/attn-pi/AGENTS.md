@@ -285,18 +285,57 @@ agent unchanged; everything here that says nisse is this agent in particular.
 
 ## Auto mode
 
-`automode/` is pi's permission system: a static safety envelope plus a
-classifier for everything reaching past it, denied conversationally rather
-than through dialogs. Design, receipts and slices:
-[docs/plans/2026-08-16-pi-auto-mode.md](../../docs/plans/2026-08-16-pi-auto-mode.md).
+`automode/` is pi's permission system: a set of static rules plus a
+classifier for everything those rules cannot place, denied conversationally
+rather than through dialogs. This section is the design of record; the slice
+plans live under `docs/plans/` and the classifier receipt is
+`spike-harness/s7-classifier-receipt.js`.
 
 - **The decision order in `policy.ts` IS the policy.** Anything added to the
-  envelope runs unjudged, so the read-only sets are conservative by
+  static rules runs unjudged, so the read-only sets are conservative by
   construction: a command that can run another command, or reach the network,
   is not in them.
 - **Fail-safe both ways:** a handler that throws blocks the tool, and a call
   auto mode cannot judge is refused, never run. Model output that does not
   read as a verdict is one of those refusals.
+- **A block that nobody judged says so, to the user.** An unreachable layer
+  and an unreadable answer are not refusals: the way through them is a retry,
+  and the user's approval is powerless because it only re-runs the
+  classification against the same endpoint. `denialWidgetLines` drops its
+  approve line when every standing denial is an outage. Showing the approve
+  line anyway costs the user a turn and leaves them thinking they fixed it.
+- **The agent is told what Claude Code tells it, verbatim.**
+  `denialToolResult` carries CC's own denial paragraph: work on what does not
+  depend on this, reach the goal another reasonable way if one exists, never
+  tunnel around the block, stop and explain when the capability is essential.
+  Do not reword it and do not add advice beside it. Guidance we invent instead
+  reads as an invitation to argue with the guard, which is what the four text
+  families it replaced did. Two sentences are ours because CC has no equivalent
+  case: an unjudged block says it is an outage and not a verdict, and an
+  unclearable one points at the settings rather than the conversation.
+- **The blocked action rides in the tool result in full.** The widget beside it
+  is clamped for a person to read; the model must never be reasoning about a
+  truncated command.
+- **The session's opening message keeps its own seat in the classifier's
+  transcript window, and rides whole.** It is the only message that can GRANT
+  anything, and a cap on it cuts exactly the middle where a delegation brief
+  says what the agent is authorized to do (measured 2026-08-22: every brief on
+  this machine ran 4,495-5,881 chars). Only a message with nothing before it
+  claims the seat, so the window still renders oldest first, and a compaction
+  clears the window without touching the grant.
+- **Nothing about a verdict is remembered.** The window holds no cap of its
+  own and the gate holds no cache: the same call made twice is judged twice.
+  A remembered allow outlives the conversation it was judged in, and a
+  remembered deny blocks a retry the user just authorized. Claude Code keeps
+  neither; the breaker counters and the standing-denial widget are the only
+  state a session accumulates, and neither decides a call.
+- **A prompt too big to judge is learned from the provider, not measured.**
+  There is no pre-flight budget. The call goes out and a `prompt is too long`
+  refusal comes back; every model in the layer refusing that way is
+  `classifier-too-long`, which asks the user through `ctx.ui.confirm` — the
+  attn equivalent of Claude Code's permission dialog, and it opens a turn.
+  A yes runs the call, a no blocks it with a text that sends the agent to the
+  user rather than to a retry. Mixed failures stay an outage.
 - Like `suite/`, the module is duck-typed against pi's shapes rather than
   importing pi, so `bun test` covers the whole extension including its
   `tool_call` wiring. `index.ts` is the only file that knows pi's event names.
@@ -315,8 +354,28 @@ than through dialogs. Design, receipts and slices:
   including unparseable output — advancing on a verdict would be shopping for
   a different one. An exhausted list still blocks, under the rule
   `classifier-unavailable` and with a reason naming the layer, the models
-  tried and the last failure. An unavailable deny is never cached: the cache
-  holds verdicts, and there was none.
+  tried and the last failure.
+- **The rulebook lives in `automode/rulebook.md`,** not in TypeScript.
+  `prompt.ts` imports it with `with { type: "text" }`, which bun inlines at
+  build time, so it ships inside `suite.js` and `automode.js` with no file to
+  copy and no path to resolve at runtime. It is split once at module load on
+  its single `{{ENVIRONMENT}}` placeholder, and a missing placeholder throws
+  there rather than shipping a prompt with a hole in it.
+- **One system prompt, both passes, byte for byte.** The pass is named only in
+  the last user message. That is what lets the provider cache one prefix per
+  session instead of two, and it is why `sessionId` is the attn session id
+  with no stage suffix: the key routes both passes to the replica already
+  holding the rulebook. `cacheControlFormat: 'anthropic'` marks it and
+  `cacheRetention: "long"` asks for the 24h window where the provider has one.
+  Splitting the system prompt by stage, or moving the rulebook out of it,
+  throws the cache away.
+- **Stage one is the cheap one and is capped like one.** `harmMaxTokens` is
+  512 — eight times the 60 output tokens glm-5.3 spent answering one severity
+  tag (2026-08-17) — against `intentMaxTokens` 8,192 for the stage that
+  thinks. Claude Code closes stage one with a stop sequence too; pi's
+  `streamSimple` exposes none, and its `reasoning` cannot go below `minimal`,
+  so the cap is what we have. A stage-one answer cut short parses as nothing
+  and escalates, which is the safe direction.
 - **Escalation is scoped to allow verdicts.** A confident deny is final — the
   user overturns one by saying so, and a second opinion buys them only the
   wait. Letting denials escalate doubled the cost of the corpus.
@@ -335,8 +394,8 @@ than through dialogs. Design, receipts and slices:
   is not refreshed.
 - The `AutoMode` in `mode.ts` lives at module scope and the session state the
   factory owns does not. That is the line: the user's `/auto` choice is theirs
-  until they change it, while the verdict cache and the breaker belong to one
-  session.
+  until they change it, while the transcript window and the breaker belong to
+  one session.
 - Precedence is `/auto` > `--auto`/`--no-auto` > `enabled_default`. The flags
   carry no default so an unset one reads as undefined, and a command that
   loses to a flag is not a command.
@@ -352,8 +411,8 @@ than through dialogs. Design, receipts and slices:
   episode where EVERY block was an outage says so (`BreakerState.outage`) and
   asks about the outage instead of claiming the session was refused N times.
 - **A denial names who decided.** Static rules keep their own names; a
-  classified call reports the layer that answered (`classifier-2a`,
-  `classifier-2b`), or `classifier-unavailable` when no model in the layer
+  classified call reports the stage that answered (`classifier-harm`,
+  `classifier-intent`), or `classifier-unavailable` when no model in the stage
   could be reached, which is why `ClassifierVerdict` carries a `layer` and an
   `unavailable` flag. Denials reach attn through `AutoMode`'s `onDenial` seam,
   which `suite/index.ts` sets to one fire-and-forget `suite.report_denial`
@@ -367,6 +426,15 @@ than through dialogs. Design, receipts and slices:
   (`internal/daemon/automode_ledger.go`). A failed write is said out loud,
   because it is the only leg with nothing behind it. Design:
   [docs/plans/2026-08-18-automode-denial-ledger.md](../../docs/plans/2026-08-18-automode-denial-ledger.md).
+- **A classified denial keeps the prompt it was judged on**, verbatim, in the
+  ledger line and nowhere else — not the store, the protocol or the app. It
+  rides on an unavailable deny too: nobody read it, and that is the finding.
+  Only a call a classifier ran for carries one.
+- **A denial records whether an approval could lift it.** A boundary verdict
+  and every static rule set `clearable: false`: the tree re-decides
+  identically, and a boundary is lifted by changing auto mode's setup, not by
+  talking. It steers the widget and the ledger, never the agent's tool result.
+  The `hard_deny` list keeps its name; it is an ordinary deny, not a boundary.
 - The ledger keeps an active file and one rotated generation, and a rotation
   counts the destroyed generation's records AND its markers into one marker
   opening the new active file. The marker in the file being renamed survives

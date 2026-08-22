@@ -1,23 +1,14 @@
-// The static decision tree: everything auto mode can answer without asking a
-// model. Pure and synchronous — the classifier is what the tree routes to,
-// never something it calls.
-//
-// Order is the policy (docs/plans/2026-08-16-pi-auto-mode.md, "Decision
-// path"): hard denies, then the allow list, then the envelope's own rules.
 import { classifyBashCommand } from "./bash";
 import { matchesAnyPattern, type AutoModeConfig } from "./config";
 import { locatePath } from "./paths";
 
-/** A pending pi tool call, narrowed to what the tree reads. */
 export type ToolCall = {
   toolName: string;
   input: Record<string, unknown>;
 };
 
-/** Tools that only ever read. */
 export const readOnlyTools: readonly string[] = ["read", "grep", "find", "ls"];
 
-/** Tools whose safety is decided by the path they name. */
 export const pathTools: readonly string[] = ["write", "edit"];
 
 export type StaticRule =
@@ -25,7 +16,7 @@ export type StaticRule =
   | "allow-list"
   | "read-only-tool"
   | "in-cwd-write"
-  | "out-of-envelope-write"
+  | "out-of-cwd-write"
   | "read-only-bash"
   | "network-bash"
   | "unjudged-bash"
@@ -41,7 +32,7 @@ export function decideStatically(call: ToolCall, config: AutoModeConfig, cwd: st
 
   const denied = matchesAnyPattern(config.hardDeny, signature);
   if (denied !== undefined) {
-    return { outcome: "block", rule: "hard-deny", reason: `hard-denied by the configured pattern ${denied}` };
+    return { outcome: "block", rule: "hard-deny", reason: `denied by the configured pattern ${denied}` };
   }
 
   const allowed = matchesAnyPattern(config.allow, signature);
@@ -57,7 +48,7 @@ export function decideStatically(call: ToolCall, config: AutoModeConfig, cwd: st
     outcome: "block",
     rule: "unknown-tool",
     reason:
-      `auto mode has no envelope entry for the tool ${JSON.stringify(call.toolName)}, ` +
+      `auto mode has no static rule for the tool ${JSON.stringify(call.toolName)}, ` +
       `so it cannot judge this call. Known tools: ${[...readOnlyTools, ...pathTools, "bash"].join(", ")}.`,
   };
 }
@@ -67,22 +58,22 @@ function decidePathTool(call: ToolCall, cwd: string): StaticDecision {
   if (typeof path !== "string" || path.trim() === "") {
     return {
       outcome: "classify",
-      rule: "out-of-envelope-write",
-      reason: `${call.toolName} named no path, so the envelope cannot place it`,
+      rule: "out-of-cwd-write",
+      reason: `${call.toolName} named no path, so the static rules cannot place it`,
     };
   }
   const located = locatePath(cwd, path);
-  if (located.location === "in-envelope") return { outcome: "run", rule: "in-cwd-write" };
+  if (located.location === "in-cwd") return { outcome: "run", rule: "in-cwd-write" };
   if (located.location === "protected") {
     return {
       outcome: "classify",
-      rule: "out-of-envelope-write",
+      rule: "out-of-cwd-write",
       reason: `${located.resolved} is a protected path (${located.protectedBy})`,
     };
   }
   return {
     outcome: "classify",
-    rule: "out-of-envelope-write",
+    rule: "out-of-cwd-write",
     reason: `${located.resolved} resolves outside the working directory ${cwd}`,
   };
 }
@@ -98,28 +89,22 @@ function decideBash(call: ToolCall): StaticDecision {
     return {
       outcome: "classify",
       rule: "network-bash",
-      reason: `${classification.command} reaches the network, which never rides the envelope`,
+      reason: `${classification.command} reaches the network, which is never decided without a model`,
     };
   }
   return { outcome: "classify", rule: "unjudged-bash", reason: classification.reason };
 }
 
-/**
- * What allow and hard-deny patterns are matched against: the bare command
- * for `bash`, `<tool> <path-or-pattern>` for everything else.
- */
 export function callSignature(call: ToolCall): string {
   if (call.toolName === "bash") return stringInput(call, "command").trim();
   const argument = stringInput(call, "path") || stringInput(call, "pattern");
   return argument === "" ? call.toolName : `${call.toolName} ${argument}`;
 }
 
-/** The cache key: one call's signature with whitespace runs collapsed. */
 export function normalizedIntent(call: ToolCall): string {
   return `${call.toolName} ${callSignature(call).replace(/\s+/g, " ").trim()}`;
 }
 
-/** One line naming the call, for the denial the model reads. */
 export function describeCall(call: ToolCall): string {
   const signature = callSignature(call).replace(/\s+/g, " ").trim();
   return call.toolName === "bash" ? `bash: ${signature}` : signature;

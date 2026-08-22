@@ -11,21 +11,6 @@ import (
 	"github.com/victorarias/attn/internal/config"
 )
 
-// Auto mode's persistence (migration 109): the promoted config, the proposals
-// waiting on a human, and the denials a session reported.
-//
-// The asymmetry between the two write paths is the point, and it lives here
-// rather than in any one caller: PromoteAutoModeProposal, AddAutoModePattern
-// and RemoveAutoModePattern are the ONLY ways a pattern or a model reaches the
-// config row, and all three are reachable from the app alone. Everything an
-// agent can call writes a proposal, which changes nothing a session launches
-// with.
-//
-// Design: docs/plans/2026-08-16-pi-auto-mode.md.
-
-// AutoModeProposal is one proposed change and what became of it. Value is a
-// pattern for allow/deny and a `provider/id` for model; Target names which model
-// and is empty otherwise.
 type AutoModeProposal struct {
 	ID         int64
 	Kind       string
@@ -37,10 +22,6 @@ type AutoModeProposal struct {
 	ResolvedAt time.Time
 }
 
-// AutoModeDenial is one call auto mode refused. Signature is the blocked call
-// in one line; Rule names who decided — a static envelope rule, the classifier
-// layer that answered (`classifier-2a`/`-2b`), `classifier-unavailable` when
-// no classifier model could be reached, or the circuit breaker.
 type AutoModeDenial struct {
 	ID        int64
 	SessionID string
@@ -51,28 +32,16 @@ type AutoModeDenial struct {
 	CreatedAt time.Time
 }
 
-// AutoModeDenialRows is how many denials the log keeps. A tripwire, not a
-// budget: auto mode's own circuit breaker stops a session at 20 denials since
-// the user last spoke (`totalDenialLimit`, plugins/attn-pi/automode/session.ts),
-// so this is 25 breaker-limit episodes — past any real day of work, and short
-// of a loop nobody is watching filling the database.
 const AutoModeDenialRows = 500
 
-// GetAutoModeConfig reads the promoted config, resolved: a machine with no row,
-// or a row that never named a model, gets the shipped defaults rather than empty
-// strings a caller would have to know how to fill in.
 func (s *Store) GetAutoModeConfig() (automode.Config, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.readAutoModeConfig(s.db)
 }
 
-// readAutoModeConfig takes a rowQuerier (documents.go) so the same read serves a
-// plain get and the read-back inside a promote's transaction.
 func (s *Store) readAutoModeConfig(q rowQuerier) (automode.Config, error) {
-	// The shipped hard denies are resolved in on every read, so a machine whose
-	// row predates them — or whose row never mentioned them — still runs with
-	// auto mode's own surfaces denied.
+
 	wsPort := config.WSPort()
 	defaults := func() automode.Config {
 		cfg := automode.Defaults()
@@ -111,9 +80,7 @@ func (s *Store) readAutoModeConfig(q rowQuerier) (automode.Config, error) {
 		return defaults(), err
 	}
 	cfg.HardDeny = automode.ResolveHardDeny(wsPort, stored)
-	// An empty list means "whichever models ship", the same way an empty string
-	// did before migration 114 — a machine that never picked one is not a
-	// machine whose classifier can judge nothing.
+
 	if models, err := decodeStringList(classifierModels, "classifier_models"); err != nil {
 		return defaults(), err
 	} else if len(models) > 0 {
@@ -127,9 +94,6 @@ func (s *Store) readAutoModeConfig(q rowQuerier) (automode.Config, error) {
 	return cfg, nil
 }
 
-// SetAutoModeEnvironment replaces the classifier's environment prose. Unlike the
-// pattern and model lists this is a direct write with no proposal in front of
-// it, which is what the plan's public interface specifies.
 func (s *Store) SetAutoModeEnvironment(entries []string, now time.Time) (automode.Config, error) {
 	return s.mutateAutoModeConfig(now, func(cfg *automode.Config) error {
 		cfg.Environment = append([]string{}, entries...)
@@ -137,8 +101,6 @@ func (s *Store) SetAutoModeEnvironment(entries []string, now time.Time) (automod
 	})
 }
 
-// SetAutoModeEnabledDefault flips whether new attn sessions start with auto mode
-// on.
 func (s *Store) SetAutoModeEnabledDefault(enabled bool, now time.Time) (automode.Config, error) {
 	return s.mutateAutoModeConfig(now, func(cfg *automode.Config) error {
 		cfg.EnabledDefault = enabled
@@ -146,14 +108,6 @@ func (s *Store) SetAutoModeEnabledDefault(enabled bool, now time.Time) (automode
 	})
 }
 
-// AddAutoModePattern adds one entry to the allow or hard-deny list, and
-// RemoveAutoModePattern takes one out. These are the app's direct-edit path:
-// only the WebSocket carries them, so what they change is still only ever
-// changed by a human, the same boundary PromoteAutoModeProposal sits on.
-//
-// Both go through mutateAutoModeConfig, which reads the config resolved and
-// writes it back stripped — so a shipped hard-deny is never persisted by an
-// edit that merely passed through the list it appears in.
 func (s *Store) AddAutoModePattern(list, pattern string, now time.Time) (automode.Config, error) {
 	pattern = strings.TrimSpace(pattern)
 	if err := automode.ValidatePattern(list, pattern); err != nil {
@@ -171,10 +125,6 @@ func (s *Store) AddAutoModePattern(list, pattern string, now time.Time) (automod
 	})
 }
 
-// RemoveAutoModePattern drops one entry. A shipped hard-deny is refused rather
-// than quietly ignored: it is resolved in at read, so a caller looking at the
-// list has every reason to think it is removable, and silence would read as a
-// removal that worked.
 func (s *Store) RemoveAutoModePattern(list, pattern string, now time.Time) (automode.Config, error) {
 	pattern = strings.TrimSpace(pattern)
 	if list != automode.ListAllow && list != automode.ListHardDeny {
@@ -209,8 +159,6 @@ func (s *Store) RemoveAutoModePattern(list, pattern string, now time.Time) (auto
 	})
 }
 
-// autoModePatternList points at the field one list name means, so add and
-// remove share the naming rather than each switching on it.
 func autoModePatternList(cfg *automode.Config, list string) *[]string {
 	if list == automode.ListAllow {
 		return &cfg.Allow
@@ -218,20 +166,6 @@ func autoModePatternList(cfg *automode.Config, list string) *[]string {
 	return &cfg.HardDeny
 }
 
-// CreateAutoModeProposal records a proposed change. It validates first, so a
-// proposal that could never be promoted never reaches the app's review list.
-//
-// The review list is a human's, so it is defended twice. An identical pending
-// proposal from the same proposer returns the one already there rather than a
-// second row — a session denied the same call twice has asked once. The
-// proposer is part of that key on purpose: the list says who asked, and
-// collapsing a second session's ask onto the first would credit the wrong one.
-// Two askers are two rows until a promotion satisfies both. A unique index over
-// pending rows holds the same key, so the answer does not depend on which
-// process is doing the asking. Past that, one proposer holds at most
-// automode.MaxPendingProposalsPerProposer unresolved proposals, and the refusal
-// names the cap and what it was asked to add: a caller that hit it can say what
-// to promote or discard, and the list stays reviewable.
 func (s *Store) CreateAutoModeProposal(kind, target, value, proposedBy string, now time.Time) (AutoModeProposal, error) {
 	if err := automode.ValidateProposal(kind, target, value); err != nil {
 		return AutoModeProposal{}, err
@@ -275,8 +209,7 @@ func (s *Store) CreateAutoModeProposal(kind, target, value, proposedBy string, n
 		VALUES (?, ?, ?, ?, ?, ?)
 	`, kind, target, value, proposedBy, automode.StatePending, stamp)
 	if err != nil {
-		// The index caught an asker this process did not see; that ask is the
-		// row already there, not a failure to report.
+
 		if existing, findErr := findPending(); findErr == nil {
 			return existing, nil
 		}
@@ -292,8 +225,6 @@ func (s *Store) CreateAutoModeProposal(kind, target, value, proposedBy string, n
 	}, nil
 }
 
-// ListAutoModeProposals returns proposals in the state given, oldest first. An
-// empty state means every proposal.
 func (s *Store) ListAutoModeProposals(state string) ([]AutoModeProposal, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -324,13 +255,6 @@ func (s *Store) ListAutoModeProposals(state string) ([]AutoModeProposal, error) 
 	return out, rows.Err()
 }
 
-// PromoteAutoModeProposal applies a pending proposal to the config and marks it
-// promoted, in one transaction. This is auto mode's trust boundary: nothing else
-// writes a pattern or a model into the config row, and only the app reaches it.
-//
-// Promoting an allow re-validates the pattern rather than trusting the recorded
-// row — the guard belongs on the path that changes what runs, not only on the
-// path that records an intention.
 func (s *Store) PromoteAutoModeProposal(id int64, now time.Time) (AutoModeProposal, automode.Config, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -369,7 +293,7 @@ func (s *Store) PromoteAutoModeProposal(id int64, now time.Time) (AutoModePropos
 	case automode.KindDeny:
 		cfg.HardDeny = appendUnique(cfg.HardDeny, proposal.Value)
 	case automode.KindModel:
-		// The proposal names the layer's whole list, so promotion replaces it.
+
 		models, err := automode.ParseModelList(proposal.Value)
 		if err != nil {
 			return AutoModeProposal{}, automode.Config{}, err
@@ -384,8 +308,7 @@ func (s *Store) PromoteAutoModeProposal(id int64, now time.Time) (AutoModePropos
 		return AutoModeProposal{}, automode.Config{}, err
 	}
 	stamp := now.UTC().Format(sortableTimeFormat)
-	// Every asker for this same change is answered by this one promotion, so
-	// none of them stays pending asking for what the config already says.
+
 	if _, err := tx.Exec(`
 		UPDATE automode_proposals SET state = ?, resolved_at = ?
 		WHERE state = ? AND kind = ? AND target = ? AND value = ?`,
@@ -401,7 +324,6 @@ func (s *Store) PromoteAutoModeProposal(id int64, now time.Time) (AutoModePropos
 	return proposal, cfg, nil
 }
 
-// DiscardAutoModeProposal closes a pending proposal without applying it.
 func (s *Store) DiscardAutoModeProposal(id int64, now time.Time) (AutoModeProposal, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -430,10 +352,6 @@ func (s *Store) DiscardAutoModeProposal(id int64, now time.Time) (AutoModePropos
 	return proposal, nil
 }
 
-// RecordAutoModeDenial stores one refused call and trims the log back to
-// AutoModeDenialRows, returning how many rows that dropped so the caller can
-// say so. The insert and the trim share one transaction: a denial that reached
-// the feed and then vanished on the next write is worse than one never stored.
 func (s *Store) RecordAutoModeDenial(denial AutoModeDenial, now time.Time) (AutoModeDenial, int64, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -475,7 +393,6 @@ func (s *Store) RecordAutoModeDenial(denial AutoModeDenial, now time.Time) (Auto
 	return denial, dropped, nil
 }
 
-// ListAutoModeDenials returns the most recent denials, newest first.
 func (s *Store) ListAutoModeDenials(limit int) ([]AutoModeDenial, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -505,8 +422,6 @@ func (s *Store) ListAutoModeDenials(limit int) ([]AutoModeDenial, error) {
 	return out, rows.Err()
 }
 
-// mutateAutoModeConfig reads the config, applies a change, and writes it back
-// under the store's write lock.
 func (s *Store) mutateAutoModeConfig(now time.Time, apply func(*automode.Config) error) (automode.Config, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -526,12 +441,8 @@ func (s *Store) mutateAutoModeConfig(now time.Time, apply func(*automode.Config)
 	return cfg, nil
 }
 
-// writeAutoModeConfig takes an execer (jobs.go) so it writes through either a
-// *sql.DB or a promote's transaction.
 func writeAutoModeConfig(e execer, cfg automode.Config, now time.Time) error {
-	// Every config here came out of a read, which resolved the shipped denies in.
-	// Persisting them would freeze today's list into the row and defeat the point
-	// of resolving at read.
+
 	cfg.HardDeny = automode.StripShippedHardDeny(config.WSPort(), cfg.HardDeny)
 	environment, err := encodeStringList(cfg.Environment)
 	if err != nil {

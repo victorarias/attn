@@ -1,17 +1,3 @@
-// Auto mode settings: the policy a pi session launches with, the two lists a
-// human edits here, the proposals waiting on a human, and what auto mode has
-// refused.
-//
-// This section is auto mode's trust boundary made visible. An agent can propose
-// a pattern or a model over the CLI and nothing happens; a person promoting one
-// here — or typing one straight into a list here — is what puts it in front of
-// the next pi session. That is why promote, discard and the two edit verbs
-// exist on this transport alone, and why the effective policy is shown beside
-// them rather than a page away.
-//
-// Design: docs/plans/2026-08-16-pi-auto-mode.md and
-// docs/plans/2026-08-19-automode-direct-edit-and-settings-shape.md.
-
 import { useState } from 'react';
 import type { AutoModeDenialInfo, AutoModeProposalInfo } from '../hooks/daemonAutoModeEvents';
 import type { AutoModePatternList, AutoModePolicy } from '../hooks/useAutoModePolicy';
@@ -210,19 +196,13 @@ interface PatternEditorProps {
   list: AutoModePatternList;
   testID: string;
   values: string[];
-  /** Entries auto mode resolves in at read: shown as built-in, never removable. */
+
   shipped: Set<string>;
   empty: string;
   placeholder: string;
   policy: AutoModePolicy;
 }
 
-/**
- * One editable pattern list. The refusal a rejected add or remove carries is
- * printed here, under the input that caused it, rather than raised to the
- * section — a validation message a re-read would wipe out is a message nobody
- * reads.
- */
 function PatternEditor({
   list, testID, values, shipped, empty, placeholder, policy,
 }: PatternEditorProps) {
@@ -323,12 +303,6 @@ function PatternEditor({
   );
 }
 
-/**
- * A layer's models, in the order pi walks them: the first one judges, and the
- * rest are only reached when the one before it cannot be. Marking which is
- * which is the whole difference between a fallback list and a list of models
- * somebody might expect to share the work.
- */
 function renderModels(label: string, testID: string, models: string[]) {
   return (
     <div className="automode-field">
@@ -397,7 +371,6 @@ function renderDenials(denials: AutoModeDenialInfo[]) {
   );
 }
 
-/** `deny` and `allow` take no target; a model proposal names which model. */
 function proposalKindLabel(proposal: AutoModeProposalInfo): string {
   if (proposal.kind === 'model') {
     return proposal.target ? `${proposal.target} model` : 'model';

@@ -1,13 +1,4 @@
-// pi wiring for auto mode. Like suite/core.ts this file is duck-typed
-// against pi's ExtensionAPI/ExtensionContext shapes (verified against pi
-// 0.84.2, packages/coding-agent/src/core/extensions/types.ts) rather than
-// importing pi, so the whole extension runs under `bun test`.
-//
-// Everything decided lives in ./policy and ./session; this file only turns
-// their answer into pi's `{ block, reason }` and keeps the fail-safe
-// posture: whatever goes wrong here, the tool does not run.
-import { autoModeSystemPromptAddendum } from "./addendum";
-import type { Classifier } from "./classifier";
+import type { Classifier, ClassifierPrompt } from "./classifier";
 import type { AutoModeConfig } from "./config";
 import { denialToolResult } from "./denial";
 import type { DenialLedgerLike } from "./ledger";
@@ -17,6 +8,7 @@ import {
   autoModeDenialWidgetKey,
   breakerQuestion,
   classifyingWorkingMessage,
+  tooLongQuestion,
   denialNotice,
   denialWidgetLines,
   type AutoModeUILike,
@@ -50,6 +42,8 @@ export type MessageLike = { role: string; content: { type: string; text?: string
 
 export type MessageEndEventLike = { type: "message_end"; message: MessageLike };
 
+export type SessionCompactEventLike = { type: "session_compact" };
+
 export type ToolResultEventLike = {
   type: "tool_result";
   toolCallId: string;
@@ -61,7 +55,7 @@ export type ToolResultEventResultLike = { usage?: UsageLike };
 export type AutoModeContextLike = {
   cwd: string;
   signal?: AbortSignal;
-  /** False in `-p` and `--mode json`: nothing can be asked there. */
+
   hasUI?: boolean;
   ui?: AutoModeUILike;
 };
@@ -80,6 +74,7 @@ export type AutoModeExtensionAPILike = {
     handler: (event: BeforeAgentStartEventLike, ctx: AutoModeContextLike) => BeforeAgentStartResultLike,
   ): void;
   on(event: "message_end", handler: (event: MessageEndEventLike, ctx: AutoModeContextLike) => void): void;
+  on(event: "session_compact", handler: (event: SessionCompactEventLike, ctx: AutoModeContextLike) => void): void;
   on(
     event: "tool_result",
     handler: (event: ToolResultEventLike, ctx: AutoModeContextLike) => ToolResultEventResultLike | undefined,
@@ -88,63 +83,38 @@ export type AutoModeExtensionAPILike = {
 
 export type AutoModeDenial = {
   toolCallId: string;
-  /** The tool pi was about to run. */
+
   tool: string;
-  /** The blocked call in one line, the same text the model is given. */
+
   action: string;
   reason: string;
-  /** Who decided: a static rule name, `classifier-2a`/`-2b`, or the breaker. */
+
   rule: string;
-  /** When the call was refused, RFC 3339. */
+
   at: string;
+
+  clearable?: boolean;
+
+  prompt?: ClassifierPrompt;
 };
 
 export type AutoModeOptions = {
   config: AutoModeConfig;
   classifier: Classifier;
-  /**
-   * Whether auto mode judges this call, asked per call because `/auto` can
-   * turn it off mid-session. Off means the handlers stay registered and do
-   * nothing but keep listening to the conversation, so turning it back on has
-   * the context it needs.
-   */
+
   isEnabled?: () => boolean;
-  /**
-   * The durable local record, written before anything is told about the
-   * denial. Reporting to attn is a mirror — a bare pi has no relay and a dead
-   * relay drops what it is handed — so this is what makes a denial readable
-   * later at all. Unset only in tests that are not about the record.
-   */
+
   ledger?: DenialLedgerLike;
-  /** Called for every blocked call, for the surfaces that report denials. */
+
   onDenial?: (denial: AutoModeDenial) => void;
-  /**
-   * Called with true while the breaker's question is on screen and false once
-   * it is answered — the one window where pi is blocked on the user rather than
-   * on a model. attn declares `pending_approval` from it; bare pi leaves it
-   * unset. A reporter that throws must not be able to swallow the answer, so
-   * the caller of this seam catches for it.
-   */
+
   onWaitingForUser?: (waiting: boolean) => void;
-  /**
-   * Where the classifier's usage waits for a tool result to ride into the
-   * session's totals. The same ledger the classifier reports into.
-   */
+
   usageLedger?: UsageLedger;
 };
 
-/**
- * Builds the pi extension factory. pi re-runs a factory on every session
- * transition, so each run gets its own AutoModeSession — a new, forked, or
- * resumed session starts with an empty verdict cache and a clear breaker.
- */
 export function createAutoMode(options: AutoModeOptions): (pi: AutoModeExtensionAPILike) => void {
   return function autoMode(pi: AutoModeExtensionAPILike): void {
-    // The ctx of the call being judged, so the classification's "checking…"
-    // feedback appears for exactly as long as a classification runs — and only
-    // when one runs at all, which is the envelope's whole point. pi runs tool
-    // calls in parallel, so both are counted rather than flagged: the last one
-    // to finish is what puts the working message back.
     let judging: AutoModeContextLike | undefined;
     let deciding = 0;
     let checking = 0;
@@ -162,10 +132,9 @@ export function createAutoMode(options: AutoModeOptions): (pi: AutoModeExtension
       },
     };
     const session = new AutoModeSession(options.config, classifier);
-    // Denials since the user last spoke, which is also when the widget listing
-    // them is cleared: speaking is what drops them, so it is what unshows them.
+
     let standing: AutoModeDenial[] = [];
-    // The breaker asks once per episode. Answering it, or speaking, ends one.
+
     let breakerAsked = false;
 
     pi.on("tool_call", async (event, ctx) => {
@@ -185,14 +154,17 @@ export function createAutoMode(options: AutoModeOptions): (pi: AutoModeExtension
             decision = await session.decide(call, decideOptions);
           }
         }
+        if (decision.outcome === "block" && decision.rule === "classifier-too-long") {
+          if (await askToRun(decision.action, ctx, options.onWaitingForUser)) {
+            session.noteApprovedCall(call);
+            return undefined;
+          }
+        }
       } catch (error) {
-        // pi already blocks a tool whose tool_call handler throws, but the
-        // model would get pi's error text instead of the denial contract.
         return { block: true, reason: denialToolResult({ action: describeCall(call), reason: failureReason(error) }) };
       } finally {
         deciding -= 1;
-        // Held only while a call is in flight: a ctx from a superseded session
-        // generation throws on any use.
+
         if (deciding === 0) judging = undefined;
       }
       if (decision.outcome === "run") return undefined;
@@ -203,10 +175,10 @@ export function createAutoMode(options: AutoModeOptions): (pi: AutoModeExtension
         reason: decision.reason,
         rule: decision.rule,
         at: new Date().toISOString(),
+        ...(decision.clearable === false ? { clearable: false } : {}),
+        ...(decision.prompt ? { prompt: decision.prompt } : {}),
       };
-      // The record first, the report second: the relay is allowed to lose a
-      // denial, the file is not. Neither can turn a denial into something else
-      // by failing — the block below stands whatever either of them does.
+
       try {
         options.ledger?.record(denial);
       } catch (error) {
@@ -215,8 +187,6 @@ export function createAutoMode(options: AutoModeOptions): (pi: AutoModeExtension
       try {
         options.onDenial?.(denial);
       } catch (error) {
-        // Reporting is fire-and-forget: whoever listens must not be able to turn
-        // a denial into something else by failing.
         reportFailure(ctx, error);
       }
       standing = [...standing, denial];
@@ -224,11 +194,6 @@ export function createAutoMode(options: AutoModeOptions): (pi: AutoModeExtension
       return { block: true, reason: decision.toolResult };
     });
 
-    // An extension's own prompt is not the user speaking, so it grants nothing:
-    // it must not clear a deny or reset the breaker. before_agent_start carries
-    // no source of its own, and pi emits it from the same prompt() call that
-    // emitted this event, so the source is remembered here for the seam that
-    // cannot see it.
     let promptIsUsers = true;
     pi.on("input", (event, ctx) => {
       promptIsUsers = event.source !== "extension";
@@ -241,27 +206,20 @@ export function createAutoMode(options: AutoModeOptions): (pi: AutoModeExtension
       }
     });
 
-    // The turn's prompt, for the deliveries that never surface as an input
-    // event (an SDK `session.prompt`, a launch brief). noteUserInput drops the
-    // repeat when a message arrives on both seams. The addendum is appended
-    // whoever prompted — the agent is under auto mode either way — but only
-    // while auto mode is on: telling an agent about a permission system that
-    // is off would have it asking for approvals nothing is going to withhold.
     pi.on("before_agent_start", (event) => {
       if (promptIsUsers) session.noteUserInput(event.prompt);
-      if (options.isEnabled?.() === false) return {};
-      return { systemPrompt: `${event.systemPrompt}\n\n${autoModeSystemPromptAddendum()}` };
+      return {};
     });
 
-    // Only assistant TEXT. A toolResult message is the injection surface the
-    // classifier's prompt exists to stay out of.
     pi.on("message_end", (event) => {
       if (event.message.role !== "assistant") return;
       session.noteAssistantText(messageText(event.message));
     });
 
-    // pi takes the returned usage INSTEAD of the tool's own, so what the tool
-    // reported has to come back with it.
+    pi.on("session_compact", () => {
+      session.noteCompaction();
+    });
+
     pi.on("tool_result", (event) => {
       const held = options.usageLedger?.drain();
       return held ? { usage: mergeUsage(event.usage, held) } : undefined;
@@ -269,15 +227,10 @@ export function createAutoMode(options: AutoModeOptions): (pi: AutoModeExtension
   };
 }
 
-/**
- * pi's UI, when there is one to talk to. `-p` and `--mode json` say so with
- * hasUI, and a duck-typed ctx (a test's, an older pi's) may carry no ui at all.
- */
 function uiOf(ctx: AutoModeContextLike | undefined): AutoModeUILike | undefined {
   return ctx?.hasUI === false ? undefined : ctx?.ui;
 }
 
-/** The denial the user sees: a line as it happens, and a list that stays. */
 function showDenial(ctx: AutoModeContextLike, denial: AutoModeDenial, standing: readonly AutoModeDenial[]): void {
   const ui = uiOf(ctx);
   if (!ui) return;
@@ -285,10 +238,6 @@ function showDenial(ctx: AutoModeContextLike, denial: AutoModeDenial, standing: 
   ui.setWidget(autoModeDenialWidgetKey, denialWidgetLines(standing));
 }
 
-/**
- * The breaker's one question. No UI is fail-closed on purpose: an unattended
- * run has nobody to answer, and the answer is what resumes auto mode.
- */
 async function askToResume(
   session: AutoModeSession,
   ctx: AutoModeContextLike,
@@ -301,14 +250,30 @@ async function askToResume(
   try {
     return await ui.confirm(question.title, question.message);
   } catch {
-    // A dialog that could not be shown is not an approval.
     return false;
   } finally {
     announceWaiting(ctx, onWaitingForUser, false);
   }
 }
 
-/** Announcing must never decide the answer, so a listener that throws is noted and dropped. */
+async function askToRun(
+  action: string,
+  ctx: AutoModeContextLike,
+  onWaitingForUser?: (waiting: boolean) => void,
+): Promise<boolean> {
+  const ui = uiOf(ctx);
+  if (!ui) return false;
+  const question = tooLongQuestion(action);
+  announceWaiting(ctx, onWaitingForUser, true);
+  try {
+    return await ui.confirm(question.title, question.message);
+  } catch {
+    return false;
+  } finally {
+    announceWaiting(ctx, onWaitingForUser, false);
+  }
+}
+
 function announceWaiting(
   ctx: AutoModeContextLike,
   onWaitingForUser: ((waiting: boolean) => void) | undefined,
@@ -328,17 +293,11 @@ function messageText(message: MessageLike): string {
     .join("\n");
 }
 
-/** A reporter that threw. The denial itself stands; only the report is lost. */
 function reportFailure(ctx: AutoModeContextLike, error: unknown): void {
   const message = error instanceof Error ? error.message : String(error);
   uiOf(ctx)?.notify(`auto mode could not report this denial to attn: ${message}`, "warning");
 }
 
-/**
- * The durable record failed. Said louder than a lost report is, because it is
- * the leg nothing else backs up: this denial happened and no surface outside
- * this screen will ever know it did.
- */
 function recordFailure(ctx: AutoModeContextLike, error: unknown): void {
   const message = error instanceof Error ? error.message : String(error);
   uiOf(ctx)?.notify(`auto mode could not write this denial to its local record: ${message}`, "error");

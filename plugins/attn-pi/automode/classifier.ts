@@ -1,50 +1,54 @@
-// The seam between the static tree and the model that judges what the tree
-// routes on. This file is the interface both sides agree on, plus the stub the
-// tests decide with; model-classifier.ts is the implementation.
 import type { ToolCall } from "./policy";
 import type { TranscriptEntry } from "./transcript";
 
 export type ClassifierRequest = {
   call: ToolCall;
-  /** The session's working directory the call was placed against. */
   cwd: string;
-  /** Why the static tree could not answer, in its own words. */
+
   reason: string;
-  /** Config prose describing what this machine may do. */
+
   environment: readonly string[];
-  /** What the user and the agent said, oldest first. Never tool results. */
+
   transcript?: readonly TranscriptEntry[];
-  /** pi's turn signal, so Esc aborts a classification in flight. */
+
+  grant?: string;
+
   signal?: AbortSignal;
 };
 
-/**
- * Which pass answered: 2a is the configured classifier, 2b the escalation
- * model. Carried so a denial can say who decided it; a classifier that does not
- * name a layer (the stub, a future one-pass judge) leaves it unset.
- */
-export type ClassifierLayer = "2a" | "2b";
+export type ClassifierLayer = "harm" | "intent";
+
+export type ClassifierPrompt = {
+  layer: ClassifierLayer;
+  system: string;
+  user: string;
+};
 
 export type ClassifierVerdict =
-  | { verdict: "allow"; reason?: string; layer?: ClassifierLayer }
+  | { verdict: "allow"; reason?: string; layer?: ClassifierLayer; severity?: number }
   | {
       verdict: "deny";
       reason: string;
       layer?: ClassifierLayer;
-      /**
-       * Nothing judged this call: every model the layer could reach failed to
-       * answer. The deny is auto mode failing closed, so the surfaces name it
-       * apart from a model that looked and refused.
-       */
+      prompt?: ClassifierPrompt;
+
+      severity?: number;
+
+      category?: string;
+
+      boundary?: boolean;
+
       unavailable?: boolean;
-    }
-  | { verdict: "uncertain"; reason?: string; layer?: ClassifierLayer };
+
+      unreadable?: boolean;
+
+      tooLong?: boolean;
+    };
 
 export interface Classifier {
   classify(request: ClassifierRequest): Promise<ClassifierVerdict>;
 }
 
-/** A classifier that answers what it was told to, and records what it saw. */
 export class StubClassifier implements Classifier {
   readonly requests: ClassifierRequest[] = [];
 

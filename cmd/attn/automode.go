@@ -14,16 +14,6 @@ import (
 	"github.com/victorarias/attn/internal/protocol"
 )
 
-// `attn automode` is auto mode's operator and agent surface: pi's permission
-// system, configured from attn. Design:
-// docs/plans/2026-08-16-pi-auto-mode.md.
-//
-// This CLI proposes; it never promotes. `allow`, `deny` and `model` record a
-// proposal a human reviews in the app, and every one of them says so on the way
-// out — an agent that read "recorded" and inferred "in force" would keep running
-// into the same denial. There is no promote verb here, and adding one would undo
-// the design: the app is the only place a policy change becomes real.
-
 func runAutoMode() {
 	if len(os.Args) < 3 || os.Args[2] == "-h" || os.Args[2] == "--help" {
 		writeAutoModeHelp(os.Stdout)
@@ -244,8 +234,7 @@ func runAutoModeModel(args []string) {
 			automode.TargetClassifier, automode.TargetEscalation, target)
 		os.Exit(2)
 	}
-	// Spaces or commas, either way: the list is what the layer runs on, and a
-	// typo is worth catching here rather than after a round trip.
+
 	models, err := automode.ParseModelList(strings.Join(rest[1:], automode.ModelListSeparator))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "automode model %s: %v\n", target, err)
@@ -281,9 +270,6 @@ func proposeAutoMode(verb, kind, target, value string, asJSON bool) {
 	fmt.Println("This changed nothing yet. Promote it in the attn app to put it in force.")
 }
 
-// autoModeProposer records who asked, when the caller is an attn session. It is
-// attribution for the human reviewing the list, not authorization: a proposal
-// from anyone is equally inert.
 func autoModeProposer() string {
 	return strings.TrimSpace(os.Getenv("ATTN_SESSION_ID"))
 }
@@ -318,10 +304,6 @@ func runAutoModeDenials(args []string) {
 	writeAutoModeDenials(os.Stdout, result.Denials, protocol.Deref(result.LedgerNote))
 }
 
-// writeAutoModeDenials prints the feed newest first, one row per denial: when,
-// which session, who decided, what was blocked, and why. A note names what the
-// session-side ledger admits it lost, so a clipped feed never reads as a whole
-// episode.
 func writeAutoModeDenials(out io.Writer, denials []protocol.AutoModeDenialInfo, ledgerNote string) {
 	if len(denials) == 0 {
 		fmt.Fprintln(out, "no denials recorded")
@@ -338,7 +320,6 @@ func writeAutoModeDenials(out io.Writer, denials []protocol.AutoModeDenialInfo, 
 	}
 }
 
-// stripFlags drops every --flag and its value from a positional argument list.
 func stripFlags(args []string) []string {
 	out := []string{}
 	for i := 0; i < len(args); i++ {

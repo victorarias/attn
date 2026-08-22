@@ -13,15 +13,6 @@ import (
 	"github.com/victorarias/attn/internal/store"
 )
 
-// Auto mode's daemon surface, split across two transports on purpose.
-//
-// This file holds the unix-socket half — the one `attn automode` and therefore
-// every agent can reach. It reads, it edits environment prose, and it records
-// proposals. Nothing here can change the patterns or models a pi session
-// launches with; ws_automode.go holds the app-only half that can.
-//
-// Design: docs/plans/2026-08-16-pi-auto-mode.md.
-
 const automodeDenialsDefaultLimit = 20
 
 func (d *Daemon) sendAutoModeResponse(conn net.Conn, resp protocol.Response) {
@@ -30,8 +21,6 @@ func (d *Daemon) sendAutoModeResponse(conn net.Conn, resp protocol.Response) {
 	}
 }
 
-// requireAutoModeStore refuses every verb on a daemon with no database rather
-// than answering with the defaults, which would read as a configured machine.
 func (d *Daemon) requireAutoModeStore(conn net.Conn) bool {
 	if d.store == nil {
 		d.sendError(conn, "no database")
@@ -117,10 +106,6 @@ func (d *Daemon) handleAutoModeEnvRemove(conn net.Conn, msg *protocol.AutoModeEn
 	})
 }
 
-// handleAutoModePropose records a proposal and nothing else. A caller that
-// expected an allow to take effect gets a proposal id back; the CLI says so in
-// as many words, because a silent "recorded, inert" is how an agent concludes
-// its own rule is live.
 func (d *Daemon) handleAutoModePropose(conn net.Conn, msg *protocol.AutoModeProposeMessage) {
 	if !d.requireAutoModeStore(conn) {
 		return
@@ -152,8 +137,7 @@ func (d *Daemon) handleAutoModeDenials(conn net.Conn, msg *protocol.AutoModeDeni
 	if msg.Limit != nil && *msg.Limit > 0 {
 		limit = *msg.Limit
 	}
-	// The log is not the whole record until the ledger has been folded in: a
-	// denial whose relay report was lost lives only in the file.
+
 	reconcile := d.reconcileAutoModeDenialLedger()
 	denials, err := d.store.ListAutoModeDenials(limit)
 	if err != nil {
@@ -169,15 +153,8 @@ func (d *Daemon) handleAutoModeDenials(conn net.Conn, msg *protocol.AutoModeDeni
 	})
 }
 
-// notificationKindAutoModeDenied marks the notification a refused call raises.
 const notificationKindAutoModeDenied = "automode_denied"
 
-// recordAutoModeDenial is where a session's refusal becomes something the user
-// can see: a row in the denials log, a notification naming what was blocked and
-// why, and one `automode.denied` fact carrying the session it happened in.
-//
-// Nothing here is recurring. A session that denies nothing writes nothing,
-// publishes nothing, and draws nothing.
 func (d *Daemon) recordAutoModeDenial(params pluginReportAutoModeDenialParams) error {
 	if d.store == nil {
 		return fmt.Errorf("no database")
@@ -200,13 +177,7 @@ func (d *Daemon) recordAutoModeDenial(params pluginReportAutoModeDenialParams) e
 	if dropped > 0 {
 		d.logf("automode: denial log is at its %d-row cap; dropped %d oldest", store.AutoModeDenialRows, dropped)
 	}
-	// The notification is best effort, by design. The denial itself is already
-	// enforced and the row is durable, so a failed notification write costs the
-	// user this one surface — `attn automode denials` still lists it — and the
-	// report is not worth failing over a surface. The fact stays with the
-	// notification because pushing it alone would re-push a list the denial
-	// never reached. The log line names the denial either way, so a row is never
-	// the only trace of it.
+
 	notification := ""
 	record, err := d.store.AddNotification(autoModeDenialNotification(d.sessionLabel(sessionID), stored), time.Now())
 	if err != nil {
@@ -219,15 +190,11 @@ func (d *Daemon) recordAutoModeDenial(params pluginReportAutoModeDenialParams) e
 	if notification == "" {
 		return nil
 	}
-	// One fact, not two: the notification is how this denial is surfaced, and
-	// automode.denied's projection is what pushes it. Its subject is the session
-	// because that is the entity a denial is about.
+
 	d.publishFact(FactAutoModeDenied, sessionID, nil)
 	return nil
 }
 
-// sessionLabel names a session the way the user does, falling back to its id
-// when the session is gone by the time the report lands.
 func (d *Daemon) sessionLabel(sessionID string) string {
 	if session := d.store.Get(sessionID); session != nil && strings.TrimSpace(session.Label) != "" {
 		return session.Label
@@ -238,8 +205,7 @@ func (d *Daemon) sessionLabel(sessionID string) string {
 func autoModeDenialNotification(label string, denial store.AutoModeDenial) store.NotificationRecord {
 	return store.NotificationRecord{
 		Kind: notificationKindAutoModeDenied,
-		// Auto mode working as designed: the agent got the reason, adapted or
-		// asked, and the run went on. Worth seeing, never worth interrupting for.
+
 		Severity:   store.NotificationInfo,
 		Title:      fmt.Sprintf("Auto mode blocked a call in %s", label),
 		Body:       denial.Signature,
