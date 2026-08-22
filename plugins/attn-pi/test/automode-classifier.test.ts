@@ -493,7 +493,6 @@ describe("the fallback walk", () => {
     expect(verdict.reason).toContain("harm model");
     expect(verdict.reason).toContain("vendor/primary, vendor/fallback");
     expect(verdict.reason).toContain("502 bad gateway");
-    expect(verdict.reason).toContain("outage");
     expect(specs(registry)).toHaveLength(2 * attemptsPerModel);
   });
 

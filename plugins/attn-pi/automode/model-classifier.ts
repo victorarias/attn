@@ -264,8 +264,7 @@ function promptIsTooLong(failure: string): boolean {
 function tooLongReason(layer: ClassifierLayer, lastFailure: string): string {
   return (
     `auto mode's ${layer} model refused this conversation for its size: ${lastFailure}. ` +
-    `Nothing judged the call and nothing refused the action - the classifier was never shown it. ` +
-    `Retrying reaches the same limit. Auto mode has asked the user to decide.`
+    `Nothing judged the call and nothing refused the action - the classifier was never shown it.`
   );
 }
 
@@ -274,8 +273,7 @@ function unavailableReason(layer: ClassifierLayer, models: readonly string[], la
   return (
     `auto mode could not reach its ${layer} model: ` +
     `tried ${tried}, ${attemptsPerModel} attempts each; last failure: ${lastFailure}. ` +
-    `No model judged this call. Auto mode fails closed when its classifier is unreachable, so this ` +
-    `is an outage and not a refusal. Say so to the user rather than retrying the call.`
+    `No model judged this call.`
   );
 }
 

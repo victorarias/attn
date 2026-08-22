@@ -32,7 +32,7 @@ export function decideStatically(call: ToolCall, config: AutoModeConfig, cwd: st
 
   const denied = matchesAnyPattern(config.hardDeny, signature);
   if (denied !== undefined) {
-    return { outcome: "block", rule: "hard-deny", reason: `denied by the configured pattern ${denied}, which no approval in the conversation lifts` };
+    return { outcome: "block", rule: "hard-deny", reason: `denied by the configured pattern ${denied}` };
   }
 
   const allowed = matchesAnyPattern(config.allow, signature);

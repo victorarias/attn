@@ -4,7 +4,6 @@ import { defaultAutoModeConfig } from "../automode/config";
 import { createAutoMode, type AutoModeDenial } from "../automode/index";
 import { UsageLedger } from "../automode/usage";
 import { assistantMessage, ctx, FakePi, FakeUI, toolCall, uiContext, userInput } from "./automode-fake-pi";
-import { autoModeSystemPromptAddendum } from "../automode/addendum";
 
 function wire(
   classifier: Classifier,
@@ -130,14 +129,13 @@ describe("auto mode extension", () => {
     expect(await second.toolCall?.(toolCall("bash", { command: "git push origin main" }), ctx)).toBeUndefined();
   });
 
-  test("the system prompt gains the addendum, keeping what pi assembled", () => {
+  test("the system prompt pi assembled is left alone", () => {
     const pi = wire(new StubClassifier());
     const result = pi.beforeAgentStart?.(
       { type: "before_agent_start", prompt: "ship it", systemPrompt: "pi's own prompt" },
       ctx,
     );
-    expect(result?.systemPrompt).toContain("pi's own prompt");
-    expect(result?.systemPrompt).toContain(autoModeSystemPromptAddendum());
+    expect(result?.systemPrompt).toBeUndefined();
   });
 
   test("what the user and the agent said reaches the classifier; tool results do not", async () => {
@@ -187,7 +185,7 @@ describe("auto mode extension", () => {
     expect(await push()).toBeUndefined();
   });
 
-  test("an extension's prompt stays out of the transcript, and still gets the addendum", async () => {
+  test("an extension's prompt stays out of the transcript", async () => {
     const classifier = new StubClassifier({ verdict: "deny", reason: "no" });
     const pi = wire(classifier);
     pi.input?.({ type: "input", text: "summarize the diff", source: "extension" }, ctx);
@@ -198,7 +196,7 @@ describe("auto mode extension", () => {
     await pi.toolCall?.(toolCall("bash", { command: "git push origin main" }), ctx);
 
     expect(classifier.requests[0]?.transcript).toEqual([]);
-    expect(result?.systemPrompt).toContain("Auto mode is on for this session");
+    expect(result?.systemPrompt).toBeUndefined();
   });
 
   test("held classifier usage rides the next tool result, keeping the tool's own", () => {
@@ -269,7 +267,6 @@ describe("a conversation the classifier's model will not take", () => {
 
     const result = await pi.toolCall?.(toolCall("bash", { command: "git push --force" }), uiContext(ui));
     expect(result?.block).toBe(true);
-    expect(result?.reason).toContain("Retrying reaches the same limit");
     expect(denials[0]?.rule).toBe("classifier-too-long");
     expect(denials[0]?.clearable).toBe(false);
   });

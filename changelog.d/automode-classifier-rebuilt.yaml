@@ -10,16 +10,17 @@ change: |
     enough to be cut, and no hand-typed prompt ever was. So the classifier
     refused work it had been authorized to do, and could not see the
     authorization.
-  - Blocked calls say how to get past them. An approval used to be the only
-    advice, and for three kinds of block it was wrong. A model auto mode
-    cannot reach now says nothing refused the work and a retry is what gets
-    through. A refusal an approval cannot lift says so, and says what does
-    lift it. The on-screen list of blocked calls follows the same rule.
+  - A blocked call tells the agent what was blocked and why, and stops there.
+    It used to add advice about approvals and retries, which was wrong for
+    three kinds of block and taught the agent to argue with the guard. The
+    on-screen list still says how to get past each block, because that is the
+    reader who can act on it: a model auto mode cannot reach says nothing
+    refused the work, and a refusal an approval cannot lift says so.
   - Two passes ask two questions. The first grades how dangerous the action is
     on its own, cheaply, ignoring what the user asked for; anything routine
     runs without a second call. The second weighs the user's intent and
-    answers with the name of the rule it matched, which the agent and the
-    record now get told.
+    answers with the name of the rule it matched, which the block and the
+    record now carry.
   - One refusal a conversation cannot lift: data leaving the machine. Turning
     auto mode off used to be a second one. A user who says plainly what they
     want can now clear it.
@@ -28,7 +29,7 @@ change: |
     outlive the conversation that earned it.
   - A conversation too big for the classifier's model asks you. Auto mode does
     not guess beforehand and does not judge on a piece of it. Say yes and the
-    call runs, say no and the agent is told to ask rather than retry.
+    call runs, say no and it stays blocked.
   - Tool calls the agent already made are in the window, so the classifier
     sees the work leading up to the call it is judging.
   - The rules grew from twelve to about fifty, and they are sent in a form

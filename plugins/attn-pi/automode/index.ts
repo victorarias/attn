@@ -1,4 +1,3 @@
-import { autoModeSystemPromptAddendum } from "./addendum";
 import type { Classifier, ClassifierPrompt } from "./classifier";
 import type { AutoModeConfig } from "./config";
 import { denialToolResult } from "./denial";
@@ -209,8 +208,7 @@ export function createAutoMode(options: AutoModeOptions): (pi: AutoModeExtension
 
     pi.on("before_agent_start", (event) => {
       if (promptIsUsers) session.noteUserInput(event.prompt);
-      if (options.isEnabled?.() === false) return {};
-      return { systemPrompt: `${event.systemPrompt}\n\n${autoModeSystemPromptAddendum()}` };
+      return {};
     });
 
     pi.on("message_end", (event) => {

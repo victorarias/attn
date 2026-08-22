@@ -177,13 +177,12 @@ function breakerReason(breaker: BreakerState): string {
       `auto mode blocked ${breaker.consecutive} calls in a row and ${breaker.total} since the user last ` +
       `spoke, every one of them because its classifier could not be reached (limits: ` +
       `${consecutiveDenialLimit} consecutive, ${totalDenialLimit} total), so it stopped trying. ` +
-      `Nothing judged any of those calls dangerous. Tell the user their classifier model looks to be ` +
-      `down; they have to answer before anything else runs.`
+      `Nothing judged any of those calls dangerous.`
     );
   }
   return (
     `auto mode has refused ${breaker.consecutive} calls in a row and ${breaker.total} since the ` +
     `user last spoke (limits: ${consecutiveDenialLimit} consecutive, ${totalDenialLimit} total), ` +
-    `so it stopped judging further calls. The user has to answer before anything else runs.`
+    `so it stopped judging further calls.`
   );
 }

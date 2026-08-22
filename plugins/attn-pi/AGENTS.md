@@ -298,13 +298,17 @@ plans live under `docs/plans/` and the classifier receipt is
 - **Fail-safe both ways:** a handler that throws blocks the tool, and a call
   auto mode cannot judge is refused, never run. Model output that does not
   read as a verdict is one of those refusals.
-- **A block that nobody judged says so, to both readers.** An unreachable
-  layer and an unreadable answer are not refusals: the way through them is a
-  retry, and the user's approval is powerless because it only re-runs the
-  classification against the same endpoint. `denialToolResult` has a second
-  shape for those, and `denialWidgetLines` drops its approve line when every
-  standing denial is an outage. Handing over the wrong one costs the user a
-  turn and leaves them thinking they fixed it.
+- **A block that nobody judged says so, to the user.** An unreachable layer
+  and an unreadable answer are not refusals: the way through them is a retry,
+  and the user's approval is powerless because it only re-runs the
+  classification against the same endpoint. `denialWidgetLines` drops its
+  approve line when every standing denial is an outage. Showing the approve
+  line anyway costs the user a turn and leaves them thinking they fixed it.
+- **The agent is told what was blocked and why, and nothing more.**
+  `denialToolResult` has one shape: the call and the reason. It does not tell
+  the agent what to do next, whether a retry helps, or whether the user could
+  lift it. Claude Code's own denial does that work in its own words, and
+  guidance we invent instead teaches the agent to argue with the guard.
 - **The session's opening message keeps its own seat in the classifier's
   transcript window, and rides whole.** It is the only message that can GRANT
   anything, and a cap on it cuts exactly the middle where a delegation brief
@@ -411,10 +415,10 @@ plans live under `docs/plans/` and the classifier receipt is
   ledger line and nowhere else — not the store, the protocol or the app. It
   rides on an unavailable deny too: nobody read it, and that is the finding.
   Only a call a classifier ran for carries one.
-- **A denial says whether an approval could lift it.** A boundary verdict and
-  every static rule set `clearable: false`, and their tool result sends the
-  agent neither to the user nor to a retry: the tree re-decides identically,
-  and a boundary is lifted by changing auto mode's setup, not by talking.
+- **A denial records whether an approval could lift it.** A boundary verdict
+  and every static rule set `clearable: false`: the tree re-decides
+  identically, and a boundary is lifted by changing auto mode's setup, not by
+  talking. It steers the widget and the ledger, never the agent's tool result.
   The `hard_deny` list keeps its name; it is an ordinary deny, not a boundary.
 - The ledger keeps an active file and one rotated generation, and a rotation
   counts the destroyed generation's records AND its markers into one marker
