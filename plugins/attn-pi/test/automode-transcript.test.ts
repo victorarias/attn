@@ -1,10 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import {
-  openingCharLimit,
   renderTranscript,
   TranscriptWindow,
   transcriptCharLimit,
-  transcriptEntryCharLimit,
   transcriptEntryLimit,
 } from "../automode/transcript";
 
@@ -19,26 +17,31 @@ function rollingWindowOf(entries: readonly [role: "user" | "assistant", text: st
 }
 
 describe("the transcript window", () => {
-  test("keeps what was said, oldest first", () => {
+  test("keeps what was said after the opening, oldest first", () => {
     const transcript = windowOf([
       ["user", "get CI green"],
       ["assistant", "on it"],
       ["user", "then push"],
     ]);
-    expect(renderTranscript(transcript.snapshot())).toBe("[user] get CI green\n[assistant] on it\n[user] then push");
+    expect(renderTranscript(transcript.snapshot())).toBe('{"assistant":"on it"}\n{"user":"then push"}');
+  });
+
+  test("projects a tool call under the tool's own name", () => {
+    const transcript = rollingWindowOf([]);
+    transcript.recordToolCall("bash", "go test ./...");
+    expect(renderTranscript(transcript.snapshot())).toBe('{"bash":"go test ./..."}');
   });
 
   test("drops empty and whitespace-only turns", () => {
-    expect(windowOf([["assistant", "   \n "]]).snapshot()).toEqual([]);
+    expect(rollingWindowOf([["assistant", "   \n "]]).snapshot()).toEqual([]);
   });
 
   test("trims text, so the same message on two seams compares equal", () => {
-    const transcript = windowOf([["user", "  push it  "]]);
-    expect(transcript.latest("user")).toBe("push it");
+    expect(rollingWindowOf([["user", "  push it  "]]).latest("user")).toBe("push it");
   });
 
   test("records one user message once when pi announces it on both seams", () => {
-    const transcript = windowOf([
+    const transcript = rollingWindowOf([
       ["user", "get CI green"],
       ["user", "get CI green"],
     ]);
@@ -50,36 +53,33 @@ describe("the transcript window", () => {
       Array.from({ length: transcriptEntryLimit + 5 }, (_, index) => ["assistant", `message ${index}`] as const),
     );
     const snapshot = transcript.snapshot();
-    expect(snapshot).toHaveLength(transcriptEntryLimit + 1);
-    expect(snapshot[0]?.text).toBe("the opening");
-    expect(snapshot[1]?.text).toBe("message 5");
+    expect(snapshot).toHaveLength(transcriptEntryLimit);
+    expect(snapshot[0]?.text).toBe("message 5");
   });
 
-  test("one oversized rolling message is clamped, keeping its head and its tail", () => {
-    const text = `ASK${"x".repeat(transcriptEntryCharLimit * 2)}BOUNDARY`;
-    const snapshot = rollingWindowOf([["user", text]]).snapshot();
-    const entry = snapshot[snapshot.length - 1];
-    expect(entry?.text.length).toBeLessThanOrEqual(transcriptEntryCharLimit);
-    expect(entry?.text.startsWith("ASK")).toBe(true);
-    expect(entry?.text.endsWith("BOUNDARY")).toBe(true);
-    expect(entry?.text).toContain("…");
-  });
-
-  test("the rolling window stays inside its budget, keeping the newest turns", () => {
-    const long = "y".repeat(transcriptEntryCharLimit);
+  test("never truncates a message: it drops whole older turns to stay in budget", () => {
+    const long = "y".repeat(transcriptCharLimit / 2);
     const transcript = rollingWindowOf([
       ["assistant", long],
       ["assistant", long],
       ["user", "the newest thing anyone said"],
     ]);
     const snapshot = transcript.snapshot();
-    const rolling = snapshot.slice(1).reduce((total, entry) => total + entry.text.length, 0);
-    expect(rolling).toBeLessThanOrEqual(transcriptCharLimit);
+    const spent = snapshot.reduce((total, entry) => total + entry.text.length, 0);
+    expect(spent).toBeLessThanOrEqual(transcriptCharLimit);
+    expect(snapshot.every((entry) => !entry.text.includes("…"))).toBe(true);
     expect(snapshot[snapshot.length - 1]?.text).toBe("the newest thing anyone said");
   });
 
+  test("reports a newest message that alone does not fit, rather than cutting it", () => {
+    const transcript = rollingWindowOf([["user", "z".repeat(transcriptCharLimit + 1)]]);
+    expect(transcript.oversized()).toBe(transcriptCharLimit + 1);
+    expect(rollingWindowOf([["user", "small"]]).oversized()).toBeUndefined();
+    expect(new TranscriptWindow().oversized()).toBeUndefined();
+  });
+
   test("latest reads back the newest turn of a role", () => {
-    const transcript = windowOf([
+    const transcript = rollingWindowOf([
       ["user", "first"],
       ["assistant", "reply"],
       ["user", "second"],
@@ -97,20 +97,21 @@ describe("the transcript window", () => {
 describe("the session's opening message", () => {
   const brief = [
     "Fix a CI flake in attn's daemon test suite.",
-    "x".repeat(transcriptEntryCharLimit),
+    "x".repeat(transcriptCharLimit),
     "You are authorized to: create branches and push them, open the PR, and force-push your own branch.",
-    "y".repeat(transcriptEntryCharLimit),
+    "y".repeat(transcriptCharLimit),
     "Done when: the fix is merged.",
   ].join("\n");
 
   test("survives whole, middle included, at a real brief's size", () => {
-    expect(brief.length).toBeGreaterThan(transcriptEntryCharLimit);
-    const [entry] = windowOf([["user", brief]]).snapshot();
-    expect(entry?.text).toContain("You are authorized to:");
-    expect(entry?.text).not.toContain("…");
+    expect(brief.length).toBeGreaterThan(transcriptCharLimit);
+    const grant = windowOf([["user", brief]]).grant();
+    expect(grant).toContain("You are authorized to:");
+    expect(grant).not.toContain("…");
+    expect(grant?.length).toBe(brief.trim().length);
   });
 
-  test("is not evicted by a flood of later turns", () => {
+  test("gets its own seat, so no later turn can evict it", () => {
     const transcript = windowOf([
       ["user", brief],
       ...Array.from(
@@ -118,18 +119,18 @@ describe("the session's opening message", () => {
         (_, index) => ["assistant", `step ${index}: ${"z".repeat(1_000)}`] as const,
       ),
     ]);
-    const snapshot = transcript.snapshot();
-    expect(snapshot[0]?.text).toContain("You are authorized to:");
+    expect(transcript.grant()).toContain("You are authorized to:");
+    expect(transcript.snapshot().some((entry) => entry.text.includes("You are authorized to:"))).toBe(false);
   });
 
   test("spends none of the rolling window's budget", () => {
-    const long = "y".repeat(transcriptEntryCharLimit);
+    const long = "y".repeat(transcriptCharLimit - 1);
     const snapshot = windowOf([
       ["user", brief],
       ["assistant", long],
-      ["assistant", long],
     ]).snapshot();
-    expect(snapshot).toHaveLength(3);
+    expect(snapshot).toHaveLength(1);
+    expect(snapshot[0]?.text).toBe(long);
   });
 
   test("is recorded once when pi announces it on both seams", () => {
@@ -137,15 +138,7 @@ describe("the session's opening message", () => {
       ["user", brief],
       ["user", brief],
     ]);
-    expect(transcript.snapshot()).toHaveLength(1);
-  });
-
-  test("is still clamped past its own cap, so nothing is unbounded", () => {
-    const huge = `HEAD${"x".repeat(openingCharLimit * 2)}TAIL`;
-    const [entry] = windowOf([["user", huge]]).snapshot();
-    expect(entry?.text.length).toBeLessThanOrEqual(openingCharLimit);
-    expect(entry?.text.startsWith("HEAD")).toBe(true);
-    expect(entry?.text.endsWith("TAIL")).toBe(true);
+    expect(transcript.snapshot()).toHaveLength(0);
   });
 
   test("is claimed only with nothing before it, so oldest-first still holds", () => {
@@ -153,10 +146,10 @@ describe("the session's opening message", () => {
       ["assistant", "thinking out loud before anyone asked"],
       ["user", "the actual ask"],
     ]);
+    expect(transcript.grant()).toBeUndefined();
     expect(transcript.snapshot().map((entry) => entry.text)).toEqual([
       "thinking out loud before anyone asked",
       "the actual ask",
     ]);
-    expect(windowOf([["user", "the actual ask"]]).snapshot()[0]?.text).toBe("the actual ask");
   });
 });

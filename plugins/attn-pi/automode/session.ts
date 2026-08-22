@@ -1,8 +1,15 @@
 import type { Classifier, ClassifierPrompt } from "./classifier";
 import type { AutoModeConfig } from "./config";
 import { denialToolResult } from "./denial";
-import { decideStatically, describeCall, normalizedIntent, type StaticRule, type ToolCall } from "./policy";
-import { TranscriptWindow } from "./transcript";
+import {
+  callSignature,
+  decideStatically,
+  describeCall,
+  normalizedIntent,
+  type StaticRule,
+  type ToolCall,
+} from "./policy";
+import { transcriptCharLimit, TranscriptWindow } from "./transcript";
 
 export const consecutiveDenialLimit = 3;
 
@@ -13,8 +20,9 @@ export type DecisionRule =
   | "cached-allow"
   | "cached-deny"
   | "classifier"
-  | "classifier-2a"
-  | "classifier-2b"
+  | "classifier-harm"
+  | "classifier-intent"
+  | "classifier-oversized"
   | "classifier-unavailable"
   | "circuit-breaker";
 
@@ -88,14 +96,20 @@ export class AutoModeSession {
 
   async decide(call: ToolCall, options: DecideOptions): Promise<SessionDecision> {
     const staticDecision = decideStatically(call, this.config, options.cwd);
-    if (staticDecision.outcome === "run") return this.allowed(staticDecision.rule);
+    if (staticDecision.outcome === "run") {
+      this.transcript.recordToolCall(call.toolName, callSignature(call));
+      return this.allowed(staticDecision.rule);
+    }
     if (staticDecision.outcome === "block") {
       return this.denied(call, staticDecision.rule, staticDecision.reason, { outage: false, clearable: false });
     }
 
     const intent = normalizedIntent(call);
     const cached = this.cache.get(intent);
-    if (cached?.verdict === "allow") return this.allowed("cached-allow");
+    if (cached?.verdict === "allow") {
+      this.transcript.recordToolCall(call.toolName, callSignature(call));
+      return this.allowed("cached-allow");
+    }
     if (cached?.verdict === "deny") {
       return this.denied(call, "cached-deny", cached.reason, { outage: false, clearable: cached.boundary !== true });
     }
@@ -105,12 +119,23 @@ export class AutoModeSession {
       return this.denied(call, "circuit-breaker", breakerReason(breaker), { outage: breaker.outage });
     }
 
+    const oversized = this.transcript.oversized();
+    if (oversized !== undefined) {
+      return this.denied(call, "classifier-oversized", oversizedReason(oversized), {
+        outage: false,
+        judged: false,
+        clearable: false,
+      });
+    }
+
+    const grant = this.transcript.grant();
     const judged = await this.classifier.classify({
       call,
       cwd: options.cwd,
       reason: staticDecision.reason,
       environment: this.config.environment,
       transcript: this.transcript.snapshot(),
+      ...(grant === undefined ? {} : { grant }),
       signal: options.signal,
     });
     const prompt = judged.verdict === "deny" ? judged.prompt : undefined;
@@ -120,14 +145,12 @@ export class AutoModeSession {
     const rule: DecisionRule = judged.layer ? `classifier-${judged.layer}` : "classifier";
     if (judged.verdict === "allow") {
       this.cache.set(intent, { verdict: "allow", reason: judged.reason ?? "" });
+      this.transcript.recordToolCall(call.toolName, callSignature(call));
       return this.allowed(rule);
     }
-    const reason =
-      judged.verdict === "deny"
-        ? judged.reason
-        : `auto mode could not judge this call confidently${judged.reason ? `: ${judged.reason}` : ""}`;
-    const boundary = judged.verdict === "deny" && judged.boundary === true;
-    const unreadable = judged.verdict === "deny" && judged.unreadable === true;
+    const reason = judged.reason;
+    const boundary = judged.boundary === true;
+    const unreadable = judged.unreadable === true;
     if (!unreadable) {
       this.cache.set(intent, { verdict: "deny", reason, ...(boundary ? { boundary: true } : {}) });
     }
@@ -164,6 +187,15 @@ export class AutoModeSession {
       ...(kind.prompt ? { prompt: kind.prompt } : {}),
     };
   }
+}
+
+function oversizedReason(chars: number): string {
+  return (
+    `the last message in this conversation is ${chars} characters, past auto mode's ` +
+    `${transcriptCharLimit}-character classifier budget, so the classifier cannot be shown what was said. ` +
+    `Auto mode will not judge a call on a conversation it can only see part of, so it did not judge this ` +
+    `one. Nothing refused the action. Ask the user directly for what you need.`
+  );
 }
 
 function breakerReason(breaker: BreakerState): string {

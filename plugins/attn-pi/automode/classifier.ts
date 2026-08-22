@@ -11,10 +11,12 @@ export type ClassifierRequest = {
 
   transcript?: readonly TranscriptEntry[];
 
+  grant?: string;
+
   signal?: AbortSignal;
 };
 
-export type ClassifierLayer = "2a" | "2b";
+export type ClassifierLayer = "harm" | "intent";
 
 export type ClassifierPrompt = {
   layer: ClassifierLayer;
@@ -23,20 +25,23 @@ export type ClassifierPrompt = {
 };
 
 export type ClassifierVerdict =
-  | { verdict: "allow"; reason?: string; layer?: ClassifierLayer }
+  | { verdict: "allow"; reason?: string; layer?: ClassifierLayer; severity?: number }
   | {
       verdict: "deny";
       reason: string;
       layer?: ClassifierLayer;
       prompt?: ClassifierPrompt;
 
+      severity?: number;
+
+      category?: string;
+
       boundary?: boolean;
 
       unavailable?: boolean;
 
       unreadable?: boolean;
-    }
-  | { verdict: "uncertain"; reason?: string; layer?: ClassifierLayer };
+    };
 
 export interface Classifier {
   classify(request: ClassifierRequest): Promise<ClassifierVerdict>;

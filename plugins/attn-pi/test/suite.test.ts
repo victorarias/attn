@@ -300,7 +300,7 @@ describe("AttnPiSuite: auto mode denials -> suite.report_denial", () => {
     tool: "bash",
     action: "bash: curl https://example.com",
     reason: "the user never asked to reach that host",
-    rule: "classifier-2a",
+    rule: "classifier-harm",
     at: "2026-08-17T10:00:00.000Z",
   };
 

@@ -7,35 +7,22 @@ change: >
   could never help, and the user spent a turn believing they had fixed it.
   When the model auto mode asks about a call cannot be reached, the block now
   says so plainly. Nothing refused the work, retrying is what gets through,
-  and no approval will do it. When the refusal names a boundary, meaning data
-  leaving the machine or auto mode being switched off from inside a session,
-  the block says that approving it in the conversation will not lift it. What
-  lifts that one is a change to auto mode's own setup, which the user makes
-  outside the session. A call refused by a pattern on the deny list says the
-  same, because the deny list is checked again on every attempt however warmly
-  the retry was approved; that one is cleared by editing the list, in
-  Settings, where it always was. The on-screen list of blocked calls follows
-  the same rule and stops offering an approval that would not have worked.
-  Separately, auto mode no longer blocks work a delegation brief already
-  authorized. The classifier reads a rolling window of the conversation, and
-  every message in it was capped at 4,000 characters by keeping its head and
-  its tail and dropping the middle. Every real delegation brief is longer than
-  that (the ones on this machine ran 4,495 to 5,881 characters), and a brief
-  states what the agent may do in its middle. The permission was the part
-  thrown away while the constraints at either end survived, and the classifier
-  then refused the work for want of an authorization it had been handed and
-  could not see. A session's opening message now keeps its own seat in that
-  window, with its own much larger cap, so what the brief authorized arrives
-  whole however long the session runs. An answer auto mode cannot read as a
-  verdict is no longer remembered either. It already told the agent to retry,
-  and a remembered one answered the retry from the cache without a model ever
-  seeing the call again. Finally, a blocked call's local record
-  now keeps the whole prompt the classifier was judged on, so a wrong verdict
-  can be told apart from a conversation window that never carried the sentence
-  that mattered. That is exactly what went wrong above, and it took replaying
-  real calls by hand to find.
+  and no approval will do it. When the refusal is one an approval cannot lift,
+  the block says that too, and says what does lift it: a change to auto mode's
+  own setup, which the user makes outside the session. A call refused by a
+  pattern on the deny list says the same, because the deny list is checked
+  again on every attempt however warmly the retry was approved; that one is
+  cleared by editing the list, in Settings, where it always was. The on-screen
+  list of blocked calls follows the same rule and stops offering an approval
+  that would not have worked. An answer auto mode cannot read is no longer
+  remembered either. It already told the agent to retry, and a remembered one
+  answered the retry from the cache without a model ever seeing the call
+  again. Finally, a blocked call's local record now keeps the whole prompt the
+  classifier was judged on, so a wrong verdict can be told apart from a
+  conversation window that never carried the sentence that mattered. That is
+  exactly what went wrong with delegation briefs, and it took replaying real
+  calls by hand to find.
 symptom: >
   Blocked calls all said the same thing: ask the user to approve it. A
-  model-endpoint outage read as a refusal, a pattern on the deny list promised
-  an approval would clear it, and a delegated agent was refused work its brief
-  explicitly allowed.
+  model-endpoint outage read as a refusal, and a pattern on the deny list
+  promised an approval would clear it.

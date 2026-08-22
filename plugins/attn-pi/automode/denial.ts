@@ -42,6 +42,7 @@ function settledToolResult(denial: Denial): string {
 }
 
 function unjudgedToolResult(denial: Denial): string {
+  if (denial.clearable === false) return unshowableToolResult(denial);
   return [
     "attn auto mode could not judge this tool call, so it blocked it.",
     "",
@@ -53,6 +54,21 @@ function unjudgedToolResult(denial: Denial): string {
     "Retrying is what gets through. The user's approval will not unblock this",
     "one, because the retry reaches the same classifier. If it keeps failing,",
     "say so in your reply so the user knows the judge is down.",
+  ].join("\n");
+}
+
+function unshowableToolResult(denial: Denial): string {
+  return [
+    "attn auto mode could not judge this tool call, so it blocked it.",
+    "",
+    `Blocked: ${oneLine(denial.action)}`,
+    `Reason: ${oneLine(denial.reason)}`,
+    "",
+    "Nothing refused this action and no limit was crossed. Auto mode never",
+    "shows its classifier part of a conversation, and this one does not fit,",
+    "so no model was asked. Retrying changes nothing and the user's approval",
+    "does not reach this. Say in your reply what you were trying to do and ask",
+    "the user for it directly.",
   ].join("\n");
 }
 

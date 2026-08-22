@@ -30,7 +30,7 @@ export type RelayReportStateParams = { token: string; state: RelaySuiteState };
 // question the session already knows the answer to.
 export type RelayReportStopParams = { token: string; assistant_text: string; aborted?: boolean };
 // One call auto mode refused, on its way to attn's own surfaces. `rule` names
-// who decided (a static envelope rule, `classifier-2a`/`-2b`,
+// who decided (a static envelope rule, `classifier-harm`/`-intent`,
 // `classifier-unavailable`, the breaker) and
 // `at` is when the session refused it, RFC 3339.
 export type RelayReportDenialParams = {

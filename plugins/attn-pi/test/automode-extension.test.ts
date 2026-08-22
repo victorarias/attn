@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { StubClassifier, type Classifier } from "../automode/classifier";
 import { defaultAutoModeConfig } from "../automode/config";
 import { createAutoMode, type AutoModeDenial } from "../automode/index";
-import { transcriptEntryCharLimit } from "../automode/transcript";
+import { transcriptCharLimit } from "../automode/transcript";
 import { UsageLedger } from "../automode/usage";
 import { assistantMessage, ctx, FakePi, toolCall, userInput } from "./automode-fake-pi";
 import { autoModeSystemPromptAddendum } from "../automode/addendum";
@@ -104,7 +104,8 @@ describe("auto mode extension", () => {
     pi.say("clean up the branch");
     on = true;
     expect((await push())?.block).toBe(true);
-    expect(classifier.requests[0]?.transcript).toEqual([{ role: "user", text: "clean up the branch" }]);
+    expect(classifier.requests[0]?.grant).toBe("clean up the branch");
+    expect(classifier.requests[0]?.transcript).toEqual([]);
   });
 
   test("auto mode off leaves the system prompt alone", () => {
@@ -149,10 +150,8 @@ describe("auto mode extension", () => {
     );
     await pi.toolCall?.(toolCall("bash", { command: "git push origin main" }), ctx);
 
-    expect(classifier.requests[0]?.transcript).toEqual([
-      { role: "user", text: "get CI green" },
-      { role: "assistant", text: "I'll fix the retry." },
-    ]);
+    expect(classifier.requests[0]?.grant).toBe("get CI green");
+    expect(classifier.requests[0]?.transcript).toEqual([{ role: "assistant", text: "I'll fix the retry." }]);
   });
 
   test("one message arriving on both seams is recorded once", async () => {
@@ -160,13 +159,15 @@ describe("auto mode extension", () => {
     const pi = wire(classifier);
     pi.say("push it");
     await pi.toolCall?.(toolCall("bash", { command: "git push origin main" }), ctx);
-    expect(classifier.requests[0]?.transcript).toEqual([{ role: "user", text: "push it" }]);
+    expect(classifier.requests[0]?.grant).toBe("push it");
+    expect(classifier.requests[0]?.transcript).toEqual([]);
   });
 
   test("an oversized message arriving on both seams is recorded once", async () => {
     const classifier = new StubClassifier({ verdict: "deny", reason: "no" });
     const pi = wire(classifier);
-    pi.say(`${"x".repeat(transcriptEntryCharLimit * 2)} and don't push yet`);
+    pi.say("the opening ask");
+    pi.say(`${"x".repeat(transcriptCharLimit / 2)} and don't push yet`);
     await pi.toolCall?.(toolCall("bash", { command: "git push origin main" }), ctx);
     expect(classifier.requests[0]?.transcript).toHaveLength(1);
   });

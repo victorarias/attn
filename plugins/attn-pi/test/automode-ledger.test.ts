@@ -35,7 +35,12 @@ class DenyingRegistry implements ModelRegistryLike {
     return {
       streamSimple: () => ({
         result: async (): Promise<CompletionResult> => ({
-          content: [{ type: "text", text: JSON.stringify({ verdict: "deny", reason: "not asked for" }) }],
+          content: [
+            {
+              type: "text",
+              text: "<severity>80</severity><category>Irreversible Local Destruction</category>",
+            },
+          ],
           stopReason: "stop",
         }),
       }),
@@ -87,7 +92,7 @@ function denial(overrides: Partial<AutoModeDenial> = {}): AutoModeDenial {
     tool: "bash",
     action: "bash: git push --force origin main",
     reason: "not asked for",
-    rule: "classifier-2a",
+    rule: "classifier-harm",
     at: "2026-08-18T10:00:00.000Z",
     ...overrides,
   };
@@ -152,10 +157,10 @@ describe("what a denial leaves behind", () => {
       tool_call_id: "call-1",
       tool: "bash",
       action: "bash: git push --force origin main",
-      reason: "not asked for",
-      rule: "classifier-2a",
+      reason: "the classifier placed this call at severity 80 under the Irreversible Local Destruction rule",
+      rule: "classifier-intent",
       at: expect.any(String),
-      prompt: { layer: "2a", system: expect.any(String), user: expect.any(String) },
+      prompt: { layer: "intent", system: expect.any(String), user: expect.any(String) },
     });
   });
 
@@ -164,10 +169,10 @@ describe("what a denial leaves behind", () => {
     await denyOneCall({ path, opening: "you may force-push this branch, it is mine" });
 
     const prompt = readRecords(path)[0]?.prompt;
-    expect(prompt?.layer).toBe("2a");
-    expect(prompt?.system).toContain("You are a safety classifier");
+    expect(prompt?.layer).toBe("intent");
+    expect(prompt?.system).toContain("You are a security monitor for an autonomous coding agent.");
     expect(prompt?.user).toContain("you may force-push this branch, it is mine");
-    expect(prompt?.user).toContain("bash: git push --force origin main");
+    expect(prompt?.user).toContain('{"bash":"git push --force origin main"}');
   });
 
   test("a call no classifier judged carries no prompt", async () => {

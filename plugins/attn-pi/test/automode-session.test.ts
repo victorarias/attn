@@ -4,6 +4,7 @@ import { defaultAutoModeConfig, type AutoModeConfig } from "../automode/config";
 import { denialToolResult } from "../automode/denial";
 import type { ToolCall } from "../automode/policy";
 import { AutoModeSession, consecutiveDenialLimit, totalDenialLimit } from "../automode/session";
+import { transcriptCharLimit } from "../automode/transcript";
 
 const cwd = "/work/repo";
 
@@ -45,8 +46,11 @@ describe("denial text contract", () => {
       expect(new Set([clearable, unjudged, settled]).size).toBe(3);
     });
 
-    test("an unjudged call reads as an outage even when it is unclearable", () => {
-      expect(denialToolResult({ ...call, judged: false, clearable: false })).toBe(unjudged);
+    test("an unjudged call nobody can retry reads as neither of the other three", () => {
+      const unshowable = denialToolResult({ ...call, judged: false, clearable: false });
+      expect(new Set([clearable, unjudged, settled, unshowable]).size).toBe(4);
+      expect(unshowable).toContain("could not judge");
+      expect(unshowable).toContain("Retrying changes nothing");
     });
   });
 });
@@ -86,11 +90,25 @@ describe("session decisions", () => {
     }
   });
 
-  test("uncertain fails closed, and says it could not judge", async () => {
-    const { session } = sessionWith(new StubClassifier({ verdict: "uncertain", reason: "no stated intent" }));
+  test("a message too big to show the classifier is not judged at all", async () => {
+    const { session, classifier } = sessionWith();
+    session.noteUserInput("the opening ask");
+    session.noteUserInput("z".repeat(transcriptCharLimit + 1));
     const decision = await session.decide(bash("go build ./..."), { cwd });
-    expect(decision.outcome).toBe("block");
-    if (decision.outcome === "block") expect(decision.reason).toContain("could not judge");
+    expect(decision).toMatchObject({ outcome: "block", rule: "classifier-oversized" });
+    expect(classifier.requests).toHaveLength(0);
+    if (decision.outcome !== "block") return;
+    expect(decision.reason).toContain(`${transcriptCharLimit}-character`);
+    expect(decision.clearable).toBe(false);
+    expect(decision.toolResult).toContain("could not judge");
+  });
+
+  test("the opening message rides its own seat, so a huge brief still gets judged", async () => {
+    const { session, classifier } = sessionWith(new StubClassifier({ verdict: "allow" }));
+    const brief = `you may force-push your own branch ${"x".repeat(transcriptCharLimit * 2)}`;
+    session.noteUserInput(brief);
+    expect(await session.decide(bash("go build ./..."), { cwd })).toMatchObject({ outcome: "run" });
+    expect(classifier.requests[0]?.grant).toBe(brief);
   });
 });
 
@@ -126,24 +144,24 @@ describe("verdict cache", () => {
   test("a classifier nothing could reach blocks under its own rule", async () => {
     const classifier = new StubClassifier({
       verdict: "deny",
-      layer: "2a",
+      layer: "harm",
       unavailable: true,
-      reason: "auto mode could not reach its classifier model (layer 2a)",
+      reason: "auto mode could not reach its classifier model ",
     });
     const { session } = sessionWith(classifier);
     expect(await session.decide(bash("git push origin main"), { cwd })).toMatchObject({
       outcome: "block",
       rule: "classifier-unavailable",
-      reason: "auto mode could not reach its classifier model (layer 2a)",
+      reason: "auto mode could not reach its classifier model ",
     });
   });
 
   test("an outage tells the agent to retry rather than to ask for approval", async () => {
     const classifier = new StubClassifier({
       verdict: "deny",
-      layer: "2a",
+      layer: "harm",
       unavailable: true,
-      reason: "auto mode could not reach its classifier model (layer 2a)",
+      reason: "auto mode could not reach its classifier model ",
     });
     const { session } = sessionWith(classifier);
     const decision = await session.decide(bash("git push origin main"), { cwd });
@@ -156,37 +174,37 @@ describe("verdict cache", () => {
   test("an answer that is not a verdict did not judge the call either", async () => {
     const classifier = new StubClassifier({
       verdict: "deny",
-      layer: "2a",
+      layer: "harm",
       unreadable: true,
-      reason: "the classifier answered something this cannot read as a verdict: hello",
+      reason: "the classifier answered something this cannot read as a severity: hello",
     });
     const { session } = sessionWith(classifier);
     const decision = await session.decide(bash("git push origin main"), { cwd });
     expect(decision.outcome).toBe("block");
     if (decision.outcome !== "block") return;
 
-    expect(decision.rule).toBe("classifier-2a");
+    expect(decision.rule).toBe("classifier-harm");
     expect(decision.toolResult).toContain("could not judge");
   });
 
   test("an answer that is not a verdict is not cached, so the retry it asks for reaches a model", async () => {
     const classifier = new StubClassifier({
       verdict: "deny",
-      layer: "2a",
+      layer: "harm",
       unreadable: true,
-      reason: "the classifier answered something this cannot read as a verdict: hello",
+      reason: "the classifier answered something this cannot read as a severity: hello",
     });
     const { session } = sessionWith(classifier);
     await session.decide(bash("git push origin main"), { cwd });
     const retry = await session.decide(bash("git push origin main"), { cwd });
     expect(classifier.requests).toHaveLength(2);
-    expect(retry).toMatchObject({ outcome: "block", rule: "classifier-2a" });
+    expect(retry).toMatchObject({ outcome: "block", rule: "classifier-harm" });
   });
 
   test("a model that looked and refused still points at the user's approval", async () => {
     const classifier = new StubClassifier({
       verdict: "deny",
-      layer: "2a",
+      layer: "harm",
       reason: "force pushes rewrite shared history",
     });
     const { session } = sessionWith(classifier);
@@ -202,10 +220,10 @@ describe("verdict cache", () => {
     const { session } = sessionWith(classifier);
     await session.decide(bash("git push origin main"), { cwd });
 
-    classifier.answerWith({ verdict: "allow", layer: "2a" });
+    classifier.answerWith({ verdict: "allow", layer: "harm" });
     expect(await session.decide(bash("git push origin main"), { cwd })).toEqual({
       outcome: "run",
-      rule: "classifier-2a",
+      rule: "classifier-harm",
     });
     expect(classifier.requests).toHaveLength(2);
   });
@@ -353,7 +371,7 @@ describe("circuit breaker", () => {
     const classifier = new StubClassifier({ verdict: "deny", unavailable: true, reason: "nothing answered" });
     const { session } = sessionWith(classifier);
     await denyOnce(session, "go run ./cmd/a");
-    classifier.answerWith({ verdict: "deny", layer: "2a", reason: "the user said not to" });
+    classifier.answerWith({ verdict: "deny", layer: "harm", reason: "the user said not to" });
     await denyOnce(session, "go run ./cmd/b");
     expect(session.breaker()).toMatchObject({ total: 2, outage: false });
   });

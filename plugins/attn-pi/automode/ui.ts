@@ -43,7 +43,7 @@ export function denialWidgetLines(denials: readonly AutoModeDenial[]): string[] 
 
 function offer(denials: readonly AutoModeDenial[]): string {
   if (denials.every(nothingJudged)) {
-    return "  Nothing judged these. The classifier is unreachable, so approving will not help.";
+    return "  Nothing judged these, so approving will not help.";
   }
   if (denials.every((denial) => denial.clearable === false)) {
     return "  Approving will not help. Auto mode's own settings decide these.";
@@ -52,7 +52,7 @@ function offer(denials: readonly AutoModeDenial[]): string {
 }
 
 function nothingJudged(denial: AutoModeDenial): boolean {
-  return denial.rule === "classifier-unavailable";
+  return denial.rule === "classifier-unavailable" || denial.rule === "classifier-oversized";
 }
 
 export function breakerQuestion(breaker: BreakerState): { title: string; message: string } {
