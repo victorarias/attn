@@ -35,15 +35,24 @@ describe("denial text contract", () => {
     expect(denialToolResult({ action: "write /etc/hosts", reason: "" })).toContain("Reason: (not stated)");
   });
 
-  test("says what was blocked and nothing else", () => {
-    const call = { action: "bash: git push --force", reason: "this rewrites shared history" };
-    const shapes = new Set([
-      denialToolResult(call),
-      denialToolResult({ ...call, judged: false }),
-      denialToolResult({ ...call, clearable: false }),
-      denialToolResult({ ...call, judged: false, clearable: false }),
-    ]);
-    expect(shapes.size).toBe(1);
+  test("the standing guidance is Claude Code's, word for word", () => {
+    const text = denialToolResult({ action: "bash: git reset --hard", reason: "it predates this session" });
+    expect(text).toContain("If you have other tasks that don't depend on this action");
+    expect(text).toContain("using head instead of cat");
+    expect(text).toContain("do not use your ability to run tests to execute non-test actions");
+    expect(text).toContain("STOP and explain to the user");
+  });
+
+  test("an outage says nobody judged it, and an ordinary block does not", () => {
+    const call = { action: "bash: git reset --hard", reason: "the classifier could not be reached" };
+    expect(denialToolResult({ ...call, judged: false })).toContain("This is an outage, not a verdict");
+    expect(denialToolResult(call)).not.toContain("outage");
+  });
+
+  test("a block an approval cannot lift points at the setup instead", () => {
+    const call = { action: "bash: git reset --hard", reason: "denied by the configured pattern" };
+    expect(denialToolResult({ ...call, clearable: false })).toContain("not lifted by the user approving it");
+    expect(denialToolResult(call)).toContain("add an allow pattern");
   });
 });
 

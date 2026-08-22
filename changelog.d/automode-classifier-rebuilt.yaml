@@ -10,12 +10,15 @@ change: |
     enough to be cut, and no hand-typed prompt ever was. So the classifier
     refused work it had been authorized to do, and could not see the
     authorization.
-  - A blocked call tells the agent what was blocked and why, and stops there.
-    It used to add advice about approvals and retries, which was wrong for
-    three kinds of block and taught the agent to argue with the guard. The
-    on-screen list still says how to get past each block, because that is the
-    reader who can act on it: a model auto mode cannot reach says nothing
-    refused the work, and a refusal an approval cannot lift says so.
+  - A blocked call now tells the agent what Claude Code tells it, in Claude
+    Code's own words: carry on with anything that does not depend on this,
+    reach the same goal another reasonable way if there is one, never tunnel
+    around the block, and stop and explain to the user when the capability is
+    genuinely needed. What we had invented instead was wrong for three kinds
+    of block and read as an invitation to argue with the guard.
+  - Two facts Claude Code does not have to carry ride along: a model auto mode
+    could not reach says nothing judged the call, and a refusal no approval
+    can lift says the remedy is the settings, not the conversation.
   - Two passes ask two questions. The first grades how dangerous the action is
     on its own, cheaply, ignoring what the user asked for; anything routine
     runs without a second call. The second weighs the user's intent and

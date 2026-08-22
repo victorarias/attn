@@ -304,11 +304,18 @@ plans live under `docs/plans/` and the classifier receipt is
   classification against the same endpoint. `denialWidgetLines` drops its
   approve line when every standing denial is an outage. Showing the approve
   line anyway costs the user a turn and leaves them thinking they fixed it.
-- **The agent is told what was blocked and why, and nothing more.**
-  `denialToolResult` has one shape: the call and the reason. It does not tell
-  the agent what to do next, whether a retry helps, or whether the user could
-  lift it. Claude Code's own denial does that work in its own words, and
-  guidance we invent instead teaches the agent to argue with the guard.
+- **The agent is told what Claude Code tells it, verbatim.**
+  `denialToolResult` carries CC's own denial paragraph: work on what does not
+  depend on this, reach the goal another reasonable way if one exists, never
+  tunnel around the block, stop and explain when the capability is essential.
+  Do not reword it and do not add advice beside it. Guidance we invent instead
+  reads as an invitation to argue with the guard, which is what the four text
+  families it replaced did. Two sentences are ours because CC has no equivalent
+  case: an unjudged block says it is an outage and not a verdict, and an
+  unclearable one points at the settings rather than the conversation.
+- **The blocked action rides in the tool result in full.** The widget beside it
+  is clamped for a person to read; the model must never be reasoning about a
+  truncated command.
 - **The session's opening message keeps its own seat in the classifier's
   transcript window, and rides whole.** It is the only message that can GRANT
   anything, and a cap on it cuts exactly the middle where a delegation brief
