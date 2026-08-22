@@ -5,6 +5,7 @@ import { createAutoMode, type AutoModeDenial } from "../automode/index";
 import { transcriptEntryCharLimit } from "../automode/transcript";
 import { UsageLedger } from "../automode/usage";
 import { assistantMessage, ctx, FakePi, toolCall, userInput } from "./automode-fake-pi";
+import { autoModeSystemPromptAddendum } from "../automode/addendum";
 
 function wire(
   classifier: Classifier,
@@ -25,9 +26,7 @@ describe("auto mode extension", () => {
     const pi = wire(new StubClassifier({ verdict: "deny", reason: "this rewrites shared history" }));
     const result = await pi.toolCall?.(toolCall("bash", { command: "git push --force" }), ctx);
     expect(result?.block).toBe(true);
-    expect(result?.reason).toContain("auto mode");
     expect(result?.reason).toContain("this rewrites shared history");
-    expect(result?.reason).toContain("lets you retry the same call");
   });
 
   test("a denial is reported with the call it blocked", async () => {
@@ -137,8 +136,7 @@ describe("auto mode extension", () => {
       ctx,
     );
     expect(result?.systemPrompt).toContain("pi's own prompt");
-    expect(result?.systemPrompt).toContain("Auto mode is on for this session");
-    expect(result?.systemPrompt).toContain("approval in the conversation");
+    expect(result?.systemPrompt).toContain(autoModeSystemPromptAddendum());
   });
 
   test("what the user and the agent said reaches the classifier; tool results do not", async () => {

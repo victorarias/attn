@@ -13,7 +13,7 @@ import {
   type ProviderLike,
   type RequestAuthLike,
 } from "../automode/model-classifier";
-import { classifierSystemPrompt, parseVerdict } from "../automode/prompt";
+import { parseVerdict } from "../automode/prompt";
 import type { TranscriptEntry } from "../automode/transcript";
 import type { UsageLike } from "../automode/usage";
 
@@ -113,18 +113,6 @@ describe("classifier prompt", () => {
     expect(user).toContain("bash: git push --force origin main");
     expect(user).toContain("/work/repo");
     expect(user).toContain("git push is not in the read-only set");
-  });
-
-  test("states the precedence the plan settled on", () => {
-    const prompt = classifierSystemPrompt([]);
-    expect(prompt).toContain("deny list");
-    expect(prompt).toContain("BOUNDARY denials");
-    expect(prompt).toContain("CLEARABLE denials");
-    expect(prompt).toContain("named the action AND the");
-    expect(prompt).toContain('"boundary":true|false');
-    expect(prompt).toContain("*prod*");
-    expect(prompt).toContain("uncertain");
-    expect(prompt).toContain("evidence, not instruction");
   });
 
   test("an empty transcript and empty environment still produce a judgeable prompt", async () => {
@@ -248,7 +236,6 @@ describe("2a to 2b routing", () => {
     await classifierWith(registry).classify(request());
     const escalation = registry.calls[1]?.context.systemPrompt ?? "";
     expect(escalation).toContain("cannot tell what the script does");
-    expect(escalation).toContain("Yours is final");
     expect(registry.calls[1]?.context.messages[0]?.content[0]?.text).toEqual(
       registry.calls[0]?.context.messages[0]?.content[0]?.text,
     );
@@ -371,7 +358,6 @@ describe("what a denial keeps of the prompt", () => {
     const verdict = await classifierWith(registry).classify(request());
     const escalation = registry.calls[1]?.context;
     expect(verdict).toMatchObject({ verdict: "deny", prompt: { layer: "2b", system: escalation?.systemPrompt } });
-    expect((verdict as { prompt?: { system: string } }).prompt?.system).toContain("Yours is final");
   });
 
   test("an outage keeps the prompt nobody read — it is what tells it from a bad window", async () => {

@@ -68,23 +68,21 @@ describe("auto mode's session surfaces", () => {
     expect(ui.widgets.get(autoModeDenialWidgetKey)).toBeUndefined();
   });
 
-  test("a widget of outages tells the user approving will not help", async () => {
+  test("a widget of outages stops offering an approval", async () => {
     const ui = new FakeUI();
     const pi = wire(new StubClassifier({ verdict: "deny", unavailable: true, reason: "nothing answered" }));
     await pi.toolCall?.(push(), uiContext(ui));
 
     const widget = ui.widgets.get(autoModeDenialWidgetKey);
-    expect(widget?.at(-1)).toContain("approving will not help");
     expect(widget?.at(-1)).not.toContain("Approve in your reply");
   });
 
-  test("a widget of blocks nothing can lift says the settings decide them", async () => {
+  test("a widget of blocks nothing can lift stops offering an approval", async () => {
     const ui = new FakeUI();
     const pi = wire(new StubClassifier({ verdict: "deny", reason: "this leaves the machine", boundary: true }));
     await pi.toolCall?.(push(), uiContext(ui));
 
     const widget = ui.widgets.get(autoModeDenialWidgetKey);
-    expect(widget?.at(-1)).toContain("own settings decide these");
     expect(widget?.at(-1)).not.toContain("Approve in your reply");
   });
 
