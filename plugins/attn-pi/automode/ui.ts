@@ -43,10 +43,10 @@ export function denialWidgetLines(denials: readonly AutoModeDenial[]): string[] 
 
 function offer(denials: readonly AutoModeDenial[]): string {
   if (denials.every(nothingJudged)) {
-    return "  Nothing judged these — the classifier is unreachable. Approving will not help.";
+    return "  Nothing judged these. The classifier is unreachable, so approving will not help.";
   }
   if (denials.every((denial) => denial.clearable === false)) {
-    return "  Approving will not help — auto mode's own settings decide these.";
+    return "  Approving will not help. Auto mode's own settings decide these.";
   }
   return "  Approve in your reply to let the agent retry.";
 }
@@ -61,7 +61,7 @@ export function breakerQuestion(breaker: BreakerState): { title: string; message
       title: "auto mode cannot reach its classifier",
       message:
         `It blocked ${breaker.consecutive} calls in a row and ${breaker.total} since you last spoke, ` +
-        `every one of them because no classifier model answered — nothing judged them. Your model ` +
+        `every one of them because no classifier model answered, so nothing judged them. Your model ` +
         `endpoint looks to be down. Try again? Answering yes judges this call and the ones after it ` +
         `normally, which will keep blocking while the endpoint is unreachable.`,
     };

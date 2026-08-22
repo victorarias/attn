@@ -96,7 +96,7 @@ export class AutoMode {
     else if (asked === "off") this.choice = false;
     else if (asked === "" || asked === "toggle") this.choice = !this.enabled();
     else if (asked !== "status") {
-      ctx.ui?.notify(`/auto takes on, off, status, or nothing at all — not ${JSON.stringify(asked)}.`, "error");
+      ctx.ui?.notify(`/auto takes on, off, status, or nothing at all, not ${JSON.stringify(asked)}.`, "error");
       return;
     }
     this.paint(ctx);

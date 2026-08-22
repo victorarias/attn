@@ -31,8 +31,7 @@ describe("denial text contract", () => {
   });
 
   test("says the user's approval in conversation permits a retry", () => {
-    expect(text).toContain("approval in the conversation");
-    expect(text).toContain("retry");
+    expect(text).toContain("lets you retry the same call");
   });
 
   test("multi-line input stays on the labelled lines", () => {
@@ -64,7 +63,7 @@ describe("denial text contract", () => {
 
     test("sends the agent to a retry, not to the user for approval", () => {
       expect(unjudged).toContain("Retrying");
-      expect(unjudged).not.toContain("approval in the conversation lets you retry");
+      expect(unjudged).not.toContain("lets you retry the same call");
     });
   });
 
@@ -81,9 +80,9 @@ describe("denial text contract", () => {
     });
 
     test("sends the agent neither to an approval nor to a retry", () => {
-      expect(settled).toContain("nothing said in this");
+      expect(settled).toContain("approving it in the");
       expect(settled).toContain("Do not ask the user to approve this one");
-      expect(settled).not.toContain("approval in the conversation lets you retry");
+      expect(settled).not.toContain("lets you retry the same call");
       expect(settled).not.toContain("Retrying is what gets through");
     });
 
@@ -197,7 +196,7 @@ describe("verdict cache", () => {
     expect(decision.outcome).toBe("block");
     if (decision.outcome !== "block") return;
     expect(decision.toolResult).toContain("could not judge");
-    expect(decision.toolResult).not.toContain("approval in the conversation lets you retry");
+    expect(decision.toolResult).not.toContain("lets you retry the same call");
   });
 
   test("an answer that is not a verdict did not judge the call either", async () => {
@@ -226,7 +225,7 @@ describe("verdict cache", () => {
     const decision = await session.decide(bash("git push --force origin main"), { cwd });
     expect(decision.outcome).toBe("block");
     if (decision.outcome !== "block") return;
-    expect(decision.toolResult).toContain("approval in the conversation lets you retry");
+    expect(decision.toolResult).toContain("lets you retry the same call");
     expect(decision.toolResult).not.toContain("could not judge");
   });
 
@@ -344,7 +343,7 @@ describe("circuit breaker", () => {
       const { session } = sessionWith(classifier);
       const decision = await block(session, "git push --force");
       expect(decision.clearable).toBeUndefined();
-      expect(decision.toolResult).toContain("approval in the conversation");
+      expect(decision.toolResult).toContain("lets you retry the same call");
     });
 
     test("the cached replay of a boundary verdict is still a boundary", async () => {

@@ -27,7 +27,7 @@ describe("auto mode extension", () => {
     expect(result?.block).toBe(true);
     expect(result?.reason).toContain("auto mode");
     expect(result?.reason).toContain("this rewrites shared history");
-    expect(result?.reason).toContain("approval in the conversation");
+    expect(result?.reason).toContain("lets you retry the same call");
   });
 
   test("a denial is reported with the call it blocked", async () => {

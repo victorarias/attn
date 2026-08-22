@@ -211,7 +211,7 @@ function unavailableReason(layer: LayerName, models: readonly string[], lastFail
   return (
     `auto mode could not reach its ${layer} model (layer ${layer === "classifier" ? "2a" : "2b"}): ` +
     `tried ${tried}, ${attemptsPerModel} attempts each; last failure: ${lastFailure}. ` +
-    `No model judged this call — auto mode fails closed when its classifier is unreachable, so this ` +
+    `No model judged this call. Auto mode fails closed when its classifier is unreachable, so this ` +
     `is an outage and not a refusal. Say so to the user rather than retrying the call.`
   );
 }

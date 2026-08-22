@@ -74,7 +74,7 @@ describe("auto mode's session surfaces", () => {
     await pi.toolCall?.(push(), uiContext(ui));
 
     const widget = ui.widgets.get(autoModeDenialWidgetKey);
-    expect(widget?.at(-1)).toContain("Approving will not help");
+    expect(widget?.at(-1)).toContain("approving will not help");
     expect(widget?.at(-1)).not.toContain("Approve in your reply");
   });
 
@@ -84,7 +84,7 @@ describe("auto mode's session surfaces", () => {
     await pi.toolCall?.(push(), uiContext(ui));
 
     const widget = ui.widgets.get(autoModeDenialWidgetKey);
-    expect(widget?.at(-1)).toContain("auto mode's own settings decide these");
+    expect(widget?.at(-1)).toContain("own settings decide these");
     expect(widget?.at(-1)).not.toContain("Approve in your reply");
   });
 

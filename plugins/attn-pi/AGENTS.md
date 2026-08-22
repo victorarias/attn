@@ -392,7 +392,7 @@ plans live under `docs/plans/` and the classifier receipt is
 - **A denial says whether an approval could lift it.** A boundary verdict and
   every static rule set `clearable: false`, and their tool result sends the
   agent neither to the user nor to a retry: the tree re-decides identically,
-  and a boundary is the one thing auto mode holds against the user's wishes.
+  and a boundary is lifted by changing auto mode's setup, not by talking.
   The `hard_deny` list keeps its name; it is an ordinary deny, not a boundary.
 - The ledger keeps an active file and one rotated generation, and a rotation
   counts the destroyed generation's records AND its markers into one marker
