@@ -42,12 +42,12 @@
   -webkit-text-fill-color: transparent;
   background-clip: text;
   margin: 0;
-  animation: gradient-shift 8s ease infinite;
-}
-
-@keyframes gradient-shift {
-  0%, 100% { background-position: 0% center; }
-  50% { background-position: 100% center; }
+  /* No animation here. `background-position` under `background-clip: text`
+     cannot composite, so animating it repaints every frame. Dashboard is
+     always mounted, so the shimmer ran behind every other view too. Measured
+     at zero sessions on an idle window: 14.0% of a core with it, 2.1%
+     without. `background-size: 200% auto` stays, and holds the gradient at
+     what was the animation's first frame. */
 }
 
 .dashboard-subtitle {
