@@ -91,10 +91,18 @@ func (s *Store) CloseSession(id string, closed SessionClose, now time.Time) (boo
 		}
 		delete(s.sessions, id)
 		s.sessionCloses[id] = sessionCloseMark{At: at, By: by, Reason: strings.TrimSpace(closed.Reason), session: session}
+		if cost, tracked := s.sessionCosts[id]; tracked {
+			cost.Observations = nil
+			s.sessionCosts[id] = cost
+		}
 		return true, nil
 	}
 
-	result, err := s.db.Exec(`UPDATE sessions SET closed_at = ?, closed_by = ?, close_reason = ?
+	// Dropping the observations takes a closed row from a measured 109 KB mean to
+	// about 1 KB; only ApplySessionCostObservations reads them (receipt on s-rxx9kp).
+	result, err := s.db.Exec(`UPDATE sessions SET closed_at = ?, closed_by = ?, close_reason = ?,
+			session_cost_json = CASE WHEN json_valid(session_cost_json)
+				THEN json_remove(session_cost_json, '$.observations') ELSE session_cost_json END
 		WHERE id = ? AND closed_at = ''`, at, by, strings.TrimSpace(closed.Reason), id)
 	if err != nil {
 		return false, fmt.Errorf("close session %s: %w", id, err)

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/victorarias/attn/internal/protocol"
+	"github.com/victorarias/attn/internal/sessioncost"
 )
 
 func closeAt(t *testing.T, s *Store, id string, closed SessionClose, at time.Time) {
@@ -300,6 +301,58 @@ func TestALateWriteCannotRewriteAClosedSession(t *testing.T) {
 			}
 			if cost.Cursor != costAtClose.Cursor {
 				t.Errorf("cost cursor = %q after a late observation, want %q", cost.Cursor, costAtClose.Cursor)
+			}
+		})
+	}
+}
+
+func TestClosingDropsTheCostObservationsAndKeepsTheTotals(t *testing.T) {
+	backings := map[string]func(*testing.T) *Store{
+		"sqlite": newSessionOwnedTableStore,
+		"maps":   func(*testing.T) *Store { return newMapBackedStore() },
+	}
+	for name, newStore := range backings {
+		t.Run(name, func(t *testing.T) {
+			s := newStore(t)
+			addSessionInDirectory(t, s, "s1", "/tmp/one")
+			observations := []SessionCostObservation{
+				{ObservationID: "msg-1", Model: "opus", Usage: sessioncost.Usage{InputTokens: 10, OutputTokens: 3}},
+				{ObservationID: "msg-2", Model: "opus", Usage: sessioncost.Usage{InputTokens: 5, OutputTokens: 1}},
+				{ObservationID: "msg-3", Model: "haiku", Usage: sessioncost.Usage{InputTokens: 7, OutputTokens: 2}},
+			}
+			if _, err := s.ApplySessionCostObservations("s1", "cursor-1", observations); err != nil {
+				t.Fatalf("ApplySessionCostObservations: %v", err)
+			}
+			before, err := s.SessionCost("s1")
+			if err != nil {
+				t.Fatalf("SessionCost before the close: %v", err)
+			}
+			if len(before.Observations) != len(observations) {
+				t.Fatalf("observations before the close = %d, want %d", len(before.Observations), len(observations))
+			}
+
+			closeAt(t, s, "s1", SessionClose{By: SessionClosedByUser}, time.Now())
+
+			after, err := s.SessionCost("s1")
+			if err != nil {
+				t.Fatalf("SessionCost after the close: %v", err)
+			}
+			if len(after.Observations) != 0 {
+				t.Errorf("observations after the close = %d, want the map dropped", len(after.Observations))
+			}
+			if len(after.Ledger) != len(before.Ledger) {
+				t.Fatalf("ledger after the close = %v, want the per-model totals kept %v", after.Ledger, before.Ledger)
+			}
+			for model, usage := range before.Ledger {
+				if after.Ledger[model] != usage {
+					t.Errorf("%s total = %+v after the close, want %+v", model, after.Ledger[model], usage)
+				}
+			}
+			if after.Cursor != before.Cursor {
+				t.Errorf("cost cursor = %q after the close, want %q", after.Cursor, before.Cursor)
+			}
+			if after.Initialized != before.Initialized {
+				t.Errorf("initialized = %v after the close, want %v", after.Initialized, before.Initialized)
 			}
 		})
 	}
