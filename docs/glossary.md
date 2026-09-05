@@ -29,6 +29,7 @@
 - Presence: watching = home visible; present = recent input elsewhere in app; away = neither.
 - Recoverable: runtime gone, conversation restorable. Reaped: unrestorable session removed.
 - Closed session: a session the user or an agent ended. The row and everything it owns stay in the ledger, marked with when it closed, who closed it and, for an agent close, why. It leaves the sidebar, the queue and every other live surface at once; `attn session list --closed` and `attn session show` are how it is read back. Distinct from Reaped, which deletes.
+- Final cost: a closed session's per-model token totals. Closing keeps the totals and drops the per-observation usage behind them, keeping only the observation ids. A closed run's cost can be read, not corrected: an amendment to one of those observations is refused rather than added, so reopening a session and replaying or revising its transcript cannot inflate the total.
 - Session ledger: the durable record of the sessions a daemon ran, live and closed together, newest first. Each daemon keeps its own, so an outpost's sessions are read on the outpost.
 - Snapshot: current conversation state. Epoch: host generation. Scroll-back: older paged history.
 - Resume: copies history into a new session. Reload: reopens a recoverable session's own history.

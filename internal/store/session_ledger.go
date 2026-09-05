@@ -2,6 +2,7 @@ package store
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -92,17 +93,19 @@ func (s *Store) CloseSession(id string, closed SessionClose, now time.Time) (boo
 		delete(s.sessions, id)
 		s.sessionCloses[id] = sessionCloseMark{At: at, By: by, Reason: strings.TrimSpace(closed.Reason), session: session}
 		if cost, tracked := s.sessionCosts[id]; tracked {
-			cost.Observations = nil
+			finalizeSessionCost(&cost)
 			s.sessionCosts[id] = cost
 		}
 		return true, nil
 	}
 
-	// Dropping the observations takes a closed row from a measured 109 KB mean to
-	// about 1 KB; only ApplySessionCostObservations reads them (receipt on s-rxx9kp).
-	result, err := s.db.Exec(`UPDATE sessions SET closed_at = ?, closed_by = ?, close_reason = ?,
-			session_cost_json = CASE WHEN json_valid(session_cost_json)
-				THEN json_remove(session_cost_json, '$.observations') ELSE session_cost_json END
+	tx, err := s.db.Begin()
+	if err != nil {
+		return false, fmt.Errorf("close session %s: %w", id, err)
+	}
+	defer tx.Rollback()
+
+	result, err := tx.Exec(`UPDATE sessions SET closed_at = ?, closed_by = ?, close_reason = ?
 		WHERE id = ? AND closed_at = ''`, at, by, strings.TrimSpace(closed.Reason), id)
 	if err != nil {
 		return false, fmt.Errorf("close session %s: %w", id, err)
@@ -111,7 +114,39 @@ func (s *Store) CloseSession(id string, closed SessionClose, now time.Time) (boo
 	if err != nil {
 		return false, fmt.Errorf("close session %s: %w", id, err)
 	}
-	return affected == 1, nil
+	if affected != 1 {
+		return false, nil
+	}
+	if err := finalizeSessionCostTx(tx, id); err != nil {
+		return false, fmt.Errorf("close session %s: %w", id, err)
+	}
+	if err := tx.Commit(); err != nil {
+		return false, fmt.Errorf("close session %s: %w", id, err)
+	}
+	return true, nil
+}
+
+// The per-observation usage is the row's whole size: a measured 109 KB mean
+// against about 14 KB for the ids alone (receipt on s-rxx9kp).
+func finalizeSessionCostTx(tx *sql.Tx, id string) error {
+	var raw string
+	if err := tx.QueryRow("SELECT session_cost_json FROM sessions WHERE id = ?", id).Scan(&raw); err != nil {
+		return err
+	}
+	state, err := decodeSessionCostState(raw)
+	if err != nil {
+		return err
+	}
+	if len(state.Observations) == 0 {
+		return nil
+	}
+	finalizeSessionCost(&state)
+	encoded, err := json.Marshal(state)
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec("UPDATE sessions SET session_cost_json = ? WHERE id = ?", string(encoded), id)
+	return err
 }
 
 // ReopenSession returns false when the id names no closed session.

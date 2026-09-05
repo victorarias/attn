@@ -340,6 +340,14 @@ func TestClosingDropsTheCostObservationsAndKeepsTheTotals(t *testing.T) {
 			if len(after.Observations) != 0 {
 				t.Errorf("observations after the close = %d, want the map dropped", len(after.Observations))
 			}
+			if len(after.Finalized) != len(observations) {
+				t.Fatalf("finalized ids after the close = %v, want one per observation", after.Finalized)
+			}
+			for _, observation := range observations {
+				if !slices.Contains(after.Finalized, observation.ObservationID) {
+					t.Errorf("finalized ids = %v, want %s among them", after.Finalized, observation.ObservationID)
+				}
+			}
 			if len(after.Ledger) != len(before.Ledger) {
 				t.Fatalf("ledger after the close = %v, want the per-model totals kept %v", after.Ledger, before.Ledger)
 			}
@@ -353,6 +361,78 @@ func TestClosingDropsTheCostObservationsAndKeepsTheTotals(t *testing.T) {
 			}
 			if after.Initialized != before.Initialized {
 				t.Errorf("initialized = %v after the close, want %v", after.Initialized, before.Initialized)
+			}
+		})
+	}
+}
+
+func TestNothingAfterAReopenCanInflateAFinalizedTotal(t *testing.T) {
+	backings := map[string]func(*testing.T) *Store{
+		"sqlite": newSessionOwnedTableStore,
+		"maps":   func(*testing.T) *Store { return newMapBackedStore() },
+	}
+	for name, newStore := range backings {
+		t.Run(name, func(t *testing.T) {
+			s := newStore(t)
+			addSessionInDirectory(t, s, "s1", "/tmp/one")
+			counted := SessionCostObservation{
+				ObservationID: "claude:msg-1", Model: "opus",
+				Usage: sessioncost.Usage{InputTokens: 10, OutputTokens: 3},
+			}
+			if _, err := s.ApplySessionCostObservations("s1", "cursor-1", []SessionCostObservation{counted}); err != nil {
+				t.Fatalf("first apply: %v", err)
+			}
+			closeAt(t, s, "s1", SessionClose{By: SessionClosedByUser}, time.Now())
+			finalized, err := s.SessionCost("s1")
+			if err != nil {
+				t.Fatalf("SessionCost at the close: %v", err)
+			}
+
+			if reopened, err := s.ReopenSession("s1"); err != nil || !reopened {
+				t.Fatalf("reopen = %v, %v", reopened, err)
+			}
+
+			replay := counted
+			revision := counted
+			revision.Usage.InputTokens = 12
+			for _, late := range []struct {
+				name  string
+				batch SessionCostObservation
+			}{
+				{"an exact replay", replay},
+				{"a later revision of the same message", revision},
+			} {
+				changed, err := s.ApplySessionCostObservations("s1", "cursor-2", []SessionCostObservation{late.batch})
+				if err != nil {
+					t.Fatalf("%s: %v", late.name, err)
+				}
+				if changed {
+					t.Errorf("%s reported a change, want a finalized observation refused", late.name)
+				}
+				after, err := s.SessionCost("s1")
+				if err != nil {
+					t.Fatalf("SessionCost after %s: %v", late.name, err)
+				}
+				if after.Ledger["opus"] != finalized.Ledger["opus"] {
+					t.Errorf("opus total = %+v after %s, want the finalized %+v",
+						after.Ledger["opus"], late.name, finalized.Ledger["opus"])
+				}
+			}
+
+			fresh := SessionCostObservation{
+				ObservationID: "claude:msg-2", Model: "opus",
+				Usage: sessioncost.Usage{InputTokens: 4, OutputTokens: 1},
+			}
+			if changed, err := s.ApplySessionCostObservations("s1", "cursor-3", []SessionCostObservation{fresh}); err != nil || !changed {
+				t.Fatalf("work after reopening changed=%v err=%v, want it counted", changed, err)
+			}
+			after, err := s.SessionCost("s1")
+			if err != nil {
+				t.Fatalf("SessionCost after the resumed work: %v", err)
+			}
+			want := finalized.Ledger["opus"].Add(fresh.Usage)
+			if after.Ledger["opus"] != want {
+				t.Errorf("opus total = %+v after resuming, want %+v", after.Ledger["opus"], want)
 			}
 		})
 	}
