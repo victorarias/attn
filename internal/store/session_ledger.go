@@ -11,8 +11,7 @@ import (
 	"github.com/victorarias/attn/internal/protocol"
 )
 
-// SessionClosedByUser is the closed_by of a session the user closed. Every
-// other value is the id of the session that closed this one.
+// Every other closed_by is the id of the session that closed this one.
 const SessionClosedByUser = "user"
 
 // SessionLedgerDefaultLimit is one terminal page: 20 rows plus a header and the
@@ -23,8 +22,7 @@ const SessionLedgerDefaultLimit = 20
 // 3.5 hours, so a heavy month stays under 3000 and --before reaches the rest.
 const SessionLedgerMaxLimit = 1000
 
-// ErrSessionClosed refuses a write that would run a session the ledger has
-// already closed. Reopening clears the close first.
+// ErrSessionClosed refuses a write that would run an already closed session.
 var ErrSessionClosed = errors.New("session is closed")
 
 // SessionClose says who closed a session and why. Only agent closes carry a reason.
@@ -55,15 +53,13 @@ type SessionLedgerPage struct {
 	NextBefore string
 }
 
-// ErrUnknownLedgerCursor names an id no ledger row carries, so a caller paging
-// with a stale --before hears which id failed rather than seeing an empty page.
+// ErrUnknownLedgerCursor names the id a stale --before failed on.
 type ErrUnknownLedgerCursor struct{ ID string }
 
 func (e *ErrUnknownLedgerCursor) Error() string {
 	return fmt.Sprintf("no session %q in the ledger to page from", e.ID)
 }
 
-// ErrLedgerLimitTooLarge names the limit and the ask, so an agent can fix it.
 type ErrLedgerLimitTooLarge struct{ Asked, Max int }
 
 func (e *ErrLedgerLimitTooLarge) Error() string {
@@ -71,8 +67,7 @@ func (e *ErrLedgerLimitTooLarge) Error() string {
 		e.Asked, e.Max, e.Max)
 }
 
-// CloseSession records the close and keeps the row and every session-owned
-// table. Returns false when no live session carries the id.
+// CloseSession returns false when no live session carries the id.
 func (s *Store) CloseSession(id string, closed SessionClose, now time.Time) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -94,7 +89,8 @@ func (s *Store) CloseSession(id string, closed SessionClose, now time.Time) (boo
 		if _, already := s.sessionCloses[id]; already {
 			return false, nil
 		}
-		s.sessionCloses[id] = sessionCloseMark{At: at, By: by, Reason: strings.TrimSpace(closed.Reason)}
+		delete(s.sessions, id)
+		s.sessionCloses[id] = sessionCloseMark{At: at, By: by, Reason: strings.TrimSpace(closed.Reason), session: session}
 		return true, nil
 	}
 
@@ -110,16 +106,17 @@ func (s *Store) CloseSession(id string, closed SessionClose, now time.Time) (boo
 	return affected == 1, nil
 }
 
-// ReopenSession clears the close so the row is live again, keeping its id.
-// Returns false when the id names no closed session.
+// ReopenSession returns false when the id names no closed session.
 func (s *Store) ReopenSession(id string) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	if s.db == nil {
-		if _, closed := s.sessionCloses[id]; !closed {
+		mark, closed := s.sessionCloses[id]
+		if !closed {
 			return false, nil
 		}
+		s.sessions[id] = mark.session
 		delete(s.sessionCloses, id)
 		return true, nil
 	}
@@ -136,7 +133,6 @@ func (s *Store) ReopenSession(id string) (bool, error) {
 	return affected == 1, nil
 }
 
-// SessionClosed answers for a row Get hides, which is the whole point of asking.
 func (s *Store) SessionClosed(id string) bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -156,18 +152,12 @@ func (s *Store) sessionClosedLocked(id string) bool {
 	return closedAt != ""
 }
 
-// SessionLedgerEntry reads one row by exact id, live or closed.
 func (s *Store) SessionLedgerEntry(id string) *protocol.SessionLedgerEntry {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	if s.db == nil {
-		session := s.sessions[id]
-		if session == nil {
-			return nil
-		}
-		entry := ledgerEntryFromSession(session, s.sessionCloses[id])
-		return &entry
+		return s.ledgerEntryMemoryLocked(id)
 	}
 
 	row := s.db.QueryRow(ledgerSelect+" FROM sessions WHERE id = ?", id)
@@ -178,8 +168,7 @@ func (s *Store) SessionLedgerEntry(id string) *protocol.SessionLedgerEntry {
 	return &entry
 }
 
-// SessionLedger reads a page of the ledger, newest first — the close for a
-// closed session, the last sighting for a live one.
+// SessionLedger reads a page newest first, by close or by last sighting.
 func (s *Store) SessionLedger(query SessionLedgerQuery) (SessionLedgerPage, error) {
 	limit := query.Limit
 	if limit <= 0 {
@@ -201,7 +190,6 @@ func (s *Store) SessionLedger(query SessionLedgerQuery) (SessionLedgerPage, erro
 const ledgerSelect = `SELECT id, label, agent, directory, workspace_id, branch, is_worktree, main_repo,
 	state, last_seen, closed_at, closed_by, close_reason`
 
-// ledgerAt is the sort key: when a session left, or when it was last seen.
 const ledgerAt = `CASE WHEN closed_at <> '' THEN closed_at ELSE last_seen END`
 
 func (s *Store) sessionLedgerDB(query SessionLedgerQuery, limit int) (SessionLedgerPage, error) {
@@ -260,21 +248,16 @@ func (s *Store) sessionLedgerDB(query SessionLedgerQuery, limit int) (SessionLed
 }
 
 func (s *Store) sessionLedgerMemory(query SessionLedgerQuery, limit int) (SessionLedgerPage, error) {
-	entries := make([]protocol.SessionLedgerEntry, 0, len(s.sessions))
-	for id, session := range s.sessions {
-		mark := s.sessionCloses[id]
-		switch query.Scope {
-		case SessionLedgerClosed:
-			if mark.At == "" {
-				continue
-			}
-		case SessionLedgerAll:
-		default:
-			if mark.At != "" {
-				continue
-			}
+	entries := make([]protocol.SessionLedgerEntry, 0, len(s.sessions)+len(s.sessionCloses))
+	if query.Scope != SessionLedgerClosed {
+		for _, session := range s.sessions {
+			entries = append(entries, ledgerEntryFromSession(session, sessionCloseMark{}))
 		}
-		entries = append(entries, ledgerEntryFromSession(session, mark))
+	}
+	if query.Scope == SessionLedgerClosed || query.Scope == SessionLedgerAll {
+		for _, mark := range s.sessionCloses {
+			entries = append(entries, ledgerEntryFromSession(mark.session, mark))
+		}
 	}
 	sort.Slice(entries, func(i, j int) bool {
 		left, right := ledgerInstant(entries[i]), ledgerInstant(entries[j])
@@ -285,11 +268,11 @@ func (s *Store) sessionLedgerMemory(query SessionLedgerQuery, limit int) (Sessio
 	})
 
 	if cursor := strings.TrimSpace(query.Before); cursor != "" {
-		session := s.sessions[cursor]
-		if session == nil {
+		entry := s.ledgerEntryMemoryLocked(cursor)
+		if entry == nil {
 			return SessionLedgerPage{}, &ErrUnknownLedgerCursor{ID: cursor}
 		}
-		at := ledgerInstant(ledgerEntryFromSession(session, s.sessionCloses[cursor]))
+		at := ledgerInstant(*entry)
 		kept := entries[:0]
 		for _, entry := range entries {
 			instant := ledgerInstant(entry)
@@ -307,6 +290,19 @@ func (s *Store) sessionLedgerMemory(query SessionLedgerQuery, limit int) (Sessio
 	return finishLedgerPage(SessionLedgerPage{Entries: entries}, matching), nil
 }
 
+func (s *Store) ledgerEntryMemoryLocked(id string) *protocol.SessionLedgerEntry {
+	if mark, closed := s.sessionCloses[id]; closed {
+		entry := ledgerEntryFromSession(mark.session, mark)
+		return &entry
+	}
+	session := s.sessions[id]
+	if session == nil {
+		return nil
+	}
+	entry := ledgerEntryFromSession(session, sessionCloseMark{})
+	return &entry
+}
+
 func finishLedgerPage(page SessionLedgerPage, matching int) SessionLedgerPage {
 	page.Omitted = matching - len(page.Entries)
 	if page.Omitted > 0 && len(page.Entries) > 0 {
@@ -322,10 +318,13 @@ func ledgerInstant(entry protocol.SessionLedgerEntry) string {
 	return entry.LastSeen
 }
 
+// The closed session leaves s.sessions and lives here instead, so every
+// in-memory reader and writer stops finding it exactly as SQL's predicate does.
 type sessionCloseMark struct {
-	At     string
-	By     string
-	Reason string
+	At      string
+	By      string
+	Reason  string
+	session *protocol.Session
 }
 
 func ledgerEntryFromSession(session *protocol.Session, mark sessionCloseMark) protocol.SessionLedgerEntry {

@@ -310,9 +310,6 @@ func (s *Store) Get(id string) *protocol.Session {
 	defer s.mu.RUnlock()
 
 	if s.db == nil {
-		if _, closed := s.sessionCloses[id]; closed {
-			return nil
-		}
 		return cloneSession(s.sessions[id])
 	}
 
@@ -456,18 +453,14 @@ func (s *Store) ClearSessions() {
 	}
 }
 
-// List answers about live sessions only, like Get: closed sessions never reach
-// the sidebar, turn accounting, workspace status or recovery through here.
+// List answers about live sessions only, like Get.
 func (s *Store) List(stateFilter string) []*protocol.Session {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	if s.db == nil {
 		result := make([]*protocol.Session, 0, len(s.sessions))
-		for id, session := range s.sessions {
-			if _, closed := s.sessionCloses[id]; closed {
-				continue
-			}
+		for _, session := range s.sessions {
 			if stateFilter != "" && string(session.State) != stateFilter {
 				continue
 			}
@@ -646,7 +639,7 @@ func (s *Store) UpdateState(id, state string) bool {
 	}
 
 	now := time.Now().Format(time.RFC3339Nano)
-	result, err := s.db.Exec(`UPDATE sessions SET state = ?, state_since = ?, state_updated_at = ? WHERE id = ?`,
+	result, err := s.db.Exec(`UPDATE sessions SET state = ?, state_since = ?, state_updated_at = ? WHERE id = ? AND closed_at = ''`,
 		state, now, now, id)
 	if err != nil {
 		log.Printf("[store] UpdateState: failed for session %s: %v", id, err)
@@ -683,7 +676,7 @@ func (s *Store) MarkModelRequestStarted(id string, at time.Time) bool {
 	if !currentAt.IsZero() && !at.After(currentAt) {
 		return false
 	}
-	result, err := s.db.Exec("UPDATE sessions SET last_model_request_at = ? WHERE id = ?", stamp, id)
+	result, err := s.db.Exec("UPDATE sessions SET last_model_request_at = ? WHERE id = ? AND closed_at = ''", stamp, id)
 	if err != nil {
 		log.Printf("[store] MarkModelRequestStarted: failed for session %s: %v", id, err)
 		return false
@@ -708,7 +701,7 @@ func (s *Store) UpdateTodos(id string, todos []string) {
 		log.Printf("[store] UpdateTodos: failed to marshal todos for session %s: %v", id, err)
 		return
 	}
-	_, err = s.db.Exec("UPDATE sessions SET todos = ? WHERE id = ?", string(todosJSON), id)
+	_, err = s.db.Exec("UPDATE sessions SET todos = ? WHERE id = ? AND closed_at = ''", string(todosJSON), id)
 	if err != nil {
 		log.Printf("[store] UpdateTodos: failed for session %s: %v", id, err)
 	}
@@ -735,7 +728,7 @@ func (s *Store) UpdateBranch(id, branch string, isWorktree bool, mainRepo string
 		return
 	}
 
-	_, err := s.db.Exec(`UPDATE sessions SET branch = ?, is_worktree = ?, main_repo = ? WHERE id = ?`,
+	_, err := s.db.Exec(`UPDATE sessions SET branch = ?, is_worktree = ?, main_repo = ? WHERE id = ? AND closed_at = ''`,
 		branch, boolToInt(isWorktree), mainRepo, id)
 	if err != nil {
 		log.Printf("[store] UpdateBranch: failed for session %s: %v", id, err)
@@ -753,7 +746,7 @@ func (s *Store) UpdateSessionLabel(id, label string) {
 		return
 	}
 
-	if _, err := s.db.Exec(`UPDATE sessions SET label = ? WHERE id = ?`, label, id); err != nil {
+	if _, err := s.db.Exec(`UPDATE sessions SET label = ? WHERE id = ? AND closed_at = ''`, label, id); err != nil {
 		log.Printf("[store] UpdateSessionLabel: failed for session %s: %v", id, err)
 	}
 }
@@ -770,7 +763,7 @@ func (s *Store) Touch(id string) {
 	}
 
 	now := time.Now().Format(time.RFC3339Nano)
-	_, err := s.db.Exec("UPDATE sessions SET last_seen = ? WHERE id = ?", now, id)
+	_, err := s.db.Exec("UPDATE sessions SET last_seen = ? WHERE id = ? AND closed_at = ''", now, id)
 	if err != nil {
 		log.Printf("[store] Touch: failed for session %s: %v", id, err)
 	}
@@ -792,7 +785,7 @@ func (s *Store) SetResumeSessionID(id, resumeSessionID string) {
 				WHEN ? != '' AND resume_session_id = ? THEN transcript_path
 				ELSE ''
 			END
-		WHERE id = ?`, resumeSessionID, resumeSessionID, resumeSessionID, id)
+		WHERE id = ? AND closed_at = ''`, resumeSessionID, resumeSessionID, resumeSessionID, id)
 	if err != nil {
 		log.Printf("[store] SetResumeSessionID: failed for session %s: %v", id, err)
 	}
@@ -819,7 +812,7 @@ func (s *Store) SetLaunchIntent(id string, intent LaunchIntent) {
 		log.Printf("[store] SetLaunchIntent: failed to marshal launch intent for session %s: %v", id, err)
 		return
 	}
-	if _, err := s.db.Exec("UPDATE sessions SET launch_intent = ? WHERE id = ?", string(intentJSON), id); err != nil {
+	if _, err := s.db.Exec("UPDATE sessions SET launch_intent = ? WHERE id = ? AND closed_at = ''", string(intentJSON), id); err != nil {
 		log.Printf("[store] SetLaunchIntent: failed for session %s: %v", id, err)
 	}
 }
@@ -831,7 +824,7 @@ func (s *Store) ClearLaunchIntent(id string) {
 	if s.db == nil {
 		return
 	}
-	if _, err := s.db.Exec("UPDATE sessions SET launch_intent = '' WHERE id = ?", id); err != nil {
+	if _, err := s.db.Exec("UPDATE sessions SET launch_intent = '' WHERE id = ? AND closed_at = ''", id); err != nil {
 		log.Printf("[store] ClearLaunchIntent: failed for session %s: %v", id, err)
 	}
 }
@@ -978,7 +971,7 @@ func (s *Store) prepareSessionTeardown(id string, now time.Time, create bool) (A
 	}
 	if run.RunID != "" {
 		if _, err := tx.Exec(`UPDATE sessions SET agent_driver_plugin_name = '', agent_driver_run_id = '', agent_driver_report_seq = 0
-			WHERE id = ? AND agent_driver_plugin_name = ? AND agent_driver_run_id = ?`, id, run.PluginName, run.RunID); err != nil {
+			WHERE id = ? AND closed_at = '' AND agent_driver_plugin_name = ? AND agent_driver_run_id = ?`, id, run.PluginName, run.RunID); err != nil {
 			return AgentDriverReportCursor{}, false, fmt.Errorf("claim session %s driver owner: %w", id, err)
 		}
 	}
@@ -1067,7 +1060,7 @@ func (s *Store) CancelSessionTeardown(id string) error {
 	}
 	if run.RunID != "" {
 		if _, err := tx.Exec(`UPDATE sessions SET agent_driver_plugin_name = ?, agent_driver_run_id = ?, agent_driver_report_seq = ?
-			WHERE id = ? AND agent_driver_run_id = ''`, run.PluginName, run.RunID, run.Seq, id); err != nil {
+			WHERE id = ? AND closed_at = '' AND agent_driver_run_id = ''`, run.PluginName, run.RunID, run.Seq, id); err != nil {
 			return err
 		}
 	}
@@ -1221,7 +1214,7 @@ func (s *Store) BeginAgentDriverRun(id, pluginName, runID string) bool {
 		return true
 	}
 	result, err := s.db.Exec(
-		"UPDATE sessions SET agent_driver_plugin_name = ?, agent_driver_run_id = ?, agent_driver_report_seq = 0 WHERE id = ?",
+		"UPDATE sessions SET agent_driver_plugin_name = ?, agent_driver_run_id = ?, agent_driver_report_seq = 0 WHERE id = ? AND closed_at = ''",
 		pluginName,
 		runID,
 		id,
@@ -1278,7 +1271,7 @@ func (s *Store) EndAgentDriverRun(id string) AgentDriverReportCursor {
 		return AgentDriverReportCursor{}
 	}
 	result, err := s.db.Exec(
-		"UPDATE sessions SET agent_driver_plugin_name = '', agent_driver_run_id = '', agent_driver_report_seq = 0 WHERE id = ? AND agent_driver_plugin_name = ? AND agent_driver_run_id = ?",
+		"UPDATE sessions SET agent_driver_plugin_name = '', agent_driver_run_id = '', agent_driver_report_seq = 0 WHERE id = ? AND closed_at = '' AND agent_driver_plugin_name = ? AND agent_driver_run_id = ?",
 		id,
 		cursor.PluginName,
 		cursor.RunID,
@@ -1335,7 +1328,7 @@ func (s *Store) ApplyAgentDriverState(id, runID string, seq uint64, state string
 		UPDATE sessions
 		SET state = ?, state_since = ?, state_updated_at = ?, agent_driver_report_seq = ?,
 			last_model_request_at = COALESCE(NULLIF(?, ''), last_model_request_at)
-		WHERE id = ? AND agent_driver_run_id = ? AND agent_driver_report_seq < ?`,
+		WHERE id = ? AND closed_at = '' AND agent_driver_run_id = ? AND agent_driver_report_seq < ?`,
 		state,
 		now,
 		now,
@@ -1377,7 +1370,7 @@ func (s *Store) ApplyAgentDriverMetadata(id, runID string, seq uint64, metadata 
 	result, err := s.db.Exec(`
 		UPDATE sessions
 		SET agent_metadata = ?, agent_driver_report_seq = ?
-		WHERE id = ? AND agent_driver_run_id = ? AND agent_driver_report_seq < ?`,
+		WHERE id = ? AND closed_at = '' AND agent_driver_run_id = ? AND agent_driver_report_seq < ?`,
 		strings.TrimSpace(metadata),
 		seq,
 		id,

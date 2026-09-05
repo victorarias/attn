@@ -228,7 +228,7 @@ func (s *Store) updateSessionCost(sessionID string, mutate func(*SessionCostStat
 	if err != nil {
 		return fmt.Errorf("encode session cost for %s: %w", sessionID, err)
 	}
-	if _, err := tx.Exec("UPDATE sessions SET session_cost_json = ? WHERE id = ?", string(encoded), sessionID); err != nil {
+	if _, err := tx.Exec("UPDATE sessions SET session_cost_json = ? WHERE id = ? AND closed_at = ''", string(encoded), sessionID); err != nil {
 		return err
 	}
 	return tx.Commit()

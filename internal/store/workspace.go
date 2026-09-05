@@ -185,7 +185,7 @@ func (s *Store) AssignSessionWorkspace(sessionID, workspaceID string) {
 	if s.db == nil {
 		return
 	}
-	if _, err := s.db.Exec(`UPDATE sessions SET workspace_id = ? WHERE id = ?`, workspaceID, sessionID); err != nil {
+	if _, err := s.db.Exec(`UPDATE sessions SET workspace_id = ? WHERE id = ? AND closed_at = ''`, workspaceID, sessionID); err != nil {
 		log.Printf("[store] AssignSessionWorkspace: failed for session %s: %v", sessionID, err)
 	}
 }

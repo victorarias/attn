@@ -20,11 +20,9 @@ import { createScenarioRunner } from './scenarioRunner.mjs';
 import { sleep } from './scenarioAssertions.mjs';
 import { UiAutomationClient } from './uiAutomationClient.mjs';
 
-// The prompt this change removed asked exactly this. Its copy is the only
-// evidence that survives a rebuild, so the scenario watches for the words.
+// The exact copy of the prompt this change removed.
 const REMOVED_PROMPT_COPY = 'Keep this worktree for later';
-// The prompt used to open within a frame of the close; a second of quiet after
-// the session leaves the sidebar is past anything an animation could delay.
+// The prompt opened within a frame of the close; a second of quiet is past that.
 const PROMPT_WATCH_MS = 1_000;
 
 const execFileAsync = promisify(execFile);

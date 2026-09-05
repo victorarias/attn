@@ -315,8 +315,6 @@ func (c *Client) SessionInstructions(targetSessionID, question string) (*protoco
 	return resp.SessionInstructionsResult, nil
 }
 
-// SessionListOptions mirrors the flags of `attn session list`. Before is the id
-// of the last row of the previous page.
 type SessionListOptions struct {
 	Closed bool
 	All    bool

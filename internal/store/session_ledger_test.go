@@ -2,7 +2,10 @@ package store
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -124,7 +127,6 @@ func TestSessionLedgerPagesNewestFirstAndCountsWhatItOmitted(t *testing.T) {
 	for _, id := range []string{"a", "b", "c", "d", "e"} {
 		addSessionInDirectory(t, s, id, "/tmp/"+id)
 	}
-	// Oldest close first, so the newest-first page is e, d, c, b, a.
 	for i, id := range []string{"a", "b", "c", "d", "e"} {
 		closeAt(t, s, id, SessionClose{By: SessionClosedByUser}, base.Add(time.Duration(i)*time.Minute))
 	}
@@ -222,4 +224,76 @@ func ledgerIDs(page SessionLedgerPage) []string {
 		ids = append(ids, entry.ID)
 	}
 	return ids
+}
+
+func TestALateWriteCannotRewriteAClosedSession(t *testing.T) {
+	s := newSessionOwnedTableStore(t)
+	addSessionInDirectory(t, s, "s1", "/tmp/one")
+	if !s.UpdateState("s1", string(protocol.SessionStateWorking)) {
+		t.Fatal("UpdateState before the close reported no row")
+	}
+
+	closeAt(t, s, "s1", SessionClose{By: SessionClosedByUser}, time.Now())
+	snapshot := *s.SessionLedgerEntry("s1")
+
+	if s.UpdateState("s1", string(protocol.SessionStateWaitingInput)) {
+		t.Error("UpdateState after the close reported a row, want the closed row refused")
+	}
+	s.Touch("s1")
+	s.UpdateSessionLabel("s1", "renamed after the close")
+	s.AssignSessionWorkspace("s1", "workspace-elsewhere")
+	if s.SettleTurn("s1", time.Now()) {
+		t.Error("SettleTurn after the close reported a row, want the closed row refused")
+	}
+
+	after := s.SessionLedgerEntry("s1")
+	if after == nil {
+		t.Fatal("SessionLedgerEntry(s1) = nil after the late writes")
+	}
+	if after.State != snapshot.State {
+		t.Errorf("state = %q after a late write, want the closed snapshot %q", after.State, snapshot.State)
+	}
+	if after.LastSeen != snapshot.LastSeen {
+		t.Errorf("last_seen = %q after a late touch, want %q", after.LastSeen, snapshot.LastSeen)
+	}
+	if after.Label != snapshot.Label {
+		t.Errorf("label = %q after a late rename, want %q", after.Label, snapshot.Label)
+	}
+	if after.WorkspaceID != snapshot.WorkspaceID {
+		t.Errorf("workspace = %q after a late assignment, want %q", after.WorkspaceID, snapshot.WorkspaceID)
+	}
+}
+
+func TestEverySessionWriterCarriesTheClosedRowPredicate(t *testing.T) {
+	exempt := map[string]string{
+		"sqlite.go":         "migrations run over rows that predate the column",
+		"session_ledger.go": "closing and reopening are the writers of closed_at",
+	}
+	sources, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatalf("list package sources: %v", err)
+	}
+	for _, name := range sources {
+		if strings.HasSuffix(name, "_test.go") || exempt[name] != "" {
+			continue
+		}
+		body, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatalf("read %s: %v", name, err)
+		}
+		text := string(body)
+		for offset := 0; ; {
+			start := strings.Index(text[offset:], "UPDATE sessions")
+			if start < 0 {
+				break
+			}
+			start += offset
+			statement := text[start:min(start+400, len(text))]
+			if !strings.Contains(statement, "closed_at = ''") {
+				t.Errorf("%s:%d writes sessions without AND closed_at = '': a closed row is the ledger's "+
+					"snapshot, so a late write must find no row", name, strings.Count(text[:start], "\n")+1)
+			}
+			offset = start + 1
+		}
+	}
 }

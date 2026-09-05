@@ -31,7 +31,7 @@ func (s *Store) SetSessionPinned(id string, pinned bool, now time.Time) bool {
 		return true
 	}
 
-	result, err := s.db.Exec(`UPDATE sessions SET pinned_at = ? WHERE id = ?`, stamp, id)
+	result, err := s.db.Exec(`UPDATE sessions SET pinned_at = ? WHERE id = ? AND closed_at = ''`, stamp, id)
 	if err != nil {
 		log.Printf("[store] SetSessionPinned: failed for session %s: %v", id, err)
 		return false
@@ -63,7 +63,7 @@ func (s *Store) SetSessionContextWindowCap(id string, cap int) bool {
 		return true
 	}
 
-	result, err := s.db.Exec(`UPDATE sessions SET context_window_cap = ? WHERE id = ?`, cap, id)
+	result, err := s.db.Exec(`UPDATE sessions SET context_window_cap = ? WHERE id = ? AND closed_at = ''`, cap, id)
 	if err != nil {
 		log.Printf("[store] SetSessionContextWindowCap: failed for session %s: %v", id, err)
 		return false

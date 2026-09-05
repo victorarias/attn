@@ -34,7 +34,7 @@ func (s *Store) OpenTurnIfClosed(id string, now time.Time) bool {
 
 	result, err := s.db.Exec(`
 		UPDATE sessions SET turn_opened_at = ?
-		 WHERE id = ? AND (turn_opened_at = '' OR turn_opened_at <= turn_settled_at)`,
+		 WHERE id = ? AND closed_at = '' AND (turn_opened_at = '' OR turn_opened_at <= turn_settled_at)`,
 		stamp, id)
 	if err != nil {
 		log.Printf("[store] OpenTurnIfClosed: failed for session %s: %v", id, err)
@@ -58,7 +58,7 @@ func (s *Store) SettleTurn(id string, now time.Time) bool {
 		return true
 	}
 
-	result, err := s.db.Exec(`UPDATE sessions SET turn_settled_at = ? WHERE id = ?`,
+	result, err := s.db.Exec(`UPDATE sessions SET turn_settled_at = ? WHERE id = ? AND closed_at = ''`,
 		now.UTC().Format(sortableTimeFormat), id)
 	if err != nil {
 		log.Printf("[store] SettleTurn: failed for session %s: %v", id, err)
@@ -86,7 +86,7 @@ func (s *Store) SnoozeTurn(id string, until, now time.Time) bool {
 	}
 
 	result, err := s.db.Exec(
-		`UPDATE sessions SET turn_settled_at = ?, turn_snoozed_until = ? WHERE id = ?`,
+		`UPDATE sessions SET turn_settled_at = ?, turn_snoozed_until = ? WHERE id = ? AND closed_at = ''`,
 		now.UTC().Format(sortableTimeFormat), until.UTC().Format(sortableTimeFormat), id)
 	if err != nil {
 		log.Printf("[store] SnoozeTurn: failed for session %s: %v", id, err)
@@ -131,7 +131,7 @@ func (s *Store) WakeTurnAtAndOpenIfClosed(id string, deadline, openedAt time.Tim
 		`UPDATE sessions SET turn_snoozed_until = '', turn_opened_at = CASE
 			WHEN turn_opened_at = '' OR turn_opened_at <= turn_settled_at THEN ?
 			ELSE turn_opened_at END
-		WHERE id = ? AND turn_snoozed_until = ?`,
+		WHERE id = ? AND closed_at = '' AND turn_snoozed_until = ?`,
 		openedAt.UTC().Format(sortableTimeFormat), id, deadline.UTC().Format(sortableTimeFormat))
 	if err != nil {
 		log.Printf("[store] WakeTurnAtAndOpenIfClosed: failed for session %s: %v", id, err)
@@ -158,7 +158,7 @@ func (s *Store) clearSnooze(id string, deadline *time.Time) bool {
 		return true
 	}
 
-	query := `UPDATE sessions SET turn_snoozed_until = '' WHERE id = ?`
+	query := `UPDATE sessions SET turn_snoozed_until = '' WHERE id = ? AND closed_at = ''`
 	args := []any{id}
 	if deadline == nil {
 		query += ` AND turn_snoozed_until != ''`

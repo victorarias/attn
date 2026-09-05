@@ -23,7 +23,6 @@ func addLedgerTestSession(t *testing.T, d *Daemon, id, directory string) {
 	})
 }
 
-// handleUnregister writes its response to the conn, so a test needs one that drains.
 func drainedConn(t *testing.T) net.Conn {
 	t.Helper()
 	server, client := net.Pipe()
@@ -81,7 +80,6 @@ func broadcastIDs(sessions []protocol.Session) []string {
 	return ids
 }
 
-// turnOwedIDs mirrors what the broadcast decorates, which is where the queue reads from.
 func (d *Daemon) turnOwedIDs() []string {
 	var owed []string
 	for _, session := range d.mergedSessionsForBroadcast() {
@@ -116,8 +114,6 @@ func TestARestartNeitherResurrectsNorReapsAClosedSession(t *testing.T) {
 	_ = second.store.Close()
 	second.store = reopened
 
-	// The reaper and the recoverable sweep both walk the live list; a closed row
-	// must be in neither, and must still be in the ledger when they are done.
 	second.pruneSessionsWithoutPTY(time.Now().Add(time.Hour))
 
 	if got := reopened.Get("closed-before-restart"); got != nil {
@@ -138,7 +134,6 @@ func TestARuntimeOutlivingItsCloseIsStoppedRatherThanRebuilt(t *testing.T) {
 	if _, err := d.store.CloseSession("stubborn", store.SessionClose{By: store.SessionClosedByUser}, time.Now()); err != nil {
 		t.Fatalf("close: %v", err)
 	}
-	// The tombstone sweep already ran, so nothing but the ledger says this is closed.
 	d.store.ClearSessionIntentionalClose("stubborn")
 	backend := &fakeSpawnBackend{sessionIDs: []string{"stubborn"}}
 	d.ptyBackend = backend

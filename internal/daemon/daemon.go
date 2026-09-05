@@ -1887,8 +1887,7 @@ func (d *Daemon) terminateSessionRuntimeChecked(sessionID string, sig syscall.Si
 	return nil
 }
 
-// Rolls a spawn back. The session is reaped rather than closed: the delegation
-// it was spawned for never ran, so there is nothing to record and nothing to reopen.
+// Rolls a spawn back: the delegation never ran, so there is nothing to record.
 func (d *Daemon) unregisterSession(sessionID string, sig syscall.Signal) *protocol.Session {
 	session := d.store.Get(sessionID)
 	if session == nil && d.hubManager != nil {
@@ -2018,8 +2017,8 @@ func (d *Daemon) terminateSessionAsync(sessionID string, sig syscall.Signal, tea
 	return done
 }
 
-// closeSession records the close in the ledger: the row and its session-owned
-// tables stay, and the store stops answering List and Get for the session.
+// closeSession keeps the row and its session-owned tables; the store stops
+// answering List and Get for it.
 func (d *Daemon) closeSession(sessionID string, closed store.SessionClose) {
 	if session := d.store.Get(sessionID); session != nil {
 		if _, err := d.captureGardenSessionSnapshot(session); err != nil {
@@ -2045,8 +2044,7 @@ func (d *Daemon) closeSession(sessionID string, closed store.SessionClose) {
 	d.clearClassifyingTurn(sessionID)
 }
 
-// removeReapedSession deletes the row. Reaping is for sessions nothing can
-// restore and for spawns rolled back before they ran; a close keeps its record.
+// removeReapedSession deletes the row; reaping is for what a close would not record.
 func (d *Daemon) removeReapedSession(sessionID string) {
 	// A crashed session can leave a checkout newer than the branch monitor's cache.
 	if session := d.store.Get(sessionID); session != nil {

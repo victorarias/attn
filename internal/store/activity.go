@@ -89,7 +89,7 @@ func (s *Store) updateSessionActivity(id string, resumeID *string, line string, 
 		return true
 	}
 
-	query := `UPDATE sessions SET activity = ?, activity_at = ?, activity_cursor = ? WHERE id = ?`
+	query := `UPDATE sessions SET activity = ?, activity_at = ?, activity_cursor = ? WHERE id = ? AND closed_at = ''`
 	args := []any{line, stamp, cursor, id}
 	if resumeID != nil {
 		query += ` AND resume_session_id = ?`
@@ -136,7 +136,7 @@ func (s *Store) setSessionActivityCursor(id string, resumeID *string, cursor str
 		return true
 	}
 
-	query := `UPDATE sessions SET activity_cursor = ? WHERE id = ?`
+	query := `UPDATE sessions SET activity_cursor = ? WHERE id = ? AND closed_at = ''`
 	args := []any{cursor, id}
 	if resumeID != nil {
 		query += ` AND resume_session_id = ?`
