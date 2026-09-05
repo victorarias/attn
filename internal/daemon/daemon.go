@@ -133,8 +133,7 @@ type Daemon struct {
 	repoVisibilityKnown   map[string]string
 	repoVisibilityPending map[string]bool
 	repoVisibilityMu      sync.Mutex
-	// What the last inspect_branch saw, so a reopen verdict is served from stored
-	// state and git runs off the request path.
+	// What the last inspect_branch saw, so a verdict is served without waiting on git.
 	branchInspections                 map[string]branchInspection
 	branchInspectionsRunning          map[string]chan struct{}
 	branchInspectionsMu               sync.Mutex

@@ -10,20 +10,17 @@ import (
 type WorktreeEntry struct {
 	Path   string
 	Branch string
-	// Registered, but its directory is gone. `git worktree add` refuses the path
-	// until a prune clears it.
+	// Registered but its directory is gone; `git worktree add` refuses until a prune.
 	Prunable bool
 }
 
-// ListWorktrees clears stale registrations before reading, so what it returns is
-// what git will still honour.
+// ListWorktrees prunes before reading, so it returns what git will still honour.
 func ListWorktrees(repoDir string) ([]WorktreeEntry, error) {
 	_ = PruneWorktrees(repoDir)
 	return ObserveWorktrees(repoDir)
 }
 
-// ObserveWorktrees reads the registrations as they are, stale ones included, and
-// writes nothing. A caller deciding whether to write to the repository reads here.
+// ObserveWorktrees reads registrations as they are, stale ones included, and writes nothing.
 func ObserveWorktrees(repoDir string) ([]WorktreeEntry, error) {
 	out, err := runGitOutput(OpWorktree, repoDir, "worktree", "list", "--porcelain")
 	if err != nil {

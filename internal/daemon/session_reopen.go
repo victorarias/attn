@@ -27,20 +27,15 @@ const (
 	reopenPlaceAdd    = "add"
 )
 
-// What one inspect_branch saw about a saved branch in its repository. Every
-// field here costs a git command, which is why it is observed off the request path.
+// Every field costs a git command, which is why it is observed off the request path.
 type branchInspection struct {
 	State             string
 	Remote            string
 	AlreadyCheckedOut bool
 	RepoMissing       bool
-	// The saved worktree is still registered though its directory is gone; git
-	// refuses to recreate it until a prune clears the registration.
 	StaleRegistration bool
 }
 
-// The verdict for one session in the ledger: whether it comes back, what it
-// would take, and why not when it does not.
 type sessionReopenVerdict struct {
 	SessionID      string
 	Entry          *protocol.SessionLedgerEntry
@@ -56,8 +51,7 @@ type sessionReopenVerdict struct {
 	WorkspaceID    string
 	WorkspacePlan  string
 	PanePlan       string
-	// Where an offered worktree action would put the checkout back.
-	RecreatePath string
+	RecreatePath   string
 }
 
 func (v *sessionReopenVerdict) offers(action protocol.SessionReopenAction) bool {
@@ -94,8 +88,6 @@ func (v *sessionReopenVerdict) toProtocol() *protocol.SessionReopen {
 	return out
 }
 
-// The saved execution, richest source first: the dispatch document knows what git
-// discovery found, the ledger row knows what the session itself reported.
 func (d *Daemon) reopenExecution(entry *protocol.SessionLedgerEntry) garden.Dispatch {
 	execution, _ := d.gardenDispatch(entry.ID)
 	execution.SessionID = entry.ID
@@ -120,8 +112,7 @@ func (d *Daemon) reopenExecution(entry *protocol.SessionLedgerEntry) garden.Disp
 	return execution
 }
 
-// reopenVerdict answers from stored state alone. A branch it has not inspected
-// yet leaves the verdict `checking` and starts one tracked inspect_branch.
+// Answers from stored state alone; an uninspected branch leaves the verdict checking.
 func (d *Daemon) reopenVerdict(sessionID string) (*sessionReopenVerdict, bool) {
 	sessionID = strings.TrimSpace(sessionID)
 	entry := d.store.SessionLedgerEntry(sessionID)
@@ -149,8 +140,6 @@ func (d *Daemon) reopenVerdict(sessionID string) (*sessionReopenVerdict, bool) {
 	return verdict, true
 }
 
-// A reopen lands in the workspace the session ran in when it is still there,
-// and in one named after the session when it is not.
 func (d *Daemon) planReopenPlacement(verdict *sessionReopenVerdict) {
 	workspaceID := strings.TrimSpace(verdict.Entry.WorkspaceID)
 	if workspaceID != "" && d.store.GetWorkspace(workspaceID) != nil {
@@ -178,8 +167,7 @@ func (d *Daemon) workspaceLayoutHasSessionPane(workspaceID, sessionID string) bo
 	return ok && paneID != "" && holder == workspaceID
 }
 
-// An outpost's ledger row lives there, so this daemon names the host to go to.
-// Reports whether the verdict can go on being decided here.
+// Reports whether the verdict can go on being decided on this daemon.
 func decideReopenHost(verdict *sessionReopenVerdict, endpoints []protocol.EndpointInfo) bool {
 	if strings.TrimSpace(verdict.Execution.HostKind) != garden.HostRemote {
 		return true
@@ -221,8 +209,6 @@ func (d *Daemon) endpointInfos() []protocol.EndpointInfo {
 	return d.hubManager.List()
 }
 
-// The conversation and directory rows of the state map, in that order: without a
-// conversation only a fresh start is left, and where depends on the directory.
 func (d *Daemon) decideReopenPlace(verdict *sessionReopenVerdict) {
 	conversation, conversationReason := d.reopenConversation(verdict.Execution)
 
@@ -305,8 +291,7 @@ func (d *Daemon) decideMissingDirectory(verdict *sessionReopenVerdict, conversat
 	}
 }
 
-// A conversation that cannot be resumed leaves only fresh starts, and a
-// worktree action would promise a resume it cannot deliver.
+// A worktree action here would promise a resume the conversation cannot deliver.
 func (d *Daemon) freshActionsForMissingDirectory(
 	verdict *sessionReopenVerdict, inspection branchInspection,
 ) []protocol.SessionReopenAction {
@@ -320,8 +305,6 @@ func (d *Daemon) freshActionsForMissingDirectory(
 	return []protocol.SessionReopenAction{protocol.SessionReopenActionStartFreshElsewhere}
 }
 
-// A branch nobody carries any more reads differently when the work reached the
-// default branch: the same offer, labeled so the caller knows nothing was lost.
 func (d *Daemon) goneBranchVerdict(verdict *sessionReopenVerdict, gone, branch string) (string, string) {
 	merged := d.branchMerged(verdict.SessionID, branch)
 	state := branchStateGone
@@ -336,8 +319,7 @@ func (d *Daemon) goneBranchVerdict(verdict *sessionReopenVerdict, gone, branch s
 	return state, gone + "; " + tail
 }
 
-// The first rung of the merged ladder from the spike: what the session's own
-// pull request record already says. Ancestry checks belong to the worktree sweep.
+// The pull request record only; ancestry checks belong to the worktree sweep.
 func (d *Daemon) branchMerged(sessionID, branch string) bool {
 	if branch == "" {
 		return false
@@ -350,7 +332,6 @@ func (d *Daemon) branchMerged(sessionID, branch string) bool {
 	return false
 }
 
-// Reports whether the saved conversation can be resumed, and why not when it cannot.
 func (d *Daemon) reopenConversation(execution garden.Dispatch) (bool, string) {
 	resumeID := strings.TrimSpace(execution.Resume)
 	agentName := strings.TrimSpace(execution.Agent)
@@ -367,8 +348,6 @@ func (d *Daemon) reopenConversation(execution garden.Dispatch) (bool, string) {
 	return true, ""
 }
 
-// A directory that outlived its session may be on another branch by now. Reading
-// the checked-out branch is a local git call on a path that already exists.
 func (d *Daemon) reopenBranchWarning(execution garden.Dispatch) string {
 	saved := strings.TrimSpace(execution.Branch)
 	if saved == "" {
@@ -384,8 +363,7 @@ func (d *Daemon) reopenBranchWarning(execution garden.Dispatch) string {
 	return ""
 }
 
-// branchInspection serves the last observation and starts a new one when there
-// is none. The request never waits on git.
+// Serves the last observation and starts a new one when there is none; never waits on git.
 func (d *Daemon) branchInspection(sessionID, repo, branch string) (branchInspection, bool) {
 	key := branchInspectionKey(repo, branch)
 	d.branchInspectionsMu.Lock()
@@ -401,8 +379,7 @@ func branchInspectionKey(repo, branch string) string {
 	return attngit.CanonicalizePath(repo) + "\x00" + strings.TrimSpace(branch)
 }
 
-// inspectBranchInBackground runs at most one inspect_branch per repository and
-// branch at a time; the returned channel closes when that one lands.
+// At most one inspect_branch per repository and branch; the channel closes when it lands.
 func (d *Daemon) inspectBranchInBackground(sessionID, repo, branch string) <-chan struct{} {
 	key := branchInspectionKey(repo, branch)
 	d.branchInspectionsMu.Lock()
@@ -446,8 +423,7 @@ func (d *Daemon) inspectBranchInBackground(sessionID, repo, branch string) <-cha
 	return done
 }
 
-// A verdict is served from the last inspection, which a fetch or a branch created
-// outside attn can outdate; asking refreshes it for the next ask.
+// A fetch or a branch created outside attn outdates the last inspection.
 func (d *Daemon) refreshReopenBranch(verdict *sessionReopenVerdict) {
 	if verdict.BranchState == "" || verdict.BranchState == branchStateUnknown {
 		return
@@ -455,7 +431,6 @@ func (d *Daemon) refreshReopenBranch(verdict *sessionReopenVerdict) {
 	d.inspectBranchInBackground(verdict.SessionID, verdict.Execution.RepositoryRoot, verdict.Execution.Branch)
 }
 
-// forgetBranchInspections drops what a repository write just made stale.
 func (d *Daemon) forgetBranchInspections(repo string) {
 	prefix := attngit.CanonicalizePath(repo) + "\x00"
 	d.branchInspectionsMu.Lock()
@@ -487,8 +462,7 @@ func inspectBranch(repo, branch string) (branchInspection, error) {
 			}
 		}
 	}
-	// Observe rather than list: listing prunes, and deciding a verdict must not
-	// write to the repository.
+	// Observe, do not list: listing prunes, and a verdict must not write to the repository.
 	worktrees, err := attngit.ObserveWorktrees(repo)
 	if err != nil {
 		return branchInspection{}, fmt.Errorf("read worktrees of %s: %w", repo, err)
@@ -506,9 +480,6 @@ func inspectBranch(repo, branch string) (branchInspection, error) {
 	return inspection, nil
 }
 
-// ---------------------------------------------------------------------------
-// Performing a reopen
-
 type sessionReopenOutcome struct {
 	SessionID       string
 	WorkspaceID     string
@@ -518,8 +489,7 @@ type sessionReopenOutcome struct {
 	WorktreeCreated string
 }
 
-// reopenSession is the door for the session ledger. Garden Resume runs the same
-// spawn through reopenSessionRuntime with its own seed bookkeeping.
+// Garden Resume runs the same spawn through reopenSessionRuntime with its own bookkeeping.
 func (d *Daemon) reopenSession(
 	sessionID string, action protocol.SessionReopenAction, directory string,
 ) (*sessionReopenOutcome, error) {
@@ -545,8 +515,8 @@ func (d *Daemon) reopenSession(
 	if action == "" {
 		action = protocol.SessionReopenActionReopen
 	}
-	// A branch check still in flight decides which worktree action is offered, so an
-	// explicit ask waits for it rather than being refused by a verdict that is not final.
+	// An in-flight branch check decides which worktree action is offered, so an
+	// explicit ask waits for it rather than losing to a verdict that is not final.
 	if verdict.Checking && !verdict.offers(action) {
 		<-d.inspectBranchInBackground(sessionID, verdict.Execution.RepositoryRoot, verdict.Execution.Branch)
 		verdict, found = d.reopenVerdict(sessionID)
@@ -634,8 +604,7 @@ func (d *Daemon) performReopen(
 	}, nil
 }
 
-// The session may have run in a subdirectory of its worktree; the recreated
-// checkout puts that path back too.
+// The session may have run in a subdirectory of its worktree; put that path back too.
 func reopenDirectoryInsideWorktree(worktree string, execution garden.Dispatch) string {
 	subdir := strings.TrimSpace(execution.RepositorySubdir)
 	if subdir == "" || subdir == "." {
@@ -657,8 +626,7 @@ func (d *Daemon) recreateReopenWorktree(
 	path := verdict.RecreatePath
 	defer d.forgetBranchInspections(repo)
 
-	// The saved registration outlives a directory somebody deleted, and git refuses
-	// to put the worktree back until it goes. Only an explicit action gets here.
+	// git refuses to put the worktree back while the deleted directory's registration stands.
 	if inspection, known := d.branchInspection(verdict.SessionID, repo, branch); known && inspection.StaleRegistration {
 		if err := attngit.PruneWorktrees(repo); err != nil {
 			return "", fmt.Errorf("clear the stale worktree registration in %s: %w", repo, err)
@@ -696,9 +664,6 @@ func (d *Daemon) recreateReopenWorktree(
 	}
 }
 
-// ---------------------------------------------------------------------------
-// The shared runtime path: Garden Resume and session reopen both run this.
-
 type sessionReopenPlan struct {
 	SessionID   string
 	Directory   string
@@ -715,8 +680,7 @@ type sessionRuntimeReopened struct {
 	WorkspaceID string
 }
 
-// Brings one session id back: lifts the ledger close, puts the workspace and pane
-// back, spawns. Every step undoes itself on a later failure, the close included.
+// Every step undoes itself on a later failure, the ledger close included.
 func (d *Daemon) reopenSessionRuntime(
 	plan sessionReopenPlan,
 	rollback *delegationRollback,
@@ -738,8 +702,7 @@ func (d *Daemon) reopenSessionRuntime(
 	d.waitForSessionTeardown(plan.SessionID)
 	d.store.ClearSessionIntentionalClose(plan.SessionID)
 
-	// The store refuses a spawn that would re-register a closed row, so the close
-	// comes off first and goes back on if anything below fails.
+	// The store refuses a spawn that would re-register a closed row.
 	priorClose := d.sessionCloseAttribution(plan.SessionID)
 	reopened, err := d.store.ReopenSession(plan.SessionID)
 	if err != nil {
@@ -821,8 +784,7 @@ func (d *Daemon) reopenSessionRuntime(
 	return &sessionRuntimeReopened{SessionID: plan.SessionID, WorkspaceID: workspaceID}, nil
 }
 
-// A resumed session predates this call, so a rollback returns it to the ledger
-// under its original closer instead of reaping the row and its history with it.
+// Returns the row to the ledger under its original close instead of reaping its history.
 func (r *delegationRollback) onSessionReopened(sessionID string, closed store.SessionClose) {
 	r.undo = append(r.undo, func() error {
 		r.d.terminateSession(sessionID, syscall.SIGTERM)
@@ -845,8 +807,7 @@ func (r *delegationRollback) onConversationForgotten(sessionID string, prior sto
 	})
 }
 
-// The dispatch doc mirrors the resume id for a session that closed; a fresh
-// start drops it so a later verdict does not offer a conversation nobody wants.
+// The dispatch doc mirrors the resume id; a fresh start drops that mirror too.
 func (d *Daemon) forgetDispatchResume(sessionID string) {
 	if _, err := d.updateGardenDispatch(sessionID, func(current garden.Dispatch) (garden.Dispatch, bool, error) {
 		if strings.TrimSpace(current.Resume) == "" {
@@ -869,8 +830,6 @@ func (d *Daemon) sessionCloseAttribution(sessionID string) store.SessionClose {
 		Reason: protocol.Deref(entry.CloseReason),
 	}
 }
-
-// ---------------------------------------------------------------------------
 
 func (d *Daemon) handleSessionReopen(conn net.Conn, msg *protocol.SessionReopenMessage) {
 	action := protocol.SessionReopenAction("")
