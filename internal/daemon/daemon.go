@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"golang.org/x/sync/singleflight"
 	"io"
 	"net"
 	"net/http"
@@ -171,6 +172,7 @@ type Daemon struct {
 	sessionTitleInitialPrompt         map[string][sha256.Size]byte
 	ticketArtifactMu                  sync.Mutex
 	seedArtifactMu                    sync.Mutex
+	delegationModelQueries            singleflight.Group
 	delegationMu                      sync.Mutex
 	delegationRunning                 map[string]bool
 	delegationWorktreePrepareHook     func(path string)
@@ -2477,6 +2479,8 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 	// automation_runs_get, automation_set_enabled, automation_delete, automation_cleanup
 	case protocol.CmdAutomationApply, protocol.CmdAutomationValidate, protocol.CmdAutomationDefinitionsGet, protocol.CmdAutomationDefinitionGet, protocol.CmdAutomationRun, protocol.CmdAutomationRunsGet, protocol.CmdAutomationSetEnabled, protocol.CmdAutomationDelete, protocol.CmdAutomationCleanup:
 		d.handleAutomationCommand(conn, cmd, msg)
+	case protocol.CmdDelegationRoles: // wire: delegation_roles
+		d.handleDelegationRoles(conn)
 	case protocol.CmdDelegateStatus: // wire: delegate_status
 		d.handleDelegateStatus(conn, msg.(*protocol.DelegateStatusMessage))
 	case protocol.CmdSetTicketStatus: // wire: set_ticket_status

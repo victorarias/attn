@@ -367,6 +367,17 @@ func TestRefreshReloadsChangedGoDeclarationsWithoutRestart(t *testing.T) {
 		}
 		writeTest(t, e, filepath.Base(name), string(data))
 	}
+	protocolDir := filepath.Join(e.repo, "internal/protocol")
+	if err := os.MkdirAll(protocolDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	protocolTypes, err := os.ReadFile("../../internal/protocol/generated.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(protocolDir, "generated.go"), protocolTypes, 0644); err != nil {
+		t.Fatal(err)
+	}
 	generator, err := os.ReadFile("../promptgen/main.go")
 	if err != nil {
 		t.Fatal(err)

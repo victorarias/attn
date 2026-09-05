@@ -109,6 +109,7 @@ describe("PiDriver", () => {
         resume: true,
         initial_prompt: true,
         model_pin: true,
+        model_discovery: true,
         effort_pin: true,
         state_reporting: true,
         message_delivery: true,

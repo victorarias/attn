@@ -3303,6 +3303,476 @@
       ]
     },
     {
+      "id": "delegation-preferences",
+      "description": "On-demand configured roles and selected execution guidance.",
+      "events": [
+        {
+          "id": "guidance",
+          "delivery": "message_fragment",
+          "description": "Delegation preference guidance supplied on demand.",
+          "body": {
+            "kind": "text",
+            "id": "delegation-preferences.guidance",
+            "source": "content/delegation-preferences/guidance.md",
+            "bindings": [
+              {
+                "name": "revision",
+                "node": {
+                  "kind": "input",
+                  "field": {
+                    "name": "revision",
+                    "kind": "text",
+                    "description": "revision"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "id": "empty",
+          "delivery": "message_fragment",
+          "description": "Delegation preference guidance supplied on demand.",
+          "body": {
+            "kind": "text",
+            "id": "delegation-preferences.empty",
+            "source": "content/delegation-preferences/empty.md"
+          }
+        },
+        {
+          "id": "role",
+          "delivery": "message_fragment",
+          "description": "Delegation preference guidance supplied on demand.",
+          "body": {
+            "kind": "text",
+            "id": "delegation-preferences.role",
+            "source": "content/delegation-preferences/role.md",
+            "bindings": [
+              {
+                "name": "name",
+                "node": {
+                  "kind": "input",
+                  "field": {
+                    "name": "name",
+                    "kind": "text",
+                    "description": "name"
+                  }
+                }
+              },
+              {
+                "name": "id",
+                "node": {
+                  "kind": "input",
+                  "field": {
+                    "name": "id",
+                    "kind": "text",
+                    "description": "id"
+                  }
+                }
+              },
+              {
+                "name": "description",
+                "node": {
+                  "kind": "input",
+                  "field": {
+                    "name": "description",
+                    "kind": "text",
+                    "description": "description"
+                  }
+                }
+              },
+              {
+                "name": "instructions",
+                "node": {
+                  "kind": "input",
+                  "field": {
+                    "name": "instructions",
+                    "kind": "text",
+                    "description": "instructions"
+                  }
+                }
+              },
+              {
+                "name": "stopping_point",
+                "node": {
+                  "kind": "input",
+                  "field": {
+                    "name": "stopping_point",
+                    "kind": "text",
+                    "description": "stopping_point"
+                  }
+                }
+              },
+              {
+                "name": "choices",
+                "node": {
+                  "kind": "input",
+                  "field": {
+                    "name": "choices",
+                    "kind": "text",
+                    "description": "choices"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "id": "choice",
+          "delivery": "message_fragment",
+          "description": "Delegation preference guidance supplied on demand.",
+          "body": {
+            "kind": "text",
+            "id": "delegation-preferences.choice",
+            "source": "content/delegation-preferences/choice.md",
+            "bindings": [
+              {
+                "name": "kind",
+                "node": {
+                  "kind": "input",
+                  "field": {
+                    "name": "kind",
+                    "kind": "text",
+                    "description": "kind"
+                  }
+                }
+              },
+              {
+                "name": "name",
+                "node": {
+                  "kind": "input",
+                  "field": {
+                    "name": "name",
+                    "kind": "text",
+                    "description": "name"
+                  }
+                }
+              },
+              {
+                "name": "id",
+                "node": {
+                  "kind": "input",
+                  "field": {
+                    "name": "id",
+                    "kind": "text",
+                    "description": "id"
+                  }
+                }
+              },
+              {
+                "name": "selection",
+                "node": {
+                  "kind": "input",
+                  "field": {
+                    "name": "selection",
+                    "kind": "text",
+                    "description": "selection"
+                  }
+                }
+              },
+              {
+                "name": "condition",
+                "node": {
+                  "kind": "input",
+                  "field": {
+                    "name": "condition",
+                    "kind": "text",
+                    "description": "condition"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "id": "fallback",
+          "delivery": "message_fragment",
+          "description": "Delegation preference guidance supplied on demand.",
+          "body": {
+            "kind": "text",
+            "id": "delegation-preferences.fallback",
+            "source": "content/delegation-preferences/fallback.md",
+            "bindings": [
+              {
+                "name": "selection",
+                "node": {
+                  "kind": "input",
+                  "field": {
+                    "name": "selection",
+                    "kind": "text",
+                    "description": "selection"
+                  }
+                }
+              },
+              {
+                "name": "instructions",
+                "node": {
+                  "kind": "input",
+                  "field": {
+                    "name": "instructions",
+                    "kind": "text",
+                    "description": "instructions"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "id": "execution",
+          "delivery": "message_fragment",
+          "description": "Delegation preference guidance supplied on demand.",
+          "body": {
+            "kind": "text",
+            "id": "delegation-preferences.execution",
+            "source": "content/delegation-preferences/execution.md",
+            "bindings": [
+              {
+                "name": "name",
+                "node": {
+                  "kind": "input",
+                  "field": {
+                    "name": "name",
+                    "kind": "text",
+                    "description": "name"
+                  }
+                }
+              },
+              {
+                "name": "instructions",
+                "node": {
+                  "kind": "input",
+                  "field": {
+                    "name": "instructions",
+                    "kind": "text",
+                    "description": "instructions"
+                  }
+                }
+              },
+              {
+                "name": "stopping_point",
+                "node": {
+                  "kind": "input",
+                  "field": {
+                    "name": "stopping_point",
+                    "kind": "text",
+                    "description": "stopping_point"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "id": "fallback-execution",
+          "delivery": "message_fragment",
+          "description": "Delegation preference guidance supplied on demand.",
+          "body": {
+            "kind": "text",
+            "id": "delegation-preferences.fallback-execution",
+            "source": "content/delegation-preferences/fallback-execution.md",
+            "bindings": [
+              {
+                "name": "instructions",
+                "node": {
+                  "kind": "input",
+                  "field": {
+                    "name": "instructions",
+                    "kind": "text",
+                    "description": "instructions"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "id": "opening",
+          "delivery": "message_fragment",
+          "description": "Delegation preference guidance supplied on demand.",
+          "body": {
+            "kind": "text",
+            "id": "delegation-preferences.opening",
+            "source": "content/delegation-preferences/opening.md",
+            "bindings": [
+              {
+                "name": "task",
+                "node": {
+                  "kind": "input",
+                  "field": {
+                    "name": "task",
+                    "kind": "text",
+                    "description": "task"
+                  }
+                }
+              },
+              {
+                "name": "guidance",
+                "node": {
+                  "kind": "input",
+                  "field": {
+                    "name": "guidance",
+                    "kind": "text",
+                    "description": "guidance"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "id": "scout-description",
+          "delivery": "message_fragment",
+          "description": "Editable starting guidance for a delegation role.",
+          "body": {
+            "kind": "text",
+            "id": "delegation-preferences.scout-description",
+            "source": "content/delegation-preferences/scout-description.md"
+          }
+        },
+        {
+          "id": "scout-instructions",
+          "delivery": "message_fragment",
+          "description": "Editable starting guidance for a delegation role.",
+          "body": {
+            "kind": "text",
+            "id": "delegation-preferences.scout-instructions",
+            "source": "content/delegation-preferences/scout-instructions.md"
+          }
+        },
+        {
+          "id": "scout-stopping-point",
+          "delivery": "message_fragment",
+          "description": "Editable starting guidance for a delegation role.",
+          "body": {
+            "kind": "text",
+            "id": "delegation-preferences.scout-stopping-point",
+            "source": "content/delegation-preferences/scout-stopping-point.md"
+          }
+        },
+        {
+          "id": "design-description",
+          "delivery": "message_fragment",
+          "description": "Editable starting guidance for a delegation role.",
+          "body": {
+            "kind": "text",
+            "id": "delegation-preferences.design-description",
+            "source": "content/delegation-preferences/design-description.md"
+          }
+        },
+        {
+          "id": "design-instructions",
+          "delivery": "message_fragment",
+          "description": "Editable starting guidance for a delegation role.",
+          "body": {
+            "kind": "text",
+            "id": "delegation-preferences.design-instructions",
+            "source": "content/delegation-preferences/design-instructions.md"
+          }
+        },
+        {
+          "id": "design-stopping-point",
+          "delivery": "message_fragment",
+          "description": "Editable starting guidance for a delegation role.",
+          "body": {
+            "kind": "text",
+            "id": "delegation-preferences.design-stopping-point",
+            "source": "content/delegation-preferences/design-stopping-point.md"
+          }
+        },
+        {
+          "id": "build-description",
+          "delivery": "message_fragment",
+          "description": "Editable starting guidance for a delegation role.",
+          "body": {
+            "kind": "text",
+            "id": "delegation-preferences.build-description",
+            "source": "content/delegation-preferences/build-description.md"
+          }
+        },
+        {
+          "id": "build-instructions",
+          "delivery": "message_fragment",
+          "description": "Editable starting guidance for a delegation role.",
+          "body": {
+            "kind": "text",
+            "id": "delegation-preferences.build-instructions",
+            "source": "content/delegation-preferences/build-instructions.md"
+          }
+        },
+        {
+          "id": "build-stopping-point",
+          "delivery": "message_fragment",
+          "description": "Editable starting guidance for a delegation role.",
+          "body": {
+            "kind": "text",
+            "id": "delegation-preferences.build-stopping-point",
+            "source": "content/delegation-preferences/build-stopping-point.md"
+          }
+        },
+        {
+          "id": "ship-description",
+          "delivery": "message_fragment",
+          "description": "Editable starting guidance for a delegation role.",
+          "body": {
+            "kind": "text",
+            "id": "delegation-preferences.ship-description",
+            "source": "content/delegation-preferences/ship-description.md"
+          }
+        },
+        {
+          "id": "ship-instructions",
+          "delivery": "message_fragment",
+          "description": "Editable starting guidance for a delegation role.",
+          "body": {
+            "kind": "text",
+            "id": "delegation-preferences.ship-instructions",
+            "source": "content/delegation-preferences/ship-instructions.md"
+          }
+        },
+        {
+          "id": "ship-stopping-point",
+          "delivery": "message_fragment",
+          "description": "Editable starting guidance for a delegation role.",
+          "body": {
+            "kind": "text",
+            "id": "delegation-preferences.ship-stopping-point",
+            "source": "content/delegation-preferences/ship-stopping-point.md"
+          }
+        },
+        {
+          "id": "review-description",
+          "delivery": "message_fragment",
+          "description": "Editable starting guidance for a delegation role.",
+          "body": {
+            "kind": "text",
+            "id": "delegation-preferences.review-description",
+            "source": "content/delegation-preferences/review-description.md"
+          }
+        },
+        {
+          "id": "review-instructions",
+          "delivery": "message_fragment",
+          "description": "Editable starting guidance for a delegation role.",
+          "body": {
+            "kind": "text",
+            "id": "delegation-preferences.review-instructions",
+            "source": "content/delegation-preferences/review-instructions.md"
+          }
+        },
+        {
+          "id": "review-stopping-point",
+          "delivery": "message_fragment",
+          "description": "Editable starting guidance for a delegation role.",
+          "body": {
+            "kind": "text",
+            "id": "delegation-preferences.review-stopping-point",
+            "source": "content/delegation-preferences/review-stopping-point.md"
+          }
+        }
+      ]
+    },
+    {
       "id": "garden-advisor",
       "description": "Tool-free model recommending a seed action or drafting its handoff.",
       "events": [
@@ -5169,5 +5639,5 @@
       ]
     }
   ],
-  "definitions_hash": "c7a04a9cf5fb99343ec2d4f6d855273167d24af04afe493b4f71b7aedb755514"
+  "definitions_hash": "022da8c2695684af2a91b533cd4ea355d8345b3e96d5e09b46c43b98cb06d554"
 }

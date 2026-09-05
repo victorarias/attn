@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "id": "delegation-routing",
+  "description": "Request-local routing guidance retrieved only after choosing to delegate.",
+  "recipient": "delegation-preferences",
+  "event": "guidance",
+  "values": { "revision": "12" }
+}

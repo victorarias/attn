@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "id": "delegation-role-execution",
+  "description": "Only selected Build guidance reaches the delegated agent, with user text kept literal.",
+  "recipient": "delegation-preferences",
+  "event": "execution",
+  "values": {
+    "name": "Build",
+    "instructions": "Implement the agreed change. Preserve {{literal}} in the fixture.",
+    "stopping_point": "Return the verified change for review."
+  }
+}

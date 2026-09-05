@@ -1,3 +1,4 @@
+import { getSupportedThinkingLevels, type Api, type Model } from "@earendil-works/pi-ai/compat";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
@@ -8,6 +9,8 @@ export type CatalogModel = {
   id: string;
   name?: string;
   contextWindow?: number;
+  effortSupport?: "supported" | "unsupported";
+  effortLevels?: string[];
 };
 
 export type ProviderModels = {
@@ -107,6 +110,10 @@ export function catalogFromModels(value: unknown): AvailableModels {
     // RPC models can carry resolved headers. Only display metadata crosses the plugin boundary.
     models.set(model.id, {
       id: model.id,
+      ...(typeof model.reasoning === "boolean" && typeof model.api === "string"
+        ? { effortSupport: model.reasoning ? "supported" as const : "unsupported" as const,
+            effortLevels: model.reasoning ? getSupportedThinkingLevels(model as unknown as Model<Api>) : [] }
+        : {}),
       ...(typeof model.name === "string" && model.name ? { name: model.name } : {}),
       ...(typeof model.contextWindow === "number" && model.contextWindow > 0
         ? { contextWindow: model.contextWindow } : {}),

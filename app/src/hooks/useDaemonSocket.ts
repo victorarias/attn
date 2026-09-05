@@ -1,3 +1,6 @@
+import { handleDelegationDaemonEvent, type DelegationSettingsState, type DelegationModelCatalog } from './daemonDelegationEvents';
+import { useDelegationPreferencesPush } from '../store/delegationPreferences';
+import type { DelegationPreferences } from '../types/generated';
 import { useEffect, useRef, useCallback, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { isTauri } from '@tauri-apps/api/core';
@@ -290,7 +293,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 
-export const PROTOCOL_VERSION = '284';
+export const PROTOCOL_VERSION = '285';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 const CLIENT_INSTANCE_ID =
@@ -1327,6 +1330,7 @@ export function useDaemonSocket({
 
         switch (data.event) {
           case 'initial_state':
+            useDelegationPreferencesPush.getState().clear();
             if (
               data.daemon_instance_id &&
               daemonInstanceIDRef.current &&
@@ -2869,6 +2873,7 @@ export function useDaemonSocket({
             if (handleBusDaemonEvent(data, pending)) break;
             if (handleAppDaemonEvent(data, pending)) break;
             if (docSubscriptions.handleEvent(data)) break;
+            if (handleDelegationDaemonEvent(data, pending)) break;
             if (handleAutoModeDaemonEvent(data, pending)) break;
             break;
           }
@@ -2884,6 +2889,7 @@ export function useDaemonSocket({
       canceledAttachIdsRef.current.clear();
       docSubscriptions.markDisconnected();
       useAutoModePushStore.getState().clear();
+      useDelegationPreferencesPush.getState().clear();
 
       if (circuitOpenRef.current) {
         console.error('[Daemon] Circuit open, not retrying');
@@ -3175,6 +3181,13 @@ export function useDaemonSocket({
       'Changing the consumer timed out',
     );
   }, [sendRequest]);
+
+  const sendDelegationPreferencesGet = useCallback((): Promise<DelegationSettingsState> =>
+    sendRequest('delegation_preferences_get', {}, 'Reading delegation preferences timed out'), [sendRequest]);
+  const sendDelegationPreferencesSave = useCallback((preferences: DelegationPreferences): Promise<DelegationSettingsState> =>
+    sendRequest('delegation_preferences_save', { preferences }, 'Saving delegation preferences timed out'), [sendRequest]);
+  const sendDelegationModels = useCallback((harness: string): Promise<DelegationModelCatalog> =>
+    sendRequest('delegation_models', { harness }, 'Discovering models timed out', 70_000), [sendRequest]);
 
   const sendAutoModeGet = useCallback((): Promise<AutoModeState> => {
     return sendRequest<AutoModeState>(
@@ -5425,6 +5438,9 @@ export function useDaemonSocket({
     sendAgentSetModel,
     sendListPastConversations,
     sendBusStatusGet,
+    sendDelegationPreferencesGet,
+    sendDelegationPreferencesSave,
+    sendDelegationModels,
     sendAutoModeGet,
     sendAutoModePromote,
     sendAutoModeDiscard,

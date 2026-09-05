@@ -262,9 +262,10 @@ var wireFixtures = map[string]wireFixture{
 	FactTailscaleServeChanged:  {events: []string{protocol.EventSettingsUpdated}},
 	FactSettingChanged:         {events: []string{protocol.EventSettingsUpdated}},
 
-	FactNotificationCreated: {events: []string{protocol.EventNotificationsUpdated}},
-	FactNotificationRead:    {events: []string{protocol.EventNotificationsUpdated}},
-	FactAutoModeDenied:      {events: []string{protocol.EventNotificationsUpdated}},
+	FactNotificationCreated:          {events: []string{protocol.EventNotificationsUpdated}},
+	FactNotificationRead:             {events: []string{protocol.EventNotificationsUpdated}},
+	FactAutoModeDenied:               {events: []string{protocol.EventNotificationsUpdated}},
+	FactDelegationPreferencesChanged: {events: []string{protocol.EventDelegationPreferencesChanged}},
 	FactAutoModeConfigChanged: {
 		events:  []string{protocol.EventAutoModeStateChanged},
 		subject: func(*wireWorld) string { return AutoModeConfigSubject },

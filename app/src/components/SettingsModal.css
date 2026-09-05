@@ -193,11 +193,12 @@
 }
 
 .settings-body {
+  --settings-body-padding-bottom: 32px;
   position: relative;
   min-height: 0;
   overflow: auto;
   background: var(--color-bg-panel);
-  padding: 26px 28px 32px;
+  padding: 26px 28px var(--settings-body-padding-bottom);
   contain: paint;
 }
 
@@ -890,7 +891,8 @@
   }
 
   .settings-body {
-    padding: 20px 18px 24px;
+    --settings-body-padding-bottom: 24px;
+    padding: 20px 18px var(--settings-body-padding-bottom);
   }
 
   .settings-content-head,

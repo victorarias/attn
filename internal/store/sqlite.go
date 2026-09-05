@@ -1190,6 +1190,7 @@ CREATE TABLE IF NOT EXISTS app_reconcile_progress (
 			ON agent_mailbox_items(recipient_session_id, created_at, id)
 			WHERE read_at = '';
 	`},
+	{134, "persist delegation preferences", `CREATE TABLE IF NOT EXISTS delegation_preferences (id INTEGER PRIMARY KEY CHECK (id = 1), config TEXT NOT NULL);`},
 }
 
 const migration99SQL = `
@@ -1629,6 +1630,19 @@ func migrateDB(db *sql.DB, dbPath string) error {
 			}
 		} else if m.version == 131 {
 			if err := applyMigration131(tx); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
+			}
+		} else if m.version == 134 {
+			if _, err := tx.Exec(m.sql); err != nil {
+				tx.Rollback()
+				return err
+			}
+			has, err := columnExists(tx, "delegation_operations", "resolved_preferences")
+			if err == nil && !has {
+				_, err = tx.Exec("ALTER TABLE delegation_operations ADD COLUMN resolved_preferences TEXT NOT NULL DEFAULT ''")
+			}
+			if err != nil {
 				tx.Rollback()
 				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
 			}
