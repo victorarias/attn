@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"encoding/json"
+	"errors"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"github.com/victorarias/attn/internal/garden"
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/ptybackend"
+	"github.com/victorarias/attn/internal/store"
 	"github.com/victorarias/attn/internal/toolhome"
 )
 
@@ -122,6 +124,63 @@ func TestSeedResumeRespawnsClosedTender(t *testing.T) {
 	}
 	if got := seedNoteCount(t, d, seedID); got != notesBefore {
 		t.Fatalf("log holds %d notes, want unchanged %d (resume must not write one)", got, notesBefore)
+	}
+}
+
+func TestSeedResumeLiftsTheLedgerCloseTheAppLeftBehind(t *testing.T) {
+	d, backend, sourceSessionID := newGardenDelegationDaemon(t)
+	leafID, seedID := delegateBoundSeed(t, d, backend, sourceSessionID, "codex")
+	writeCodexRolloutFixture(t, "codex-conv-closed")
+	d.persistResumeSessionID(leafID, "codex-conv-closed")
+
+	d.handleUnregister(drainedConn(t), &protocol.UnregisterMessage{ID: leafID})
+	if entry := d.store.SessionLedgerEntry(leafID); entry == nil || protocol.Deref(entry.ClosedAt) == "" {
+		t.Fatalf("ledger entry after close = %+v, want the close recorded", entry)
+	}
+	since := spawnCount(backend)
+
+	outcome, err := d.resumeSeed(seedID)
+	if err != nil {
+		t.Fatalf("resumeSeed: %v", err)
+	}
+	if outcome.SessionID != leafID || outcome.AlreadyRunning {
+		t.Fatalf("outcome = %+v, want session=%s already_running=false", outcome, leafID)
+	}
+	if session := d.store.Get(leafID); session == nil {
+		t.Fatal("store.Get after resume = nil, want the reopened session on every live surface")
+	}
+	if entry := d.store.SessionLedgerEntry(leafID); entry == nil || protocol.Deref(entry.ClosedAt) != "" {
+		t.Fatalf("ledger entry after resume = %+v, want the close lifted", entry)
+	}
+	if spawn := resumeSpawnForSession(t, backend, leafID, since); spawn.ResumeSessionID != "codex-conv-closed" {
+		t.Fatalf("resume spawn ResumeSessionID = %q, want codex-conv-closed", spawn.ResumeSessionID)
+	}
+}
+
+func TestAFailedResumeReturnsTheTenderToTheLedger(t *testing.T) {
+	d, backend, sourceSessionID := newGardenDelegationDaemon(t)
+	leafID, seedID := delegateBoundSeed(t, d, backend, sourceSessionID, "codex")
+	writeCodexRolloutFixture(t, "codex-conv-doomed")
+	d.persistResumeSessionID(leafID, "codex-conv-doomed")
+
+	d.closeSession(leafID, store.SessionClose{By: "sess-dispatcher", Reason: "brief delivered"})
+	backend.spawnErr = errors.New("no pty available")
+
+	if _, err := d.resumeSeed(seedID); err == nil {
+		t.Fatal("resumeSeed error = nil, want the spawn failure")
+	}
+	if session := d.store.Get(leafID); session != nil {
+		t.Fatalf("store.Get after a failed resume = %+v, want no live session", session)
+	}
+	entry := d.store.SessionLedgerEntry(leafID)
+	if entry == nil || protocol.Deref(entry.ClosedAt) == "" {
+		t.Fatalf("ledger entry after a failed resume = %+v, want the row still closed", entry)
+	}
+	if by := protocol.Deref(entry.ClosedBy); by != "sess-dispatcher" {
+		t.Errorf("closed_by = %q, want the original closer sess-dispatcher", by)
+	}
+	if reason := protocol.Deref(entry.CloseReason); reason != "brief delivered" {
+		t.Errorf("close_reason = %q, want the original reason", reason)
 	}
 }
 
