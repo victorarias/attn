@@ -9,6 +9,7 @@ import {
   launchFreshAppAndConnect,
   parseCommonArgs,
   printCommonHelp,
+  queryDaemonDb,
   restoreHarnessSettings,
 } from './common.mjs';
 import { DaemonObserver } from './daemonObserver.mjs';
@@ -56,6 +57,32 @@ function attnAllowingFailure(daemonBinary, profile, ...args) {
   return { status: result.status, stdout: result.stdout || '', stderr: result.stderr || '' };
 }
 
+// A verdict says `checking` while an inspect_branch is in flight and answers
+// sharper on the next ask. Ask until it has stopped checking.
+async function showUntilDecided(daemonBinary, profile, sessionId, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  let shown = '';
+  while (Date.now() < deadline) {
+    shown = attn(daemonBinary, profile, 'session', 'show', sessionId);
+    if (!/^checking\s/m.test(shown)) return shown;
+    await sleep(100);
+  }
+  throw new Error(`The verdict for ${sessionId} never stopped checking:\n${shown}`);
+}
+
+// The verdict can only offer a plain reopen once the agent has bound a
+// conversation; codex reports its rollout through the session-start hook.
+async function waitForBoundConversation(dbPath, sessionId, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  let resumeId = '';
+  while (Date.now() < deadline) {
+    resumeId = queryDaemonDb(dbPath, `SELECT resume_session_id FROM sessions WHERE id = '${sessionId}' LIMIT 1;`);
+    if (resumeId) return resumeId;
+    await sleep(200);
+  }
+  throw new Error(`Session ${sessionId} never bound a conversation in ${timeoutMs}ms; last value=${JSON.stringify(resumeId)}`);
+}
+
 async function waitForSessionGone(client, observer, sessionId, timeoutMs) {
   await observer.waitFor(() => !observer.sessionsById.has(sessionId), `session ${sessionId} unregistered`, timeoutMs);
   const deadline = Date.now() + timeoutMs;
@@ -91,6 +118,7 @@ async function main() {
   assertFreshWorldTargetSafe({ profile, appPath: options.appPath });
   const daemonBinary = appDaemonInTree(options.appPath);
   const dataDir = dataDirForProfile(profile);
+  const dbPath = path.join(dataDir, 'attn.db');
   const runner = createScenarioRunner(options, {
     scenarioId: 'SESSION-REOPEN',
     tier: 'tier1-local-shell',
@@ -146,7 +174,8 @@ async function main() {
         mainRepo: registered.main_repo,
         repo,
       });
-      runner.writeJson('worktree-session.json', registered);
+      const resumeId = await waitForBoundConversation(dbPath, sessionId, 60_000);
+      runner.writeJson('worktree-session.json', { ...registered, resumeId });
     });
 
     await runner.step('close_the_session', async () => {
@@ -157,7 +186,7 @@ async function main() {
     });
 
     await runner.step('the_verdict_says_it_comes_back', async () => {
-      const shown = attn(daemonBinary, profile, 'session', 'show', sessionId);
+      const shown = await showUntilDecided(daemonBinary, profile, sessionId, 30_000);
       runner.assert(/^state\s+closed$/m.test(shown), 'session show must report the session as closed', { shown });
       runner.assert(/^reopen\s+yes$/m.test(shown), 'the verdict must offer a plain reopen', { shown });
       runner.assert(/^place\s+directory present/m.test(shown), 'the verdict must read the directory as present', { shown });
@@ -183,7 +212,7 @@ async function main() {
     });
 
     await runner.step('the_verdict_refuses_and_writes_nothing', async () => {
-      const shown = attn(daemonBinary, profile, 'session', 'show', sessionId);
+      const shown = await showUntilDecided(daemonBinary, profile, sessionId, 30_000);
       runner.assert(/^reopen\s+no: /m.test(shown), 'the verdict must refuse and say why', { shown });
       runner.assert(/^actions\s+.*recreate_worktree_and_reopen/m.test(shown),
         'the verdict must offer the recreate action', { shown });
