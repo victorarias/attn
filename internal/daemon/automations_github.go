@@ -264,7 +264,7 @@ func (d *Daemon) cancelWithdrawnAutomationRun(run *store.AutomationRun) error {
 			if err := d.terminateSessionChecked(run.SessionID, syscall.SIGTERM); err != nil {
 				return fmt.Errorf("stop withdrawn automation reviewer: %w", err)
 			}
-			d.forgetSession(run.SessionID)
+			d.closeSession(run.SessionID, store.SessionClose{By: store.SessionClosedByUser, Reason: "review withdrawn"})
 		}
 	}
 	failureComment := automationFailureComment(run, ticket, automationReviewWithdrawnMessage)

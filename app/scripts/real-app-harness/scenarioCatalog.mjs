@@ -56,6 +56,12 @@ export const scenarioCatalog = [
     command: ['pnpm', 'run', 'real-app:scenario-close-pane-nonblocking'],
   },
   {
+    id: 'session-close-ledger',
+    runnerId: 'SESSION-CLOSE-LEDGER',
+    label: 'Closing a worktree session records it and leaves the worktree alone',
+    command: ['pnpm', 'run', 'real-app:scenario-session-close-ledger'],
+  },
+  {
     id: 'tile-only-workspace-select',
     runnerId: 'TILE-ONLY-WORKSPACE-SELECT',
     label: 'Tile-only workspace select + render',

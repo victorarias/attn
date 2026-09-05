@@ -100,6 +100,10 @@ func TestUnclassifiedCommandListOnlyShrinks(t *testing.T) {
 	}
 }
 
+// A ledger row is written by the daemon that ran the session, so a hub asked
+// about an id it never ran answers not-found instead of a neighbour's record.
+const sessionLedgerIsPerDaemon = "the ledger records the sessions this daemon ran; another daemon's rows are read there"
+
 // A hub answering one of these locally reads its own store instead of the owner's,
 // and fails invisibly: the local pane keeps working, only a remote pane is wrong.
 var sessionCommandsAnsweredWhereTheyLand = map[string]string{
@@ -126,6 +130,9 @@ var sessionCommandsAnsweredWhereTheyLand = map[string]string{
 	protocol.CmdOpenSentFiles:       "arrives from the agent process over the unix socket",
 
 	protocol.CmdUnregister: "handleUnregisterWS forwards to the endpoint itself",
+
+	protocol.CmdSessionList: sessionLedgerIsPerDaemon,
+	protocol.CmdSessionShow: sessionLedgerIsPerDaemon,
 
 	protocol.CmdTicketAttach:   "the ticket board is the hub's own store",
 	protocol.CmdBrowserControl: "handleRemoteBrowserControl resolves the browser host itself",

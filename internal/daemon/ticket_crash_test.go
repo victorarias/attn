@@ -31,7 +31,7 @@ func TestDropSessionRecordCrashesBoundTicket(t *testing.T) {
 	ticketID := boundTicketID(t, d, sessionID)
 	d.store.UpdateState(sessionID, protocol.StateWorking)
 
-	d.dropSessionRecord(sessionID)
+	d.closeSession(sessionID, store.SessionClose{By: store.SessionClosedByUser})
 
 	ticket, err := d.store.GetTicket(ticketID)
 	if err != nil {

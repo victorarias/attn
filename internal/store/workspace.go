@@ -196,7 +196,7 @@ func (s *Store) SessionsInWorkspace(workspaceID string) []string {
 	if s.db == nil {
 		return nil
 	}
-	rows, err := s.db.Query(`SELECT id FROM sessions WHERE workspace_id = ? ORDER BY id`, workspaceID)
+	rows, err := s.db.Query(`SELECT id FROM sessions WHERE workspace_id = ? AND closed_at = '' ORDER BY id`, workspaceID)
 	if err != nil {
 		return nil
 	}

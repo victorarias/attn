@@ -11,6 +11,7 @@ import (
 	"github.com/victorarias/attn/internal/pty"
 	"github.com/victorarias/attn/internal/sessionstate"
 	"github.com/victorarias/attn/internal/statetrace"
+	"github.com/victorarias/attn/internal/store"
 )
 
 func evidenceOf(t *testing.T, d *Daemon, sessionID string) sessionstate.Evidence {
@@ -501,7 +502,7 @@ func TestEvidenceDoesNotLeakWhenRemovalRacesTheWrite(t *testing.T) {
 
 	<-paused
 	go func() {
-		d.dropSessionRecord(id)
+		d.closeSession(id, store.SessionClose{By: store.SessionClosedByUser})
 	}()
 	time.Sleep(20 * time.Millisecond)
 	close(release)

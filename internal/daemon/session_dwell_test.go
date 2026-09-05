@@ -10,6 +10,7 @@ import (
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/pty"
 	"github.com/victorarias/attn/internal/sessionstate"
+	"github.com/victorarias/attn/internal/store"
 )
 
 func TestDwellGateHoldsATransitionUntilItHasBeenTrueLongEnough(t *testing.T) {
@@ -184,7 +185,7 @@ func TestClosingASessionMidDwellLeavesNothingBehind(t *testing.T) {
 		t.Fatal("no dwell was armed, so the test cannot show one being cleaned up")
 	}
 
-	d.dropSessionRecord(id)
+	d.closeSession(id, store.SessionClose{By: store.SessionClosedByUser})
 
 	if d.dwellGate().waiting(id) {
 		t.Fatal("the closed session's dwell is still pending")

@@ -7,6 +7,7 @@ import (
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/pty"
 	"github.com/victorarias/attn/internal/sessionstate"
+	"github.com/victorarias/attn/internal/store"
 )
 
 func TestASessionWhoseEvidenceStoppedMovingIsReportedStuck(t *testing.T) {
@@ -136,7 +137,7 @@ func TestTheReasonIsForgottenWithTheSession(t *testing.T) {
 		t.Fatal("no reason was recorded, so the cleanup below proves nothing")
 	}
 
-	d.dropSessionRecord(id)
+	d.closeSession(id, store.SessionClose{By: store.SessionClosedByUser})
 
 	if got := d.stateReasons().get(id); got != "" {
 		t.Fatalf("reason %q survived the session", got)

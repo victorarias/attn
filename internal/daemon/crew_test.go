@@ -115,7 +115,7 @@ func TestCrew_AMemberIsImportedBoundAndReleased(t *testing.T) {
 		t.Fatalf("roster binding = %q, want sess-trellis", got)
 	}
 
-	d.forgetSession("sess-trellis")
+	d.closeSession("sess-trellis", store.SessionClose{By: store.SessionClosedByUser})
 	if binding := memberByID(t, crewList(t, d), "trellis").BindingSession; binding != nil {
 		t.Fatalf("the binding survived its session: %v", *binding)
 	}

@@ -19,6 +19,7 @@ const (
 	FactSessionModelRequestStarted    = "session.model_request.started"
 	FactSessionRenamed                = "session.renamed"
 	FactSessionUnregistered           = "session.unregistered"
+	FactSessionClosed                 = "session.closed"
 	FactSessionTodosChanged           = "session.todos.changed"
 	FactSessionAssistantWindowChanged = "session.assistant_window.changed"
 	FactSessionRespawned              = "session.respawned"

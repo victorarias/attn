@@ -194,7 +194,7 @@ func (s *Store) SnoozedSessions() map[string]time.Time {
 		return snoozed
 	}
 
-	rows, err := s.db.Query(`SELECT id, turn_snoozed_until FROM sessions WHERE turn_snoozed_until != ''`)
+	rows, err := s.db.Query(`SELECT id, turn_snoozed_until FROM sessions WHERE turn_snoozed_until != '' AND closed_at = ''`)
 	if err != nil {
 		log.Printf("[store] SnoozedSessions: failed: %v", err)
 		return snoozed

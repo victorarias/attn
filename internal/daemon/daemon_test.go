@@ -968,7 +968,7 @@ func TestDaemon_ReconcileResumesTeardownWithoutRecreatingRemovedSession(t *testi
 	if _, err := first.prepareSessionTeardown("closing-session"); err != nil {
 		t.Fatalf("prepare session teardown: %v", err)
 	}
-	first.commitSessionUnregister("closing-session")
+	first.commitSessionUnregister("closing-session", store.SessionClose{By: store.SessionClosedByUser})
 	if firstStore.Get("closing-session") != nil || !firstStore.SessionCloseIntentional("closing-session") {
 		t.Fatal("teardown gap must have no session row and a durable close marker")
 	}
@@ -1051,7 +1051,7 @@ func TestDaemon_AsyncTeardownFailureKeepsRestartTombstone(t *testing.T) {
 	if err != nil {
 		t.Fatalf("prepare session teardown: %v", err)
 	}
-	d.commitSessionUnregister("failed-teardown")
+	d.commitSessionUnregister("failed-teardown", store.SessionClose{By: store.SessionClosedByUser})
 	d.ptyBackend = &fakeSpawnBackend{killErr: errors.New("worker still owns the child")}
 	<-d.terminateSessionAsync("failed-teardown", syscall.SIGTERM, teardown)
 	if !d.store.SessionCloseIntentional("failed-teardown") {
@@ -1104,7 +1104,7 @@ func TestDaemon_LateRegisterCannotRecreateClosingSession(t *testing.T) {
 	if _, err := d.prepareSessionTeardown("late-register"); err != nil {
 		t.Fatalf("prepare close: %v", err)
 	}
-	d.commitSessionUnregister("late-register")
+	d.commitSessionUnregister("late-register", store.SessionClose{By: store.SessionClosedByUser})
 	conn := &syncConn{}
 	d.handleRegister(conn, &protocol.RegisterMessage{
 		ID: "late-register", Label: protocol.Ptr("late"), Dir: t.TempDir(),

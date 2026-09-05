@@ -435,60 +435,6 @@ test.describe('Keyboard Shortcuts', () => {
     });
   });
 
-  test.describe('Worktree Cleanup Prompt', () => {
-    test('traps focus and supports arrow navigation', async ({ page, daemon }) => {
-      await daemon.start();
-      await page.addInitScript(() => {
-        localStorage.setItem('alwaysKeepWorktrees', 'false');
-      });
-      await page.goto('/');
-      await page.waitForSelector('.dashboard');
-
-      await createSession(page, daemon, {
-        id: 's1',
-        label: 'Worktree',
-        state: 'working',
-        cwd: '/tmp/test/worktree-1',
-        is_worktree: true,
-        branch: 'feature/cleanup',
-      });
-
-      await expect(page.locator('[data-testid="session-s1"]')).toBeVisible();
-      await page.locator('[data-testid="session-s1"]').click();
-      await expect(page.locator('.terminal-wrapper.active')).toBeVisible();
-
-      await page.keyboard.press('Meta+w');
-
-      const dialog = page.locator('.worktree-cleanup-prompt .cleanup-content');
-      await expect(dialog).toBeVisible();
-
-      // In headless CI document.hasFocus() is false, which breaks page.keyboard.press() and toBeFocused();
-      // locator.press() reaches the element regardless, and document.activeElement?.matches() bypasses hasFocus().
-      const activeEl = (sel: string) =>
-        page.evaluate((s) => document.activeElement?.matches(s) ?? false, sel);
-
-      await expect.poll(() => activeEl('.cleanup-btn.keep')).toBe(true);
-
-      await page.locator('.cleanup-btn.keep').press('ArrowRight');
-      await expect.poll(() => activeEl('.cleanup-btn.delete')).toBe(true);
-
-      await page.locator('.cleanup-btn.delete').press('ArrowRight');
-      await expect.poll(() => activeEl('.cleanup-btn.always')).toBe(true);
-
-      await page.locator('.cleanup-btn.always').press('ArrowLeft');
-      await expect.poll(() => activeEl('.cleanup-btn.delete')).toBe(true);
-
-      await page.locator('.cleanup-btn.delete').press('Tab');
-      await expect.poll(() => activeEl('.cleanup-btn.always')).toBe(true);
-
-      await page.locator('.cleanup-btn.always').press('Tab');
-      await expect.poll(() => activeEl('.cleanup-btn.keep')).toBe(true);
-
-      await page.locator('.cleanup-btn.keep').press('Shift+Tab');
-      await expect.poll(() => activeEl('.cleanup-btn.always')).toBe(true);
-    });
-  });
-
   test.describe('Sidebar', () => {
     test('⌘⇧B toggles sidebar', async ({ page, daemon }) => {
       await daemon.start();

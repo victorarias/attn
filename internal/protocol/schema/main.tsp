@@ -787,6 +787,26 @@ model SessionTranscriptMessage {
   after_cursor?: string;
 }
 
+// Reads the session ledger: the durable record of every session that ran.
+// Live sessions by default, `closed` for the closed ones alone, `all` for both.
+// Newest first, where newest means the close for a closed session and the last
+// sighting for a live one.
+model SessionListMessage {
+  cmd: "session_list";
+  closed?: boolean;
+  all?: boolean;
+  // Rows per page. Absent takes the daemon's default.
+  limit?: int32;
+  // The id of the last row of the previous page; this page starts after it.
+  before?: string;
+}
+
+// Reads one ledger row, live or closed, by exact session id.
+model SessionShowMessage {
+  cmd: "session_show";
+  session_id: string;
+}
+
 // Replays the daemon's per-session ring of state observations so a wrong color
 // can be explained: which sources spoke, what each claimed, and what happened to
 // each claim. Diagnostic only — reading it changes nothing.
@@ -6032,6 +6052,8 @@ model Response {
   present_feedback_result?: PresentFeedbackResult;
   session_instructions_result?: SessionInstructionsResult;
   session_transcript_result?: SessionTranscriptResult;
+  session_list_result?: SessionListResult;
+  session_show_result?: SessionShowResult;
   state_explain_result?: StateExplainResult;
   agent_peek_result?: AgentPeekResult;
   agent_msg_result?: AgentMsgResult;
@@ -6456,6 +6478,41 @@ model SessionTranscriptResult {
   events: SessionTranscriptEvent[];
   next_cursor: string;
   at_end: boolean;
+}
+
+// A session as the ledger holds it. Distinct from Session, which is the live
+// broadcast shape: this one outlives the runtime and carries how it ended.
+model SessionLedgerEntry {
+  id: string;
+  label: string;
+  agent: string;
+  directory: string;
+  workspace_id: string;
+  branch?: string;
+  is_worktree?: boolean;
+  main_repo?: string;
+  // The state the session held when it closed, or its live state.
+  state: SessionState;
+  last_seen: string;
+  // Absent while the session is live. Its presence is what makes the row closed.
+  closed_at?: string;
+  // "user", or the id of the session that closed this one.
+  closed_by?: string;
+  // Only agent closes carry one; the user never types a reason.
+  close_reason?: string;
+}
+
+model SessionListResult {
+  entries: SessionLedgerEntry[];
+  // Rows matching the query that this page left out, all of them older than
+  // the last entry. Zero means the page reached the end.
+  omitted: int32;
+  // The id to pass back as `before` for the next page. Absent when nothing is omitted.
+  next_before?: string;
+}
+
+model SessionShowResult {
+  entry: SessionLedgerEntry;
 }
 
 model DelegateResult {

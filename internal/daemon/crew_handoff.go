@@ -16,6 +16,7 @@ import (
 	"github.com/victorarias/attn/internal/prompts"
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/ptybackend"
+	"github.com/victorarias/attn/internal/store"
 )
 
 // Measured 2026-08-14: `claude --session-id <id>` refuses a second launch under an id
@@ -301,7 +302,7 @@ func (d *Daemon) crewSessionGeometry(sessionID string) (int, int) {
 }
 
 func (d *Daemon) closeNappedSession(sessionID string, teardown *sessionTeardown) {
-	d.commitSessionUnregister(sessionID)
+	d.commitSessionUnregister(sessionID, store.SessionClose{By: store.SessionClosedByUser, Reason: "crew member put to sleep"})
 	if teardown.session != nil {
 		d.publishSessionUnregistered(teardown.session)
 		d.dissociateSessionFromWorkspace(teardown.session.ID)

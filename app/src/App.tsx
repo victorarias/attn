@@ -12,7 +12,6 @@ import { AttentionDrawer } from './components/AttentionDrawer';
 import { LocationPicker } from './components/LocationPicker';
 
 import { UndoToast } from './components/UndoToast';
-import { WorktreeCleanupPrompt } from './components/WorktreeCleanupPrompt';
 import { CloseSessionPrompt } from './components/CloseSessionPrompt';
 import { ChiefOfStaffTransferPrompt } from './components/ChiefOfStaffTransferPrompt';
 import { SessionContextCapPrompt } from './components/SessionContextCapPrompt';
@@ -1035,20 +1034,11 @@ function AppContent({
   const [isRefreshingPRs, setIsRefreshingPRs] = useState(false);
   const [refreshError, setRefreshError] = useState<string | null>(null);
 
-  const cleanupRequestIdRef = useRef(0);
-  const [closedWorktree, setClosedWorktree] = useState<{ id: number; path: string; branch?: string } | null>(null);
-  const [worktreeCleanupState, setWorktreeCleanupState] = useState<{
-    requestId: number | null;
-    isDeleting: boolean;
-    error: string | null;
-    forceable: boolean;
-  }>({ requestId: null, isDeleting: false, error: null, forceable: false });
   const [pendingSessionClose, setPendingSessionClose] = useState<{
     id: string;
     label: string;
     splitCount: number;
   } | null>(null);
-  const [alwaysKeepWorktrees, setAlwaysKeepWorktrees] = useState(false);
 
   const agentAvailability = useMemo(() => getAgentAvailability(settings), [settings]);
   const hasAvailableAgents = useMemo(
@@ -1600,7 +1590,6 @@ function AppContent({
     || chiefTransferTarget !== null
     || contextCapPromptSession !== null
     || appViewParamsPrompt !== null
-    || closedWorktree !== null
     || pendingSessionClose !== null
     || sessionCreationJob !== null
     || openPRLauncherJob !== null;
@@ -1872,7 +1861,7 @@ function AppContent({
     if (settingsOpen || shortcutsOpen || locationPickerOpen || whatsNew.isOpen
       || workspaceContextsOpen || notebookOpen || gardenHoldsWindow
       || chiefTransferTarget !== null || contextCapPromptSession !== null
-      || appViewParamsPrompt !== null || closedWorktree !== null || pendingSessionClose !== null
+      || appViewParamsPrompt !== null || pendingSessionClose !== null
       || sessionCreationJob !== null || openPRLauncherJob !== null) {
       return;
     }
@@ -1882,7 +1871,6 @@ function AppContent({
     chiefTransferTarget,
     contextCapPromptSession,
     appViewParamsPrompt,
-    closedWorktree,
     locationPickerOpen,
     openPRLauncherJob,
     pendingSessionClose,
@@ -2184,23 +2172,6 @@ function AppContent({
     setLocationPickerOpen(false);
   }, []);
 
-  const prepareWorktreeCleanupPrompt = useCallback((session: (typeof enrichedLocalSessions)[number] | undefined) => {
-    if (!session?.isWorktree || !session.cwd) {
-      return;
-    }
-
-    const sessionsInSameDir = enrichedLocalSessions.filter(s => s.cwd === session.cwd);
-    const isLastSession = sessionsInSameDir.length === 1;
-    if (!isLastSession || alwaysKeepWorktrees) {
-      return;
-    }
-
-    const cleanupRequestId = cleanupRequestIdRef.current + 1;
-    cleanupRequestIdRef.current = cleanupRequestId;
-    setWorktreeCleanupState({ requestId: cleanupRequestId, isDeleting: false, error: null, forceable: false });
-    setClosedWorktree({ id: cleanupRequestId, path: session.cwd, branch: session.branch });
-  }, [alwaysKeepWorktrees, enrichedLocalSessions]);
-
   const hasChiefOfStaff = useMemo(
     () => daemonSessions.some((ds) => ds.chief_of_staff === true),
     [daemonSessions]
@@ -2214,7 +2185,6 @@ function AppContent({
         return;
       }
       const session = enrichedLocalSessions.find(s => s.id === id);
-      prepareWorktreeCleanupPrompt(session);
 
       const localDaemonSession = daemonSessions.find(ds => ds.id === session?.id);
       if (localDaemonSession && session) {
@@ -2227,7 +2197,7 @@ function AppContent({
         removeWorkspaceRef(session.workspaceId);
       }
     },
-    [closeSession, daemonSessions, enrichedLocalSessions, prepareWorktreeCleanupPrompt, removeWorkspaceRef, sendUnregisterSession, showError]
+    [closeSession, daemonSessions, enrichedLocalSessions, removeWorkspaceRef, sendUnregisterSession, showError]
   );
 
   const handleClosePane = useCallback((sessionId: string, paneId: string) => {
@@ -2237,7 +2207,6 @@ function AppContent({
       return Promise.resolve();
     }
     const session = enrichedLocalSessions.find((entry) => entry.id === sessionId);
-    prepareWorktreeCleanupPrompt(session);
     const fallbackPaneId = prepareClosePaneFocus(sessionId, paneId);
     const fallbackSessionId = session?.workspace.agents.find((pane) => (
       pane.id === fallbackPaneId && pane.id !== paneId
@@ -2257,7 +2226,7 @@ function AppContent({
         clearPreparedClosePaneFocus(sessionId);
         throw error;
       });
-  }, [clearPreparedClosePaneFocus, daemonSessions, enrichedLocalSessions, prepareClosePaneFocus, prepareWorktreeCleanupPrompt, sendWorkspaceClosePane, sessions, setActiveSession, showError]);
+  }, [clearPreparedClosePaneFocus, daemonSessions, enrichedLocalSessions, prepareClosePaneFocus, sendWorkspaceClosePane, sessions, setActiveSession, showError]);
 
   const handleRequestCloseSession = useCallback((id: string) => {
     const session = sessions.find((entry) => entry.id === id);
@@ -2434,57 +2403,6 @@ function AppContent({
     },
     [agentAvailability, hasAvailableAgents, openPR, settings.new_session_agent]
   );
-
-  const handleWorktreeKeep = useCallback(() => {
-    setWorktreeCleanupState({ requestId: null, isDeleting: false, error: null, forceable: false });
-    setClosedWorktree(null);
-  }, []);
-
-  const handleWorktreeDelete = useCallback(async () => {
-    if (
-      !closedWorktree
-      || worktreeCleanupState.requestId !== closedWorktree.id
-      || worktreeCleanupState.isDeleting
-    ) {
-      return;
-    }
-    const deleteTarget = closedWorktree;
-    const force = worktreeCleanupState.forceable;
-    setWorktreeCleanupState((current) => (
-      current.requestId === deleteTarget.id
-        ? { requestId: deleteTarget.id, isDeleting: true, error: null, forceable: false }
-        : current
-    ));
-    try {
-      if (force) {
-        await sendDeleteWorktree(deleteTarget.path, undefined, { force: true });
-      } else {
-        await sendDeleteWorktree(deleteTarget.path);
-      }
-      setWorktreeCleanupState((current) => (
-        current.requestId === deleteTarget.id
-          ? { requestId: null, isDeleting: false, error: null, forceable: false }
-          : current
-      ));
-      setClosedWorktree((current) => (
-        current?.id === deleteTarget.id ? null : current
-      ));
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to delete worktree';
-      console.error('[App] Failed to delete worktree:', err);
-      setWorktreeCleanupState((current) => (
-        current.requestId === deleteTarget.id
-          ? { requestId: deleteTarget.id, isDeleting: false, error: message, forceable: Boolean((err as { forceable?: boolean }).forceable) }
-          : current
-      ));
-    }
-  }, [closedWorktree, sendDeleteWorktree, worktreeCleanupState.forceable, worktreeCleanupState.isDeleting, worktreeCleanupState.requestId]);
-
-  const handleWorktreeAlwaysKeep = useCallback(() => {
-    setAlwaysKeepWorktrees(true);
-    setWorktreeCleanupState({ requestId: null, isDeleting: false, error: null, forceable: false });
-    setClosedWorktree(null);
-  }, []);
 
   const workspaceViews = useMemo(
     () => buildWorkspaceViewModels(daemonWorkspaces, visibleEnrichedSessions),
@@ -3907,17 +3825,6 @@ function AppContent({
         phase={sessionCreationJob?.phase || 'starting_session'}
         error={sessionCreationJob?.error}
         onDismiss={() => setSessionCreationJob(null)}
-      />
-      <WorktreeCleanupPrompt
-        isVisible={closedWorktree !== null}
-        worktreePath={closedWorktree?.path || ''}
-        branchName={closedWorktree?.branch}
-        isDeleting={worktreeCleanupState.isDeleting}
-        deleteError={worktreeCleanupState.error}
-        deleteForceable={worktreeCleanupState.forceable}
-        onKeep={handleWorktreeKeep}
-        onDelete={handleWorktreeDelete}
-        onAlwaysKeep={handleWorktreeAlwaysKeep}
       />
       <CloseSessionPrompt
         isVisible={pendingSessionClose !== null}

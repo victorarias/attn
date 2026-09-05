@@ -315,6 +315,53 @@ func (c *Client) SessionInstructions(targetSessionID, question string) (*protoco
 	return resp.SessionInstructionsResult, nil
 }
 
+// SessionListOptions mirrors the flags of `attn session list`. Before is the id
+// of the last row of the previous page.
+type SessionListOptions struct {
+	Closed bool
+	All    bool
+	Limit  int
+	Before string
+}
+
+func (c *Client) SessionList(opts SessionListOptions) (*protocol.SessionListResult, error) {
+	msg := protocol.SessionListMessage{Cmd: protocol.CmdSessionList}
+	if opts.Closed {
+		msg.Closed = protocol.Ptr(true)
+	}
+	if opts.All {
+		msg.All = protocol.Ptr(true)
+	}
+	if opts.Limit > 0 {
+		msg.Limit = protocol.Ptr(opts.Limit)
+	}
+	if before := strings.TrimSpace(opts.Before); before != "" {
+		msg.Before = protocol.Ptr(before)
+	}
+	resp, err := c.send(msg)
+	if err != nil {
+		return nil, err
+	}
+	if resp.SessionListResult == nil {
+		return nil, errors.New("daemon returned no session list result")
+	}
+	return resp.SessionListResult, nil
+}
+
+func (c *Client) SessionShow(sessionID string) (*protocol.SessionShowResult, error) {
+	resp, err := c.send(protocol.SessionShowMessage{
+		Cmd:       protocol.CmdSessionShow,
+		SessionID: strings.TrimSpace(sessionID),
+	})
+	if err != nil {
+		return nil, err
+	}
+	if resp.SessionShowResult == nil {
+		return nil, errors.New("daemon returned no session show result")
+	}
+	return resp.SessionShowResult, nil
+}
+
 func (c *Client) SessionTranscript(targetSessionID, afterCursor string) (*protocol.SessionTranscriptResult, error) {
 	msg := protocol.SessionTranscriptMessage{
 		Cmd:             protocol.CmdSessionTranscript,

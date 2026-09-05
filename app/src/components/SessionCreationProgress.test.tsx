@@ -6,7 +6,7 @@ describe('SessionCreationProgress', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function getBoundingClientRect(this: Element) {
-      if (this.classList.contains('worktree-cleanup-compact')) {
+      if (this.classList.contains('session-progress-compact')) {
         return {
           x: 900,
           y: 680,
@@ -62,7 +62,7 @@ describe('SessionCreationProgress', () => {
     });
 
     expect(screen.getByRole('button', { name: 'Other work' })).toHaveFocus();
-    expect(container.querySelector('.worktree-cleanup-prompt')).toHaveClass('surface-hidden');
+    expect(container.querySelector('.session-progress-prompt')).toHaveClass('surface-hidden');
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1000);

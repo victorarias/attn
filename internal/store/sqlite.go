@@ -1190,6 +1190,7 @@ CREATE TABLE IF NOT EXISTS app_reconcile_progress (
 			ON agent_mailbox_items(recipient_session_id, created_at, id)
 			WHERE read_at = '';
 	`},
+	{134, "closing a session records it instead of deleting it", ""},
 }
 
 const migration99SQL = `
@@ -1323,7 +1324,12 @@ func migrateDB(db *sql.DB, dbPath string) error {
 			return fmt.Errorf("starting transaction for migration %d: %w", m.version, err)
 		}
 
-		if m.version == 20 {
+		if m.version == 134 {
+			if err := applyMigration134(tx); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
+			}
+		} else if m.version == 20 {
 			if err := applyMigration20(tx); err != nil {
 				tx.Rollback()
 				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
@@ -1846,6 +1852,32 @@ func applyMigration20(tx *sql.Tx) error {
 		return err
 	}
 	if _, err := tx.Exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_prs_host_repo_number ON prs(host, repo, number)"); err != nil {
+		return err
+	}
+	return nil
+}
+
+// Rewind-safe like every other column add here: the migration tests un-record
+// versions and re-run migrateDB over a database that already has the columns.
+func applyMigration134(tx *sql.Tx) error {
+	columns := map[string]string{
+		"closed_at":    "ALTER TABLE sessions ADD COLUMN closed_at TEXT NOT NULL DEFAULT ''",
+		"closed_by":    "ALTER TABLE sessions ADD COLUMN closed_by TEXT NOT NULL DEFAULT ''",
+		"close_reason": "ALTER TABLE sessions ADD COLUMN close_reason TEXT NOT NULL DEFAULT ''",
+	}
+	for column, statement := range columns {
+		exists, err := columnExists(tx, "sessions", column)
+		if err != nil {
+			return err
+		}
+		if exists {
+			continue
+		}
+		if _, err := tx.Exec(statement); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.Exec("CREATE INDEX IF NOT EXISTS idx_sessions_closed_at ON sessions(closed_at, id)"); err != nil {
 		return err
 	}
 	return nil
