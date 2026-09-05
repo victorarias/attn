@@ -16,8 +16,6 @@ import (
 	"github.com/victorarias/attn/internal/store"
 )
 
-// A repository with an origin the integration branch can be resolved against,
-// because every merged signal is measured against `origin/<branch>`.
 type sweepRepo struct {
 	t    *testing.T
 	root string
@@ -43,7 +41,7 @@ func newSweepRepo(t *testing.T) *sweepRepo {
 }
 
 // The message is a parameter because two commits with the same tree, parent, author
-// and second hash identically, and some cases here need them distinct.
+// and second hash identically, and some cases need them distinct.
 func (r *sweepRepo) commitIn(dir, file, content, message string) string {
 	r.t.Helper()
 	if err := os.WriteFile(filepath.Join(dir, file), []byte(content), 0o600); err != nil {
@@ -58,8 +56,6 @@ func (r *sweepRepo) commitOnMain(file, content, message string) string {
 	return r.commitIn(filepath.Join(r.root, "main"), file, content, message)
 }
 
-// A worktree on a new branch cut from `from`, which is what every case below
-// starts from.
 func (r *sweepRepo) worktree(name, branch, from string) string {
 	r.t.Helper()
 	path := filepath.Join(r.root, name)
@@ -102,24 +98,21 @@ func verdictFor(t *testing.T, d *Daemon, repo, path string, idle time.Duration, 
 	return worktreeSweepVerdict(rowFor(t, d, path), d.sweepContext(repo), now, idle)
 }
 
-// Every merged signal, observed by the shipped refresh against a real repository.
 func TestWorktreeRefreshObservesEachMergedSignal(t *testing.T) {
 	repo := newSweepRepo(t)
 	d := sweepDaemon(t)
 	now := time.Now()
 
-	// Ancestor: the branch tip is already on main.
 	base := strings.TrimSpace(gitOutput(t, repo.main, "rev-parse", "HEAD"))
 	ancestor := repo.worktree("ancestor", "feat/ancestor", base)
 
-	// Tree: identical content reaches main through a different commit, which is
-	// what a squash or rebase merge leaves behind.
+	// What a squash or rebase merge leaves behind: identical content on main
+	// through a different commit.
 	tree := repo.worktree("tree", "feat/tree", base)
 	repo.commitIn(tree, "shared.txt", "shared\n", "on the branch")
 	repo.commitOnMain("shared.txt", "shared\n", "on main")
 	repo.pushMain()
 
-	// Pull request: the merged record names the branch; nothing local says so.
 	pr := repo.worktree("pr", "feat/pr", base)
 	prHead := repo.commitIn(pr, "pr.txt", "pr\n", "pr work")
 	d.store.RecordRepoMergedBranches(repo.main, []store.MergedBranch{{
@@ -128,7 +121,6 @@ func TestWorktreeRefreshObservesEachMergedSignal(t *testing.T) {
 	}}, now)
 	d.store.SetRepoIntegrationBranch(repo.main, "main", "pull_requests", now)
 
-	// None: work that reached nothing.
 	unmerged := repo.worktree("unmerged", "feat/unmerged", base)
 	repo.commitIn(unmerged, "only-here.txt", "only here\n", "unmerged work")
 
@@ -146,7 +138,6 @@ func TestWorktreeRefreshObservesEachMergedSignal(t *testing.T) {
 	}
 }
 
-// One case per kept reason, each decided from the row the refresh wrote.
 func TestWorktreeSweepKeepsForEachReason(t *testing.T) {
 	repo := newSweepRepo(t)
 	d := sweepDaemon(t)
@@ -225,8 +216,6 @@ func TestWorktreeSweepKeepsForEachReason(t *testing.T) {
 		}
 	}
 
-	// The open-seed gate reads the same map the sweep builds, so assert on the gate
-	// directly rather than standing a garden execution up.
 	facts := d.sweepContext(repo.main)
 	facts.openSeeds = map[string][]string{openSeed: {"s-abc123"}}
 	verdict := worktreeSweepVerdict(rowFor(t, d, openSeed), facts, now, 0)
@@ -235,8 +224,6 @@ func TestWorktreeSweepKeepsForEachReason(t *testing.T) {
 	}
 }
 
-// The pin outranks every other gate and survives a refresh, and unpinning hands
-// the decision back.
 func TestWorktreeKeepPinSurvivesRefreshAndReleases(t *testing.T) {
 	repo := newSweepRepo(t)
 	d := sweepDaemon(t)
@@ -265,8 +252,6 @@ func TestWorktreeKeepPinSurvivesRefreshAndReleases(t *testing.T) {
 	}
 }
 
-// A pass with a session live in the worktree removes nothing and says whose
-// session held it.
 func TestWorktreeSweepPassKeepsALiveSessionAndReclaimsTheRest(t *testing.T) {
 	t.Setenv("ATTN_WORKTREE_SWEEP_IDLE_DAYS", "0")
 	repo := newSweepRepo(t)
@@ -310,8 +295,6 @@ func TestWorktreeSweepPassKeepsALiveSessionAndReclaimsTheRest(t *testing.T) {
 	}
 }
 
-// The switch keeps the decision visible: an eligible worktree stays, and its row
-// says it is eligible rather than inventing a reason of its own.
 func TestWorktreeSweepDisabledKeepsEligibleWorktreesAndSaysWhy(t *testing.T) {
 	t.Setenv("ATTN_WORKTREE_SWEEP_IDLE_DAYS", "0")
 	repo := newSweepRepo(t)
@@ -330,8 +313,6 @@ func TestWorktreeSweepDisabledKeepsEligibleWorktreesAndSaysWhy(t *testing.T) {
 	}
 }
 
-// git is the truth: a worktree another tool made is adopted with its path intact,
-// and one git no longer lists is dropped.
 func TestWorktreeRefreshReconcilesAgainstGit(t *testing.T) {
 	repo := newSweepRepo(t)
 	d := sweepDaemon(t)
@@ -356,8 +337,6 @@ func TestWorktreeRefreshReconcilesAgainstGit(t *testing.T) {
 	}
 }
 
-// The idle rule under a fake clock: a merged, clean worktree stays scheduled for
-// every day short of the threshold, and becomes eligible the moment it is reached.
 func TestWorktreeSweepIdleRuleWaitsTheFullWindow(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		lastActivity := time.Now()
@@ -388,8 +367,6 @@ func TestWorktreeSweepIdleRuleWaitsTheFullWindow(t *testing.T) {
 	})
 }
 
-// The env override is what the tests and a hurried user reach for; it must be read
-// rather than baked in at build time.
 func TestWorktreeSweepIdleReadsTheEnvironmentOverride(t *testing.T) {
 	if got := worktreeSweepIdle(); got != defaultWorktreeSweepIdleDays*24*time.Hour {
 		t.Fatalf("default idle = %s", got)
@@ -404,8 +381,6 @@ func TestWorktreeSweepIdleReadsTheEnvironmentOverride(t *testing.T) {
 	}
 }
 
-// A removal has to leave a trail where the work lived: the seed whose session ran
-// in the worktree gets a note naming the path, the branch and the reason.
 func TestWorktreeSweepNotesTheRemovalOnItsSeed(t *testing.T) {
 	t.Setenv("ATTN_WORKTREE_SWEEP_IDLE_DAYS", "0")
 	repo := newSweepRepo(t)
@@ -430,11 +405,8 @@ func TestWorktreeSweepNotesTheRemovalOnItsSeed(t *testing.T) {
 	if err := d.recordGardenDispatch("session-worked", "s-abc123", "", path, "claude", false); err != nil {
 		t.Fatalf("recording the dispatch: %v", err)
 	}
-	// The session is gone by the time the sweep runs; a live one would keep the
-	// worktree, which is a different gate with its own test.
 	d.store.Remove("session-worked")
-	// The user's own session in the repository is what keeps it tracked once the
-	// delegated one is gone.
+	// What keeps the repository tracked once the delegated session is gone.
 	d.store.Add(&protocol.Session{ID: "session-main", Directory: repo.main})
 
 	if _, removed, _ := d.worktreeSweepPass(time.Now()); removed != 1 {
@@ -461,8 +433,6 @@ func TestWorktreeSweepNotesTheRemovalOnItsSeed(t *testing.T) {
 	}
 }
 
-// A delete from the app or the CLI destroys exactly what the sweep would, so it
-// owes the same trail: an entry in the log and a note on the seeds that worked there.
 func TestDeletingAWorktreeByHandLeavesTheSameTrailAsTheSweep(t *testing.T) {
 	repo := newSweepRepo(t)
 	d := newEnrolledDaemon(t, "")
@@ -488,8 +458,6 @@ func TestDeletingAWorktreeByHandLeavesTheSameTrailAsTheSweep(t *testing.T) {
 	d.store.Remove("session-by-hand")
 	d.store.Add(&protocol.Session{ID: "session-main", Directory: repo.main})
 
-	// The open seed keeps it: the sweep would never take this one, which is the
-	// point of the user being able to.
 	if _, removed, _ := d.worktreeSweepPass(time.Now()); removed != 0 {
 		t.Fatalf("the sweep removed %d worktrees, want 0", removed)
 	}
@@ -551,5 +519,47 @@ func TestTheWorktreeSurfaceNeverPutsNullWhereTheAppExpectsAnArray(t *testing.T) 
 	}
 	if !strings.Contains(string(log), `"entries":[]`) {
 		t.Fatalf("the empty sweep log is %s, want \"entries\":[] in it", log)
+	}
+}
+
+// A failed refresh leaves the rows holding whatever the last good pass saw. Acting
+// on that removes work done since, and the forced branch delete makes it permanent.
+func TestASweepNeverActsOnARepositoryItCouldNotRefresh(t *testing.T) {
+	t.Setenv("ATTN_WORKTREE_SWEEP_IDLE_DAYS", "0")
+	repo := newSweepRepo(t)
+	d := sweepDaemon(t)
+	now := time.Now()
+	base := strings.TrimSpace(gitOutput(t, repo.main, "rev-parse", "HEAD"))
+
+	stale := repo.worktree("stale", "feat/stale", base)
+	d.refreshRepositoryWorktrees(repo.main, now)
+	if row := rowFor(t, d, stale); row.MergedSignal == store.MergedSignalNone {
+		t.Fatalf("the row is not eligible before the refresh breaks: %q", row.MergedSignal)
+	}
+
+	repo.commitIn(stale, "new-work.txt", "not on any branch yet\n", "work after the last refresh")
+
+	broken := filepath.Join(repo.root, "main", ".git")
+	if err := os.Rename(broken, broken+"-gone"); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, removed, _ := d.worktreeSweepPass(time.Now()); removed != 0 {
+		t.Fatalf("the sweep removed %d worktrees of a repository it could not refresh, want 0", removed)
+	}
+	if _, err := os.Stat(filepath.Join(stale, "new-work.txt")); err != nil {
+		t.Fatalf("the work committed since the last refresh is gone: %v", err)
+	}
+	// Not attempted, not merely survived: a removal the stale row asked for and
+	// git happened to refuse still writes its failure here.
+	if entries, _ := d.store.WorktreeSweepLog(repo.main, 10); len(entries) != 0 {
+		t.Fatalf("the sweep acted on a repository it could not refresh: %+v", entries)
+	}
+
+	row := rowFor(t, d, stale)
+	if row.SweepStatus != store.WorktreeSweepUnknown ||
+		!strings.Contains(row.SweepReason, "could not be refreshed") {
+		t.Errorf("row after a failed refresh = %q / %q, want it to say nothing is decided",
+			row.SweepStatus, row.SweepReason)
 	}
 }

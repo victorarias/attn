@@ -9,8 +9,6 @@ import (
 	"time"
 )
 
-// One `git worktree list --porcelain` record, with the fields the sweep needs
-// beyond the path and the branch. See docs/worktree-sweep.md.
 type WorktreeState struct {
 	Path     string
 	Branch   string

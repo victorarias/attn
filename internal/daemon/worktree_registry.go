@@ -14,25 +14,22 @@ import (
 // Receipt in docs/worktree-sweep.md.
 const integrationBranchTTL = 24 * time.Hour
 
-// What one repository pass learned once and every worktree of it then reads. Built
-// per pass so 141 worktrees cost one repository-wide git call each, not 141.
+// Built once per repository pass, so 141 worktrees cost one repository-wide git
+// call each rather than 141.
 type repositoryFacts struct {
-	repo string
-	// The ref ancestry and tree equality are measured against, e.g. "origin/next".
+	repo              string
 	integrationBranch string
 	treeHashes        map[string]bool
 	stashes           map[string]int
 	mergedBranches    map[string]store.MergedBranch
-	// Live sessions and open seeds by canonical worktree path, so a gate never
-	// rescans the session list or the seed collection per worktree.
-	liveSessions map[string][]string
-	openSeeds    map[string][]string
-	// The newest activity any live session reported in each worktree.
+	// Keyed by canonical worktree path.
+	liveSessions    map[string][]string
+	openSeeds       map[string][]string
 	sessionActivity map[string]time.Time
 }
 
-// The registry's repositories plus the ones live sessions sit in, so a repository
-// with no worktree yet still shows up on the surface.
+// Includes the repositories live sessions sit in, so one with no worktree row yet
+// still reaches the surface.
 func (d *Daemon) trackedRepositories() []string {
 	seen := make(map[string]bool)
 	var repos []string
@@ -68,23 +65,23 @@ func (d *Daemon) trackedRepositories() []string {
 	return repos
 }
 
-// Reconciles the registry against git and writes observed state. Every git call is
-// a tracked GitOperation, so the surface can show a slow repository per row.
-func (d *Daemon) refreshRepositoryWorktrees(repo string, now time.Time) {
+// Reports whether every row now holds state observed in this pass. False means the
+// rows are stale and no verdict on them may be acted on.
+func (d *Daemon) refreshRepositoryWorktrees(repo string, now time.Time) bool {
 	if d.store == nil {
-		return
+		return false
 	}
 
 	facts, err := d.repositoryFacts(repo, now)
 	if err != nil {
 		d.logf("worktree refresh: %s: %v", repo, err)
-		return
+		return false
 	}
 
 	states, err := d.reconcileWorktreeRegistry(repo, now)
 	if err != nil {
 		d.logf("worktree refresh: %s: listing worktrees: %v", repo, err)
-		return
+		return false
 	}
 
 	d.coalesceSnapshots(func() {
@@ -92,10 +89,11 @@ func (d *Daemon) refreshRepositoryWorktrees(repo string, now time.Time) {
 			d.refreshWorktreeRow(facts, state, now)
 		}
 	})
+	return true
 }
 
-// git is the truth: what it reports becomes a row, what it no longer reports is
-// dropped. The main worktree is never a row, so no gate has to exclude it.
+// What git reports becomes a row, what it no longer reports is dropped, and the
+// main worktree is never a row.
 func (d *Daemon) reconcileWorktreeRegistry(repo string, now time.Time) ([]git.WorktreeState, error) {
 	finish := d.beginGitOperation(protocol.GitOperationKindRefreshRepository, repo, nil)
 	states, err := git.ListWorktreeStates(repo)
@@ -154,8 +152,7 @@ func (d *Daemon) repositoryFacts(repo string, now time.Time) (*repositoryFacts, 
 	if facts.mergedBranches == nil {
 		facts.mergedBranches = make(map[string]store.MergedBranch)
 	}
-	// A pull request a live session opened counts before the repository-wide
-	// refresh has ever run, which is the whole point of keeping both records.
+	// Counts a live session's pull request before the repository-wide refresh runs.
 	for branch, record := range d.store.MergedSessionPullRequestBranches() {
 		if _, known := facts.mergedBranches[branch]; !known {
 			facts.mergedBranches[branch] = record
@@ -240,8 +237,8 @@ func modalBaseBranch(counts map[string]int) (string, bool) {
 	return best, best != ""
 }
 
-// The stored resolution wins while it is fresh; origin/HEAD is the fallback, not
-// the source. The returned ref is one git can resolve in this repository.
+// origin/HEAD is the fallback, never the source. The returned ref is one git can
+// resolve in this repository.
 func (d *Daemon) integrationBranch(repo string, now time.Time) string {
 	if record := d.store.RepoIntegrationBranch(repo); record != nil && record.Branch != "" {
 		resolvedAt, err := time.Parse(time.RFC3339, record.ResolvedAt)

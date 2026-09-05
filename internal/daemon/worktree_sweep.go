@@ -74,23 +74,34 @@ func (d *Daemon) worktreeSweepHandler(_ context.Context, _ *jobs.Job) (any, erro
 	return map[string]any{"refreshed": refreshed, "removed": removed, "kept": kept}, nil
 }
 
-// Refresh, then decide from stored state only. The sweep never runs git to decide,
-// so a verdict is always explainable from the row the surface is showing.
+// Decides from stored state only, so a verdict is always explainable from the row
+// the surface is showing.
 func (d *Daemon) worktreeSweepPass(now time.Time) (refreshed, removed, kept int) {
 	if d.store == nil {
 		return 0, 0, 0
 	}
 
 	repos := d.trackedRepositories()
+	current := make(map[string]bool, len(repos))
 	for _, repo := range repos {
-		d.refreshRepositoryWorktrees(repo, now)
-		refreshed++
+		current[repo] = d.refreshRepositoryWorktrees(repo, now)
+		if current[repo] {
+			refreshed++
+		}
 	}
 
 	sweeping := d.worktreeSweepEnabled()
 	for _, repo := range repos {
 		facts := d.sweepContext(repo)
 		for _, wt := range d.store.ListWorktreesByRepo(repo) {
+			// The gates read stored state. When the pass could not observe this
+			// repository that state is old, and old state removes live work.
+			if !current[repo] {
+				d.store.SetWorktreeSweep(wt.Path, store.WorktreeSweepUnknown,
+					"the repository could not be refreshed, so nothing here is decided", now)
+				kept++
+				continue
+			}
 			verdict := worktreeSweepVerdict(wt, facts, now, worktreeSweepIdle())
 			d.recordSweepVerdict(wt, verdict, now)
 			if verdict.Status != store.WorktreeSweepRemoved {
@@ -98,8 +109,6 @@ func (d *Daemon) worktreeSweepPass(now time.Time) (refreshed, removed, kept int)
 				continue
 			}
 			if !sweeping {
-				// Eligible, but the sweep is turned off. Say so on the row rather than
-				// pretending it is kept for a reason of its own.
 				d.store.SetWorktreeSweep(wt.Path, store.WorktreeSweepScheduled,
 					"eligible now; the sweep is off (Settings › Files and locations › Worktree sweep)", now)
 				kept++
@@ -116,8 +125,7 @@ func (d *Daemon) worktreeSweepPass(now time.Time) (refreshed, removed, kept int)
 	return refreshed, removed, kept
 }
 
-// What the gates read, all of it already stored or already in memory. Nothing
-// here runs git.
+// What the gates read. Nothing here runs git.
 type sweepContext struct {
 	liveSessions map[string][]string
 	openSeeds    map[string][]string
@@ -142,12 +150,10 @@ func (d *Daemon) storedIntegrationBranch(repo string) string {
 type sweepVerdict struct {
 	Status store.WorktreeSweepStatus
 	Reason string
-	// When the row is scheduled, the date it becomes eligible.
-	At time.Time
+	At     time.Time
 }
 
-// The spike's rule set, in order. The first gate that holds names the kept reason,
-// so a kept row always says which one it was and an agent can act on the text.
+// In order: the first gate that holds names the kept reason.
 func worktreeSweepVerdict(wt *store.Worktree, facts sweepContext, now time.Time, idleFor time.Duration) sweepVerdict {
 	if wt.Prunable {
 		return sweepVerdict{store.WorktreeSweepKeptStale,
@@ -232,8 +238,6 @@ func (d *Daemon) recordSweepVerdict(wt *store.Worktree, verdict sweepVerdict, no
 	}
 }
 
-// The delete writes the successful entry and the seed notes; a refusal never
-// reaches it, so the sweep's own failure is the only one recorded here.
 func (d *Daemon) removeSweptWorktree(wt *store.Worktree, verdict sweepVerdict, now time.Time) bool {
 	err := d.doDeleteWorktree(wt.Path, nil, deleteWorktreeOptions{
 		RemovalAction: "removed", RemovalReason: verdict.Reason,
@@ -253,8 +257,8 @@ func (d *Daemon) removeSweptWorktree(wt *store.Worktree, verdict sweepVerdict, n
 	return true
 }
 
-// The registry drops the row, so the log and the seed notes are all that is left
-// to say what went and why. Every removal writes both, whoever asked for it.
+// The registry drops the row, so every removal writes both the log entry and the
+// seed notes, whoever asked for it.
 func (d *Daemon) recordWorktreeRemoval(
 	wt *store.Worktree, seeds []string, opts deleteWorktreeOptions, now time.Time,
 ) {
@@ -269,8 +273,6 @@ func (d *Daemon) recordWorktreeRemoval(
 	entry.ID = d.store.AppendWorktreeSweepLog(entry, now)
 	d.publishFact(FactWorktreeSwept, wt.Path, protocolSweepEntry(entry))
 
-	// The path is in the note on purpose: worktrees other tools made go the same
-	// way, and the note is where you see which one it was.
 	body := fmt.Sprintf("attn %s the worktree %s (branch %s of %s): %s.",
 		action, wt.Path, wt.Branch, wt.MainRepo, reason)
 	for _, seedID := range seeds {
@@ -280,8 +282,7 @@ func (d *Daemon) recordWorktreeRemoval(
 	}
 }
 
-// Every seed whose last execution ran in the worktree, open or closed. A closed
-// seed blocks nothing, but its log is still where somebody looks for the branch.
+// Every seed whose last execution ran in the worktree, open or closed.
 func (d *Daemon) seedsForWorktree(wt *store.Worktree) []string {
 	var seeds []string
 	d.eachSeedExecution(func(seed garden.Seed, dispatch garden.Dispatch) {
@@ -292,8 +293,7 @@ func (d *Daemon) seedsForWorktree(wt *store.Worktree) []string {
 	return seeds
 }
 
-// Open seeds only: what the gate blocks on. Planted, growing and dormant seeds
-// all count; a harvested or withered one has nothing left to protect.
+// Planted, growing and dormant count; a harvested or withered seed does not.
 func (d *Daemon) openSeedsByWorktree(repo string) map[string][]string {
 	byPath := make(map[string][]string)
 	if d.store == nil {
@@ -324,8 +324,6 @@ func worktreeOwnsExecution(wt *store.Worktree, dispatch garden.Dispatch) bool {
 		attngit.CanonicalizePath(dispatch.RepositoryRoot) == attngit.CanonicalizePath(wt.MainRepo)
 }
 
-// One scan of the seed collection per call, not one per worktree: the sweep pass
-// builds its index once and every gate reads the map.
 func (d *Daemon) eachSeedExecution(visit func(garden.Seed, garden.Dispatch)) {
 	after := ""
 	for {

@@ -6,8 +6,7 @@ import (
 	"github.com/google/uuid"
 )
 
-// Written at creation from now on; rows that predate the column read unknown and
-// stay that way, because nothing recorded who made them.
+// Rows that predate the column read unknown and stay that way.
 type WorktreeOrigin string
 
 const (
@@ -16,8 +15,7 @@ const (
 	WorktreeOriginGit     WorktreeOrigin = "git"
 )
 
-// Why the sweep left a worktree alone, or that it is queued to go. One value per
-// gate in the spike's ladder, so a kept row always says which gate held it.
+// One value per gate, so a kept row always says which gate held it.
 type WorktreeSweepStatus string
 
 const (
@@ -34,8 +32,7 @@ const (
 	WorktreeSweepRemoved         WorktreeSweepStatus = "removed"
 )
 
-// Which rung of the merged ladder answered, strongest first. The ladder and its
-// measured coverage are in docs/worktree-sweep.md.
+// Which rung of the merged ladder answered, strongest first. See docs/worktree-sweep.md.
 type MergedSignal string
 
 const (
@@ -53,8 +50,7 @@ type Worktree struct {
 	Origin    WorktreeOrigin `json:"origin"`
 	PinnedAt  string         `json:"pinned_at,omitempty"`
 
-	// Everything below is observed state written by the background refresh. Empty
-	// means never refreshed, which is honest for a row the pass has not reached.
+	// Observed state written by the background refresh. Empty means never refreshed.
 	ObservedAt     string       `json:"observed_at,omitempty"`
 	HeadSHA        string       `json:"head_sha,omitempty"`
 	Detached       bool         `json:"detached,omitempty"`
@@ -75,8 +71,7 @@ type Worktree struct {
 
 func (w *Worktree) Pinned() bool { return w != nil && w.PinnedAt != "" }
 
-// What one refresh pass learned about one worktree. Written whole so a partial
-// pass can never leave half-fresh, half-stale state on the row.
+// Written whole, so a partial pass never leaves half-fresh state on the row.
 type WorktreeObservation struct {
 	Branch         string
 	HeadSHA        string
@@ -150,8 +145,6 @@ func (s *Store) ListWorktrees() []*Worktree {
 	return s.queryWorktrees(`SELECT ` + worktreeColumns + ` FROM worktrees ORDER BY main_repo, path`)
 }
 
-// Every repository the registry knows about. The sweep unions this with the
-// repositories of live sessions, so a repo with no worktree yet still refreshes.
 func (s *Store) ListWorktreeRepos() []string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -261,8 +254,7 @@ func (s *Store) SetWorktreeSweep(path string, status WorktreeSweepStatus, reason
 		string(status), reason, stamp, path)
 }
 
-// Reports false when no row moved, so the caller can say "not a registered
-// worktree" instead of silently pretending the pin took.
+// Reports false when no row moved, so the caller can say the path is not registered.
 func (s *Store) SetWorktreePin(path string, pinned bool, now time.Time) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -294,8 +286,8 @@ type WorktreeSweepLogEntry struct {
 	At     string `json:"at"`
 }
 
-// The registry drops rows git no longer lists, so a removed worktree has no row
-// left to carry its outcome. This log is where a removal stays visible.
+// A removed worktree has no row left to carry its outcome; this log is where it
+// stays visible.
 func (s *Store) AppendWorktreeSweepLog(entry WorktreeSweepLogEntry, now time.Time) string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -319,8 +311,7 @@ func (s *Store) AppendWorktreeSweepLog(entry WorktreeSweepLogEntry, now time.Tim
 	return id
 }
 
-// Newest first. Reports the number of rows past the limit so a caller can print
-// how much it is not showing instead of implying the log ends there.
+// Newest first, with the number of rows past the limit.
 func (s *Store) WorktreeSweepLog(mainRepo string, limit int) ([]WorktreeSweepLogEntry, int) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -467,8 +458,6 @@ func (s *Store) RepoMergedBranches(mainRepo string) map[string]MergedBranch {
 	return merged
 }
 
-// Branches a live session's own pull request record already reports merged, so a
-// PR opened from a session counts before the repository-wide refresh runs.
 func (s *Store) MergedSessionPullRequestBranches() map[string]MergedBranch {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

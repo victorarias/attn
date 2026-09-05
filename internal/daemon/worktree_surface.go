@@ -20,8 +20,8 @@ const defaultWorktreeListLimit = 20
 // repositories, so nothing healthy comes near it.
 const maxWorktreeListLimit = 5000
 
-// Reads the registry only. No git runs here however slow the repository is: that
-// is the whole point of the background refresh writing observed state onto rows.
+// Reads the registry only, so it answers at request speed however slow the
+// repository is.
 func (d *Daemon) worktreeListResult(mainRepo string, limit int) *protocol.WorktreeListResult {
 	if limit <= 0 {
 		limit = maxWorktreeListLimit
@@ -76,8 +76,8 @@ func (d *Daemon) setWorktreeKeep(path string, keep bool) (*protocol.Worktree, er
 	if wt == nil {
 		return nil, &worktreeNotFoundError{path: path}
 	}
-	// The pin decides the next verdict, so say so on the row now instead of
-	// leaving a stale kept reason there until the next tick.
+	// The pin decides the next verdict, so the row must not keep a stale reason
+	// until the next tick.
 	if keep {
 		d.store.SetWorktreeSweep(path, store.WorktreeSweepPinned, "kept forever by you", time.Time{})
 	} else {
@@ -107,8 +107,8 @@ func (d *Daemon) worktreeSweepLogResult(mainRepo string, limit int) *protocol.Wo
 	return result
 }
 
-// Pulls the cron entry in rather than running a pass inline: the refresh is
-// minutes of git and no request path may wait on it.
+// Pulls the cron entry in rather than running inline: no request path may wait
+// on minutes of git.
 func (d *Daemon) queueWorktreeRefresh() bool {
 	queue := d.jobQueueRef()
 	if queue == nil {

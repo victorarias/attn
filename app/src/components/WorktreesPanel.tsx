@@ -176,20 +176,11 @@ export function WorktreesPanel({
     });
   }, [setKeep, withBusy]);
 
+  // The daemon's push is what drops the row and writes the log entry; a local
+  // guess here would be a second entry.
   const remove = useCallback((worktree: Worktree) => {
     setConfirmDelete(null);
-    return withBusy(worktree.path, async () => {
-      await deleteWorktree(worktree.path, Boolean(worktree.dirty));
-      useWorktreeStore.getState().swept({
-        id: `local:${worktree.path}`,
-        path: worktree.path,
-        main_repo: worktree.main_repo,
-        branch: worktree.branch,
-        action: 'removed',
-        reason: 'you deleted it',
-        at: new Date().toISOString(),
-      });
-    });
+    return withBusy(worktree.path, () => deleteWorktree(worktree.path, Boolean(worktree.dirty)));
   }, [deleteWorktree, withBusy]);
 
   const requestRefresh = useCallback(() => {

@@ -53,7 +53,7 @@ describe('WorktreesPanel actions', () => {
     expect(setKeep).toHaveBeenLastCalledWith('/projects/attn--feat-one', false);
   });
 
-  it('asks before deleting and drops the row once it is gone', async () => {
+  it('asks before deleting, then drops the row on the daemon\u2019s receipt', async () => {
     const deleteWorktree = vi.fn().mockResolvedValue(undefined);
     render(<WorktreesPanel {...props({ deleteWorktree })} />);
 
@@ -66,6 +66,19 @@ describe('WorktreesPanel actions', () => {
     fireEvent.click(screen.getByText('Delete'));
     fireEvent.click(screen.getAllByText('Delete')[1] ?? screen.getByText('Delete'));
     await waitFor(() => expect(deleteWorktree).toHaveBeenCalledWith('/projects/attn--feat-one', false));
+
+    // The panel invents nothing: the row goes when the daemon says it went, which
+    // is the same push that puts the one entry in the log.
+    expect(screen.queryByText('attn--feat-one')).toBeTruthy();
+    useWorktreeStore.getState().swept({
+      id: 'entry-1',
+      path: '/projects/attn--feat-one',
+      main_repo: '/projects/attn',
+      branch: 'feat/one',
+      action: 'deleted',
+      reason: 'at your request',
+      at: '2026-09-05T10:00:00Z',
+    });
     await waitFor(() => expect(screen.queryByText('attn--feat-one')).toBeNull());
   });
 

@@ -107,8 +107,8 @@ function fillWithFiles(dir, count) {
   }
 }
 
-// Every worktree is cut from the pushed tip, so all of them read merged. What
-// separates them is the gate each one then trips.
+// Every worktree is cut from the pushed tip, so all read merged and the gate each
+// one trips is what separates them.
 function buildFixtureRepo(root) {
   const origin = path.join(root, 'origin.git');
   const main = path.join(root, 'main');
@@ -220,8 +220,6 @@ async function main() {
       await launchFreshAppAndConnect(client, observer);
     });
 
-    // A session is what makes the daemon track a repository at all, and it is
-    // also the source a delegation needs.
     await runner.step('open_a_session_in_the_repository', async () => {
       ownerSession = await createSessionAndWaitForInitialPane({
         client, observer, cwd: fixture.main, label: 'wtmain', agent: 'shell',
@@ -284,8 +282,6 @@ async function main() {
       const seen = await poll(async () => {
         const current = await client.request('worktrees_get_state');
         const count = refreshingCount(current);
-        // The panel reads the registry, so it must keep answering with every row
-        // while git is still walking the repository behind it.
         const rows = fixtureRows(current, fixture).length;
         if (count > 0 && rows >= fixture.count) {
           return { refreshing: count, rows, afterMs: Date.now() - started };
@@ -330,8 +326,6 @@ async function main() {
 
     await runner.step('leg4_a_removal_lands_on_the_seed_and_in_the_log', async () => {
       const target = fixture.worktrees.merged;
-      // The live session is its own gate; closing it first is what leaves the
-      // removal to be about the worktree.
       await observer.unregisterMatchingSessions((session) => session.id === delegateSession, 20_000);
       delegateSession = null;
 

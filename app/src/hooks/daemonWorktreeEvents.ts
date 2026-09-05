@@ -63,8 +63,8 @@ export function handleWorktreeDaemonEvent(
         pending,
         'worktree_refresh',
         event,
-        // The daemon answers false when it has no job queue to enqueue onto, and
-        // that is a failure the caller must see rather than a quiet no-op.
+        // False means the daemon had no job queue to enqueue onto: a failure the
+        // caller must see, not a quiet no-op.
         (settled) => (settled.success ? true : undefined),
         'The daemon has no job queue running, so no refresh was queued',
       );

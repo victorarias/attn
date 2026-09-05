@@ -1,8 +1,8 @@
 import { create } from 'zustand';
 import type { Worktree, WorktreeRepository, WorktreeSweepEntry } from '../types/generated';
 
-// Pushes land here rather than in App: only the Worktrees panel subscribes, so a
-// refresh pass over a large registry cannot repaint the shell.
+// Pushes land here rather than in App, so a refresh pass over a large registry
+// cannot repaint the shell.
 interface WorktreeStore {
   worktrees: Worktree[];
   repositories: WorktreeRepository[];
@@ -15,8 +15,6 @@ interface WorktreeStore {
   clear: () => void;
 }
 
-// A removal arrives as one sweep entry, so the log grows one row at a time between
-// fetches; the panel pages the rest from the daemon.
 const maxPushedSweepEntries = 200;
 
 export const useWorktreeStore = create<WorktreeStore>((set) => ({

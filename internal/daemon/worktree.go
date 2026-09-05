@@ -186,8 +186,7 @@ func (d *Daemon) discoverWorktree(path string) *store.Worktree {
 
 type deleteWorktreeOptions struct {
 	Force bool
-	// What the removal is called in the sweep log and on the seed notes. The
-	// sweep names its verdict; everyone else is a deliberate delete.
+	// What the removal is called in the sweep log and on the seed notes.
 	RemovalAction string
 	RemovalReason string
 }
