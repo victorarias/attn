@@ -12,7 +12,13 @@ import {
 } from "./index";
 import type { DenialLedgerLike } from "./ledger";
 import { ModelClassifier, type ModelRegistryLike } from "./model-classifier";
-import { autoModeStatusKey, autoModeStatusText } from "./ui";
+import {
+  autoModeStatusKey,
+  denialReportLines,
+  dimmed,
+  heldCount,
+  heldStatusText,
+} from "./ui";
 import { UsageLedger } from "./usage";
 import { reviewUnavailable } from "../security/recovery";
 import { toolEvidenceLimits } from "./evidence";
@@ -59,6 +65,7 @@ export class AutoMode {
   private noticed = false;
   private review: ToolCallReview | undefined;
   private executionCheck: ToolExecutionCheck | undefined;
+  private standing: () => readonly AutoModeDenial[] = () => [];
 
   constructor(private readonly setup: AutoModeSetup) {
     this.extension = createAutoMode({
@@ -72,7 +79,11 @@ export class AutoMode {
       onDenial: setup.onDenial,
       onWaitingForUser: setup.onWaitingForUser,
       usageLedger: this.usage,
-      onReady: (review, checkExecution) => { this.review = review; this.executionCheck = checkExecution; },
+      onReady: (review, checkExecution, standing) => {
+        this.review = review;
+        this.executionCheck = checkExecution;
+        this.standing = standing;
+      },
       sandboxReviewInExecutor: setup.sandboxReviewInExecutor,
       cacheWritePaths: setup.cacheWritePaths,
     });
@@ -105,7 +116,7 @@ export class AutoMode {
     this.flag = pi.getFlag("no-auto") === true ? false : pi.getFlag("auto") === true ? true : undefined;
 
     pi.registerCommand("auto", {
-      description: "Toggle attn auto mode (on | off | status)",
+      description: "Toggle attn auto mode (on | off | status | blocked)",
       handler: (args, ctx) => this.command(args, ctx),
     });
 
@@ -128,23 +139,44 @@ export class AutoMode {
     if (asked === "on") this.choice = true;
     else if (asked === "off") this.choice = false;
     else if (asked === "" || asked === "toggle") this.choice = !this.enabled();
+    else if (asked === "blocked") { this.reportBlocked(ctx); return; }
     else if (asked !== "status") {
-      ctx.ui?.notify(`/auto takes on, off, status, or nothing at all, not ${JSON.stringify(asked)}.`, "error");
+      ctx.ui?.notify(`/auto takes on, off, status, blocked, or nothing at all, not ${JSON.stringify(asked)}.`, "error");
       return;
     }
     this.paint(ctx);
+    const held = this.held();
     ctx.ui?.notify(
       this.setup.config.models.length === 0
         ? "auto mode is off: no model is set to judge a call. Add one in attn's settings."
         : this.enabled()
-          ? "auto mode is on: work inside this directory runs free, anything past it is judged."
+          ? held > 0
+            ? `auto mode is on: work inside this directory runs free, anything past it is judged. ${held} call${held === 1 ? " is" : "s are"} held — /auto blocked reviews them.`
+            : "auto mode is on: work inside this directory runs free, anything past it is judged."
           : "auto mode is off: pi runs every tool call, as it does without it.",
       "info",
     );
   }
 
+  private held(): number {
+    return this.enabled() ? heldCount(this.standing()) : 0;
+  }
+
+  private reportBlocked(ctx: AutoModeContextLike): void {
+    const denials = this.standing();
+    if (!this.enabled() || denials.length === 0) {
+      ctx.ui?.notify("auto mode is not holding any calls.", "info");
+      return;
+    }
+    // Only the TUI draws color; RPC relays notify text verbatim, so it stays plain.
+    const theme = ctx.mode === "tui" ? ctx.ui?.theme : undefined;
+    ctx.ui?.notify(denialReportLines(denials, theme).join("\n"), "warning");
+  }
+
   private paint(ctx: AutoModeContextLike): void {
-    ctx.ui?.setStatus(autoModeStatusKey, autoModeStatusText(this.enabled()));
+    // Only the TUI draws the footer; RPC relays status text verbatim, so it stays plain.
+    const theme = ctx.mode === "tui" ? ctx.ui?.theme : undefined;
+    ctx.ui?.setStatus(autoModeStatusKey, dimmed(theme, heldStatusText(this.enabled(), this.held())));
   }
 
   private judge(): Classifier {

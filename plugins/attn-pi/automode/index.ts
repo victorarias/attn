@@ -5,12 +5,15 @@ import type { DenialLedgerLike } from "./ledger";
 import { describeCall, isSandboxRequest, type ToolCall } from "./policy";
 import { AutoModeSession, type SessionDecision } from "./session";
 import {
-  autoModeDenialWidgetKey,
   breakerQuestion,
   classifyingWorkingMessage,
+  denialKey,
+  dimmed,
+  heldCount,
+  heldStatusText,
+  autoModeStatusKey,
   tooLongQuestion,
   denialNotice,
-  denialWidgetLines,
   type AutoModeUILike,
 } from "./ui";
 import { mergeUsage, UsageLedger, type UsageLike } from "./usage";
@@ -61,6 +64,7 @@ export type ToolResultEventResultLike = { usage?: UsageLike };
 export type AutoModeContextLike = {
   cwd: string;
   signal?: AbortSignal;
+  mode?: string;
 
   hasUI?: boolean;
   ui?: AutoModeUILike;
@@ -118,7 +122,7 @@ export type AutoModeOptions = {
   onWaitingForUser?: (waiting: boolean) => void;
   /** Where the classifier's usage waits for a tool result to ride into the totals. */
   usageLedger?: UsageLedger;
-  onReady?: (review: ToolCallReview, checkExecution: ToolExecutionCheck) => void;
+  onReady?: (review: ToolCallReview, checkExecution: ToolExecutionCheck, standing: () => readonly AutoModeDenial[]) => void;
   sandboxReviewInExecutor?: boolean;
   cacheWritePaths?: () => readonly string[];
 };
@@ -148,7 +152,17 @@ export function createAutoMode(options: AutoModeOptions): (pi: AutoModeExtension
     };
     const session = new AutoModeSession(options.config, classifier);
     let standing: AutoModeDenial[] = [];
+    // The agent retries blocked calls; a repeat restates the count, not the warning.
+    let lastDeniedKey: string | undefined;
     let breakerAsked = false;
+    const paintHeld = (ctx: AutoModeContextLike, denials: readonly AutoModeDenial[]): void => {
+      const ui = uiOf(ctx);
+      if (!ui) return;
+      // Only the TUI draws the footer; RPC relays status text verbatim, so it stays plain.
+      const theme = ctx.mode === "tui" ? ui.theme : undefined;
+      const enabled = options.isEnabled?.() !== false;
+      ui.setStatus(autoModeStatusKey, dimmed(theme, heldStatusText(enabled, heldCount(denials))));
+    };
     const approvals = new Map<string, string>();
     const executionFingerprint = (call: ToolCall, cwd: string) => inputFingerprint({ toolName: call.toolName, input: call.input, cwd });
 
@@ -222,7 +236,10 @@ export function createAutoMode(options: AutoModeOptions): (pi: AutoModeExtension
         reportFailure(ctx, error);
       }
       standing = [...standing, denial];
-      showDenial(ctx, denial, standing);
+      const repeated = denialKey(denial) === lastDeniedKey;
+      lastDeniedKey = denialKey(denial);
+      showDenial(ctx, denial, repeated);
+      paintHeld(ctx, standing);
       return { block: true, reason: credentials.text(decision.toolResult) };
     };
     const checkExecution: ToolExecutionCheck = (event, ctx) => {
@@ -242,7 +259,7 @@ export function createAutoMode(options: AutoModeOptions): (pi: AutoModeExtension
         })));
       }
     };
-    options.onReady?.(review, checkExecution);
+    options.onReady?.(review, checkExecution, () => standing);
     pi.on("tool_call", (event, ctx) => {
       // The protected bash executor validates the scope before asking this same reviewer.
       if (options.sandboxReviewInExecutor && isSandboxRequest({ toolName: event.toolName, input: event.input })) return undefined;
@@ -258,7 +275,8 @@ export function createAutoMode(options: AutoModeOptions): (pi: AutoModeExtension
       breakerAsked = false;
       if (standing.length > 0) {
         standing = [];
-        uiOf(ctx)?.setWidget(autoModeDenialWidgetKey, undefined);
+        lastDeniedKey = undefined;
+        paintHeld(ctx, standing);
       }
     });
 
@@ -294,11 +312,12 @@ function uiOf(ctx: AutoModeContextLike | undefined): AutoModeUILike | undefined 
   return ctx?.hasUI === false ? undefined : ctx?.ui;
 }
 
-function showDenial(ctx: AutoModeContextLike, denial: AutoModeDenial, standing: readonly AutoModeDenial[]): void {
+// The denial speaks once, in full, as a chat warning; the footer only counts what is
+// held — /auto blocked reads the details on demand, so nothing sits above the composer.
+function showDenial(ctx: AutoModeContextLike, denial: AutoModeDenial, repeated: boolean): void {
   const ui = uiOf(ctx);
-  if (!ui) return;
+  if (!ui || repeated) return;
   ui.notify(denialNotice(denial), "warning");
-  ui.setWidget(autoModeDenialWidgetKey, denialWidgetLines(standing));
 }
 
 // The breaker's one question. No UI is fail-closed on purpose: an unattended run has

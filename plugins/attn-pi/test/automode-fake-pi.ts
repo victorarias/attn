@@ -15,12 +15,18 @@ import type {
   ToolResultEventResultLike,
 } from "../automode/index";
 import type { AutoModePiLike, AutoModeSessionContextLike, SessionStartEventLike } from "../automode/mode";
-import type { AutoModeUILike } from "../automode/ui";
+import type { AutoModeTheme, AutoModeUILike } from "../automode/ui";
 
 type ToolCallHandler = (
   event: ToolCallEventLike,
   ctx: AutoModeContextLike,
 ) => ToolCallEventResultLike | undefined | Promise<ToolCallEventResultLike | undefined>;
+
+/** Marks each part so a test can see which theme tone a surface chose. */
+export const testTheme: AutoModeTheme = {
+  fg: (color, text) => `<${color}>${text}</${color}>`,
+  bold: (text) => `**${text}**`,
+};
 
 export class FakePi implements AutoModeExtensionAPILike, AutoModePiLike {
   toolCall: ToolCallHandler | undefined;
@@ -115,13 +121,13 @@ export const ctx: AutoModeContextLike = { cwd: "/work/repo" };
 /** pi's ExtensionUIContext, recorded rather than drawn. */
 export class FakeUI implements AutoModeUILike {
   readonly statuses = new Map<string, string | undefined>();
-  readonly widgets = new Map<string, string[] | undefined>();
   readonly notices: { message: string; type?: string }[] = [];
   /** Every setWorkingMessage call in order; undefined is "back to pi's own". */
   readonly workingMessages: (string | undefined)[] = [];
   readonly questions: { title: string; message: string }[] = [];
   answer = false;
   readonly previews: string[] = [];
+  theme?: AutoModeTheme;
   async editor(_title: string, prefill = ""): Promise<string | undefined> {
     this.previews.push(prefill);
     return prefill;
@@ -137,10 +143,6 @@ export class FakeUI implements AutoModeUILike {
 
   notify(message: string, type?: "info" | "warning" | "error"): void {
     this.notices.push({ message, type });
-  }
-
-  setWidget(key: string, content: string[] | undefined): void {
-    this.widgets.set(key, content);
   }
 
   async confirm(title: string, message: string): Promise<boolean> {

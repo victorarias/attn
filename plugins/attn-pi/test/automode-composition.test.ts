@@ -21,7 +21,7 @@ import {
   standaloneAutoModeSource,
 } from "../automode/source";
 import { autoModeStatusKey } from "../automode/ui";
-import { FakePi, FakeUI, toolCall, uiContext } from "./automode-fake-pi";
+import { FakePi, FakeUI, testTheme, toolCall, uiContext, userInput } from "./automode-fake-pi";
 
 const judgingConfig = { ...defaultAutoModeConfig, models: ["test/judge"] };
 
@@ -212,6 +212,27 @@ describe("turning auto mode on and off", () => {
     expect(ui.notices.at(-1)?.message).toContain("auto mode is on");
   });
 
+  test("/auto blocked reports what is held, and says when nothing is", async () => {
+    const ui = new FakeUI();
+    const mode = new AutoMode({ config: judgingConfig });
+    const pi = new FakePi();
+    mode.register(pi);
+    pi.start(uiContext(ui, { modelRegistry: new CountingRegistry(denies()) }));
+
+    expect((await pi.toolCall?.(toolCall("bash", { command: "git push --force origin main" }), uiContext(ui)))?.block).toBe(true);
+    expect(ui.statuses.get(autoModeStatusKey)).toBe("auto: on · 1 held");
+
+    await pi.run("auto", "blocked", uiContext(ui));
+    expect(ui.notices.at(-1)?.type).toBe("warning");
+    expect(ui.notices.at(-1)?.message).toContain("auto mode is holding this call");
+    expect(ui.notices.at(-1)?.message).toContain("Approve in your reply");
+
+    pi.input?.(userInput("understood"), uiContext(ui));
+    await pi.run("auto", "blocked", uiContext(ui));
+    expect(ui.notices.at(-1)?.message).toContain("not holding any calls");
+    expect(ui.statuses.get(autoModeStatusKey)).toBe("auto: on");
+  });
+
   test("/auto refuses an argument it does not understand, and changes nothing", async () => {
     const ui = new FakeUI();
     const mode = new AutoMode({ config: judgingConfig });
@@ -230,6 +251,23 @@ describe("turning auto mode on and off", () => {
     mode.register(pi);
     pi.start(uiContext(ui));
     expect(ui.statuses.get(autoModeStatusKey)).toBe("auto: on");
+  });
+
+  test("in the TUI the status tints itself to match the footer; other modes stay plain", () => {
+    const themed = new FakeUI();
+    themed.theme = testTheme;
+    const mode = new AutoMode({ config: judgingConfig });
+    const tuiPi = new FakePi();
+    mode.register(tuiPi);
+    tuiPi.start(uiContext(themed, { mode: "tui" }));
+    expect(themed.statuses.get(autoModeStatusKey)).toBe("<dim>auto: on</dim>");
+
+    const plain = new FakeUI();
+    const rpcMode = new AutoMode({ config: judgingConfig });
+    const rpcPi = new FakePi();
+    rpcMode.register(rpcPi);
+    rpcPi.start(uiContext(plain, { mode: "rpc" }));
+    expect(plain.statuses.get(autoModeStatusKey)).toBe("auto: on");
   });
 
   test("a broken config is said once, however many session transitions follow", () => {
