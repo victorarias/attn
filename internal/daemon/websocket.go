@@ -1124,6 +1124,14 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		d.handleCreateWorktreeWS(client, msg.(*protocol.CreateWorktreeMessage))
 	case protocol.CmdDeleteWorktree: // wire: delete_worktree
 		d.handleDeleteWorktreeWS(client, msg.(*protocol.DeleteWorktreeMessage))
+	case protocol.CmdWorktreeList: // wire: worktree_list
+		d.handleWorktreeListWS(client, msg.(*protocol.WorktreeListMessage))
+	case protocol.CmdWorktreeKeep: // wire: worktree_keep
+		d.handleWorktreeKeepWS(client, msg.(*protocol.WorktreeKeepMessage))
+	case protocol.CmdWorktreeSweepLog: // wire: worktree_sweep_log
+		d.handleWorktreeSweepLogWS(client, msg.(*protocol.WorktreeSweepLogMessage))
+	case protocol.CmdWorktreeRefresh: // wire: worktree_refresh
+		d.handleWorktreeRefreshWS(client, msg.(*protocol.WorktreeRefreshMessage))
 	case protocol.CmdGetSettings: // wire: get_settings
 		d.handleGetSettingsWS(client)
 	case protocol.CmdSetSetting: // wire: set_setting
@@ -1763,6 +1771,8 @@ func remoteCommandPath(msg interface{}) string {
 	case *protocol.CreateWorktreeMessage:
 		return typed.MainRepo
 	case *protocol.DeleteWorktreeMessage:
+		return typed.Path
+	case *protocol.WorktreeKeepMessage:
 		return typed.Path
 	case *protocol.ListBranchesMessage:
 		return typed.MainRepo

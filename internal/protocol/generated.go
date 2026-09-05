@@ -4280,6 +4280,8 @@ type GitOperationFinishedMessage struct {
 type GitOperationKind string
 
 const GitOperationKindDeleteWorktree GitOperationKind = "delete_worktree"
+const GitOperationKindRefreshRepository GitOperationKind = "refresh_repository"
+const GitOperationKindRefreshWorktree GitOperationKind = "refresh_worktree"
 
 type GitOperationStartedMessage struct {
 	// Event corresponds to the JSON schema field "event".
@@ -6791,6 +6793,20 @@ type Response struct {
 
 	// Workspaces corresponds to the JSON schema field "workspaces".
 	Workspaces []Workspace `json:"workspaces,omitempty,omitzero"`
+
+	// WorktreeKeepResult corresponds to the JSON schema field "worktree_keep_result".
+	WorktreeKeepResult *WorktreeKeepResult `json:"worktree_keep_result,omitempty,omitzero"`
+
+	// WorktreeListResult corresponds to the JSON schema field "worktree_list_result".
+	WorktreeListResult *WorktreeListResult `json:"worktree_list_result,omitempty,omitzero"`
+
+	// WorktreeRefreshResult corresponds to the JSON schema field
+	// "worktree_refresh_result".
+	WorktreeRefreshResult *WorktreeRefreshResult `json:"worktree_refresh_result,omitempty,omitzero"`
+
+	// WorktreeSweepLogResult corresponds to the JSON schema field
+	// "worktree_sweep_log_result".
+	WorktreeSweepLogResult *WorktreeSweepLogResult `json:"worktree_sweep_log_result,omitempty,omitzero"`
 }
 
 type ReviewComment struct {
@@ -9646,6 +9662,9 @@ type WebSocketEvent struct {
 	// Repos corresponds to the JSON schema field "repos".
 	Repos []RepoState `json:"repos,omitempty,omitzero"`
 
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID *string `json:"request_id,omitempty,omitzero"`
+
 	// Rows corresponds to the JSON schema field "rows".
 	Rows *int `json:"rows,omitempty,omitzero"`
 
@@ -9701,6 +9720,9 @@ type WebSocketEvent struct {
 	// Success corresponds to the JSON schema field "success".
 	Success *bool `json:"success,omitempty,omitzero"`
 
+	// SweepEntry corresponds to the JSON schema field "sweep_entry".
+	SweepEntry *WorktreeSweepEntry `json:"sweep_entry,omitempty,omitzero"`
+
 	// TargetPath corresponds to the JSON schema field "target_path".
 	TargetPath *string `json:"target_path,omitempty,omitzero"`
 
@@ -9743,6 +9765,13 @@ type WebSocketEvent struct {
 
 	// Workspaces corresponds to the JSON schema field "workspaces".
 	Workspaces []Workspace `json:"workspaces,omitempty,omitzero"`
+
+	// WorktreeListResult corresponds to the JSON schema field "worktree_list_result".
+	WorktreeListResult *WorktreeListResult `json:"worktree_list_result,omitempty,omitzero"`
+
+	// WorktreeSweepLogResult corresponds to the JSON schema field
+	// "worktree_sweep_log_result".
+	WorktreeSweepLogResult *WorktreeSweepLogResult `json:"worktree_sweep_log_result,omitempty,omitzero"`
 
 	// Worktrees corresponds to the JSON schema field "worktrees".
 	Worktrees []Worktree `json:"worktrees,omitempty,omitzero"`
@@ -10562,11 +10591,62 @@ type Worktree struct {
 	// CreatedAt corresponds to the JSON schema field "created_at".
 	CreatedAt *string `json:"created_at,omitempty,omitzero"`
 
+	// Detached corresponds to the JSON schema field "detached".
+	Detached *bool `json:"detached,omitempty,omitzero"`
+
+	// Dirty corresponds to the JSON schema field "dirty".
+	Dirty *bool `json:"dirty,omitempty,omitzero"`
+
+	// DirtyFiles corresponds to the JSON schema field "dirty_files".
+	DirtyFiles *int `json:"dirty_files,omitempty,omitzero"`
+
+	// HeadSHA corresponds to the JSON schema field "head_sha".
+	HeadSHA *string `json:"head_sha,omitempty,omitzero"`
+
+	// LastActivityAt corresponds to the JSON schema field "last_activity_at".
+	LastActivityAt *string `json:"last_activity_at,omitempty,omitzero"`
+
 	// MainRepo corresponds to the JSON schema field "main_repo".
 	MainRepo string `json:"main_repo"`
 
+	// MergedSignal corresponds to the JSON schema field "merged_signal".
+	MergedSignal *string `json:"merged_signal,omitempty,omitzero"`
+
+	// ObservedAt corresponds to the JSON schema field "observed_at".
+	ObservedAt *string `json:"observed_at,omitempty,omitzero"`
+
+	// Origin corresponds to the JSON schema field "origin".
+	Origin *string `json:"origin,omitempty,omitzero"`
+
 	// Path corresponds to the JSON schema field "path".
 	Path string `json:"path"`
+
+	// Pinned corresponds to the JSON schema field "pinned".
+	Pinned *bool `json:"pinned,omitempty,omitzero"`
+
+	// PinnedAt corresponds to the JSON schema field "pinned_at".
+	PinnedAt *string `json:"pinned_at,omitempty,omitzero"`
+
+	// Prunable corresponds to the JSON schema field "prunable".
+	Prunable *bool `json:"prunable,omitempty,omitzero"`
+
+	// RefreshError corresponds to the JSON schema field "refresh_error".
+	RefreshError *string `json:"refresh_error,omitempty,omitzero"`
+
+	// Stashes corresponds to the JSON schema field "stashes".
+	Stashes *int `json:"stashes,omitempty,omitzero"`
+
+	// SweepAt corresponds to the JSON schema field "sweep_at".
+	SweepAt *string `json:"sweep_at,omitempty,omitzero"`
+
+	// SweepReason corresponds to the JSON schema field "sweep_reason".
+	SweepReason *string `json:"sweep_reason,omitempty,omitzero"`
+
+	// SweepStatus corresponds to the JSON schema field "sweep_status".
+	SweepStatus *string `json:"sweep_status,omitempty,omitzero"`
+
+	// Unpushed corresponds to the JSON schema field "unpushed".
+	Unpushed *int `json:"unpushed,omitempty,omitzero"`
 }
 
 type WorktreeCreatedEvent struct {
@@ -10583,6 +10663,192 @@ type WorktreeDeletedEvent struct {
 
 	// Worktrees corresponds to the JSON schema field "worktrees".
 	Worktrees []Worktree `json:"worktrees"`
+}
+
+type WorktreeKeepMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Keep corresponds to the JSON schema field "keep".
+	Keep bool `json:"keep"`
+
+	// Path corresponds to the JSON schema field "path".
+	Path string `json:"path"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID *string `json:"request_id,omitempty,omitzero"`
+}
+
+type WorktreeKeepResult struct {
+	// Worktree corresponds to the JSON schema field "worktree".
+	Worktree Worktree `json:"worktree"`
+}
+
+type WorktreeKeepResultEvent struct {
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty,omitzero"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID *string `json:"request_id,omitempty,omitzero"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
+
+	// Worktrees corresponds to the JSON schema field "worktrees".
+	Worktrees []Worktree `json:"worktrees,omitempty,omitzero"`
+}
+
+type WorktreeListMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Limit corresponds to the JSON schema field "limit".
+	Limit *int `json:"limit,omitempty,omitzero"`
+
+	// MainRepo corresponds to the JSON schema field "main_repo".
+	MainRepo *string `json:"main_repo,omitempty,omitzero"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID *string `json:"request_id,omitempty,omitzero"`
+}
+
+type WorktreeListResult struct {
+	// Omitted corresponds to the JSON schema field "omitted".
+	Omitted int `json:"omitted"`
+
+	// Repositories corresponds to the JSON schema field "repositories".
+	Repositories []WorktreeRepository `json:"repositories"`
+
+	// Worktrees corresponds to the JSON schema field "worktrees".
+	Worktrees []Worktree `json:"worktrees"`
+}
+
+type WorktreeListResultEvent struct {
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID *string `json:"request_id,omitempty,omitzero"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
+
+	// WorktreeListResult corresponds to the JSON schema field "worktree_list_result".
+	WorktreeListResult WorktreeListResult `json:"worktree_list_result"`
+}
+
+type WorktreeRefreshMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID *string `json:"request_id,omitempty,omitzero"`
+}
+
+type WorktreeRefreshResult struct {
+	// Queued corresponds to the JSON schema field "queued".
+	Queued bool `json:"queued"`
+}
+
+type WorktreeRefreshResultEvent struct {
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID *string `json:"request_id,omitempty,omitzero"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
+}
+
+type WorktreeRepository struct {
+	// IntegrationBranch corresponds to the JSON schema field "integration_branch".
+	IntegrationBranch *string `json:"integration_branch,omitempty,omitzero"`
+
+	// IntegrationSource corresponds to the JSON schema field "integration_source".
+	IntegrationSource *string `json:"integration_source,omitempty,omitzero"`
+
+	// MainRepo corresponds to the JSON schema field "main_repo".
+	MainRepo string `json:"main_repo"`
+}
+
+type WorktreeStateChangedEvent struct {
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// Worktrees corresponds to the JSON schema field "worktrees".
+	Worktrees []Worktree `json:"worktrees"`
+}
+
+type WorktreeSweepEntry struct {
+	// Action corresponds to the JSON schema field "action".
+	Action string `json:"action"`
+
+	// At corresponds to the JSON schema field "at".
+	At string `json:"at"`
+
+	// Branch corresponds to the JSON schema field "branch".
+	Branch *string `json:"branch,omitempty,omitzero"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID string `json:"id"`
+
+	// MainRepo corresponds to the JSON schema field "main_repo".
+	MainRepo string `json:"main_repo"`
+
+	// Path corresponds to the JSON schema field "path".
+	Path string `json:"path"`
+
+	// Reason corresponds to the JSON schema field "reason".
+	Reason *string `json:"reason,omitempty,omitzero"`
+}
+
+type WorktreeSweepLogMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Limit corresponds to the JSON schema field "limit".
+	Limit *int `json:"limit,omitempty,omitzero"`
+
+	// MainRepo corresponds to the JSON schema field "main_repo".
+	MainRepo *string `json:"main_repo,omitempty,omitzero"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID *string `json:"request_id,omitempty,omitzero"`
+}
+
+type WorktreeSweepLogResult struct {
+	// Entries corresponds to the JSON schema field "entries".
+	Entries []WorktreeSweepEntry `json:"entries"`
+
+	// Omitted corresponds to the JSON schema field "omitted".
+	Omitted int `json:"omitted"`
+}
+
+type WorktreeSweepLogResultEvent struct {
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID *string `json:"request_id,omitempty,omitzero"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
+
+	// WorktreeSweepLogResult corresponds to the JSON schema field
+	// "worktree_sweep_log_result".
+	WorktreeSweepLogResult WorktreeSweepLogResult `json:"worktree_sweep_log_result"`
+}
+
+type WorktreeSweptEvent struct {
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// SweepEntry corresponds to the JSON schema field "sweep_entry".
+	SweepEntry WorktreeSweepEntry `json:"sweep_entry"`
 }
 
 type WorktreesUpdatedMessage struct {

@@ -104,3 +104,13 @@
 - Auto mode: pi permissions. Config: policy/environment snapshot at launch.
 - Proposal: requested policy/model change. Promotion: user applies it. Denial: refused call.
 - Environment template: initial classifier context copied into config.
+
+## Worktrees
+
+- Worktree registry: the daemon's stored view of every git worktree of every tracked repository. Git is the truth; a background refresh reconciles the rows. Nothing on a request path runs git.
+- Worktree sweep: the hourly background pass that reclaims worktrees whose work has landed. It decides from stored state only and removes a worktree solely when every gate passes: idle 14 days, clean, no stashes, nothing unpushed past what merged, no live session, no open seed, and merged.
+- Merged signal: which rung proved the branch landed — `pull_request` (a merged PR recorded for it), `ancestor` (its head is an ancestor of the integration branch), or `tree` (its exact tree already appears on integration history, which is how a squash or rebase merge reads).
+- Integration branch: the branch a repository's work actually merges into, resolved from where its merged pull requests targeted, with `origin/HEAD` as the fallback.
+- Kept reason: why the sweep left a worktree alone — pinned, dirty, stashed, unpushed, detached, a live session, an open seed, or simply not idle yet. Every kept worktree carries one.
+- Keep pin: a per-worktree "never reclaim this" the user sets and clears. It outranks every other gate and survives refreshes.
+- Sweep log: the durable record of every worktree removal and why it happened, whether the sweep decided it or the user did. It outlives the rows themselves, which is the only place a removal can be inspected afterwards.

@@ -202,6 +202,13 @@ export const scenarioCatalog = [
     timeoutMs: 600_000,
   },
   {
+    id: 'worktree-surface',
+    runnerId: 'WORKTREE-SURFACE',
+    label: 'Worktrees panel: a slow refresh stays visible, the keep pin goes both ways, and a removal lands on its seed',
+    command: ['pnpm', 'run', 'real-app:scenario-worktree-surface'],
+    timeoutMs: 900_000,
+  },
+  {
     id: 'terminal-block-copy',
     skipOn: { linux: 'Cmd+C reaches the terminal through the macOS menu accelerator' },
     runnerId: 'TERMINAL-BLOCK-COPY',

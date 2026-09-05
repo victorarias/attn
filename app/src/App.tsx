@@ -84,6 +84,7 @@ import { normalizeSessionAgent, type SessionAgent } from './types/sessionAgent';
 import { hasPane, workspaceSnapshotFromDaemonWorkspace, resolveEditorTileRoot, localWorkspaceDirectory, soleWorkspaceForId, serializeNotebookTileParams, type TerminalSplitDirection } from './types/workspace';
 import { useDaemonStore } from './store/daemonSessions';
 import { gardenPathToSeed, useGardenWalk } from './store/gardenWalk';
+import { WorktreesPanel } from './components/WorktreesPanel';
 import { useConversationsStore } from './store/conversations';
 import { usePRsNeedingAttention } from './hooks/usePRsNeedingAttention';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
@@ -233,6 +234,22 @@ function AutomationsIcon() {
         strokeLinejoin="round"
       />
       <circle cx="8" cy="8" r="1.3" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
+function WorktreesIcon() {
+  return (
+    <svg viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M4 2.6v10.8" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+      <path
+        d="M4 5.4h5.2a2 2 0 0 1 2 2v1M4 10.2h7.2"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+      />
+      <circle cx="12.2" cy="8.6" r="1.5" fill="none" stroke="currentColor" strokeWidth="1.4" />
     </svg>
   );
 }
@@ -844,6 +861,11 @@ function AppContent({
     getRepoInfo,
     listWorkflowRuns,
     getWorkflowRun,
+    listWorktrees,
+    setWorktreeKeep,
+    getWorktreeSweepLog,
+    refreshWorktrees,
+    gitOperations,
     listAutomationDefinitions,
     listAutomationRuns,
     setAutomationEnabled,
@@ -1231,7 +1253,7 @@ function AppContent({
     void connect();
   }, [connect]);
 
-  type DockPanelId = 'workflowRun' | 'attention' | 'automations' | 'garden';
+  type DockPanelId = 'workflowRun' | 'attention' | 'automations' | 'worktrees' | 'garden';
 
   const [sidebarMutedExpanded, setSidebarMutedExpanded] = useState(false);
 
@@ -1250,6 +1272,7 @@ function AppContent({
         workflowRun: false,
         attention: false,
         automations: false,
+        worktrees: false,
         garden: false,
     },
     stack: [],
@@ -1573,6 +1596,7 @@ function AppContent({
   const workflowRunPanelOpen = openDockPanels.workflowRun;
   const attentionPanelOpen = openDockPanels.attention;
   const automationsPanelOpen = openDockPanels.automations;
+  const worktreesPanelOpen = openDockPanels.worktrees;
   const gardenPanelOpen = openDockPanels.garden;
   const openGardenDock = useCallback(() => openDockPanel('garden'), [openDockPanel]);
   const closeGardenDock = useCallback(() => closeDockPanel('garden'), [closeDockPanel]);
@@ -1673,6 +1697,24 @@ function AppContent({
     () => new Map(daemonSessions.map((session) => [session.id, session.label])),
     [daemonSessions],
   );
+
+  const worktreePanelSessions = useMemo(
+    () => daemonSessions.map((session) => ({
+      id: session.id,
+      label: session.label,
+      directory: session.directory,
+    })),
+    [daemonSessions],
+  );
+
+  // The panel's own delete. sendDeleteWorktree refuses a dirty tree unless forced,
+  // and the panel only forces after the row's "Delete, losing changes" confirmation.
+  const handleDeleteWorktreeFromPanel = useCallback(async (path: string, force: boolean) => {
+    const result = await sendDeleteWorktree(path, undefined, force ? { force: true } : {});
+    if (!result.success) {
+      throw new Error(result.error || 'Deleting the worktree failed');
+    }
+  }, [sendDeleteWorktree]);
 
   const toggleNotificationsPanel = useCallback(() => {
     setNotificationsPanelOpen((open) => !open);
@@ -1816,6 +1858,14 @@ function AppContent({
       icon: <AttentionActionIcon />,
       shortcut: [shortcutTokens('dock.attention')],
       run: () => openDockPanel('attention'),
+    },
+    {
+      id: 'worktrees',
+      title: 'Open worktrees',
+      description: 'Every worktree, what the sweep decided, and why it kept the rest',
+      keywords: ['worktree', 'worktrees', 'sweep', 'branch', 'reclaim', 'pin', 'keep'],
+      icon: <ContextActionIcon />,
+      run: () => openDockPanel('worktrees'),
     },
     {
       id: 'garden-frame',
@@ -2356,6 +2406,7 @@ function AppContent({
     sendRuntimeInput,
     isRuntimeAttached,
     openAutomationsPanel: () => openDockPanel('automations'),
+    openWorktreesPanel: () => openDockPanel('worktrees'),
     presentationNotices,
     resetSessionPaneTerminal,
     injectSessionPaneBytes,
@@ -3358,6 +3409,13 @@ function AppContent({
       onClick: () => toggleDockPanel('automations'),
     },
     {
+      id: 'worktrees',
+      title: worktreesPanelOpen ? 'Hide Worktrees' : 'Show Worktrees',
+      icon: <WorktreesIcon />,
+      active: worktreesPanelOpen,
+      onClick: () => toggleDockPanel('worktrees'),
+    },
+    {
       id: 'garden',
       title: gardenMode === 'closed' ? 'Show the garden' : 'Hide the garden',
       icon: <GardenIcon />,
@@ -3381,6 +3439,7 @@ function AppContent({
     notificationsUnread,
     hasCriticalNotification,
     automationsPanelOpen,
+    worktreesPanelOpen,
     gardenPanelOpen,
     toggleNotificationsPanel,
   ]);
@@ -3847,6 +3906,26 @@ function AppContent({
                   deleteDefinition={deleteAutomationDefinition}
                   onSelectSession={handleSelectSession}
                   onFocusPane={(sessionId, paneId) => focusSessionPane(sessionId, paneId, 40)}
+                />
+              ),
+            },
+            {
+              id: 'worktrees',
+              isOpen: worktreesPanelOpen,
+              width: 'clamp(420px, 44vw, 660px)',
+              className: 'dock-panel dock-panel--worktrees',
+              children: (
+                <WorktreesPanel
+                  isOpen={worktreesPanelOpen}
+                  onClose={() => closeDockPanel('worktrees')}
+                  listWorktrees={listWorktrees}
+                  getSweepLog={getWorktreeSweepLog}
+                  setKeep={setWorktreeKeep}
+                  refreshWorktrees={refreshWorktrees}
+                  deleteWorktree={handleDeleteWorktreeFromPanel}
+                  sessions={worktreePanelSessions}
+                  gitOperations={gitOperations}
+                  onSelectSession={handleSelectSession}
                 />
               ),
             },

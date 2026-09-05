@@ -105,6 +105,7 @@ interface UseUiAutomationBridgeArgs {
   sendRuntimeInput: (runtimeId: string, data: string, source?: string) => void;
   isRuntimeAttached: (runtimeId: string) => boolean;
   openAutomationsPanel?: () => void;
+  openWorktreesPanel?: () => void;
   presentationNotices?: Presentation[];
   resetSessionPaneTerminal: (sessionId: string, paneId: string) => boolean;
   injectSessionPaneBytes: (sessionId: string, paneId: string, bytes: Uint8Array) => Promise<boolean>;
@@ -1495,6 +1496,51 @@ function collectSeedDocumentState(scope: string, seedId: string) {
   };
 }
 
+function requireWorktreePath(payload: Record<string, unknown>): string {
+  const path = typeof payload.path === 'string' ? payload.path.trim() : '';
+  if (!path) {
+    throw new Error('the command requires a worktree path');
+  }
+  return path;
+}
+
+function collectWorktreesUiState() {
+  const panel = document.querySelector('[data-testid="worktrees-panel"]');
+  if (!(panel instanceof HTMLElement)) {
+    return { present: false };
+  }
+  const rows = Array.from(panel.querySelectorAll('.worktrees-panel__row')).map((row) => ({
+    path: row.getAttribute('data-testid')?.replace('worktree-row-', '') ?? '',
+    name: row.querySelector('.worktrees-panel__name')?.textContent?.trim() ?? '',
+    branch: row.querySelector('.worktrees-panel__branch')?.textContent?.trim() ?? '',
+    chips: Array.from(row.querySelectorAll('.worktrees-panel__chip')).map(
+      (chip) => chip.textContent?.trim() ?? '',
+    ),
+    sweep: row.querySelector('.worktrees-panel__sweep-status')?.textContent?.trim() ?? '',
+    reason: row.querySelector('.worktrees-panel__sweep-reason')?.textContent?.trim() ?? '',
+    pinned: row.classList.contains('is-pinned'),
+    refreshing: Boolean(row.querySelector('.worktrees-panel__refreshing')),
+  }));
+  const log = Array.from(panel.querySelectorAll('.worktrees-panel__log-row')).map((row) => ({
+    path: row.getAttribute('data-testid')?.replace('worktree-log-', '') ?? '',
+    name: row.querySelector('.worktrees-panel__log-path')?.textContent?.trim() ?? '',
+    branch: row.querySelector('.worktrees-panel__log-branch')?.textContent?.trim() ?? '',
+    action: row.querySelector('.worktrees-panel__log-action')?.textContent?.trim() ?? '',
+    reason: row.querySelector('.worktrees-panel__log-reason')?.textContent?.trim() ?? '',
+  }));
+  return {
+    present: true,
+    rows,
+    log,
+    repositories: Array.from(panel.querySelectorAll('.worktrees-panel__repo-header')).map((header) => ({
+      name: header.querySelector('.worktrees-panel__repo-name')?.textContent?.trim() ?? '',
+      integration: header.querySelector('.worktrees-panel__repo-integration')?.textContent?.trim() ?? '',
+      refreshing: Boolean(header.querySelector('.worktrees-panel__refreshing')),
+    })),
+    error: panel.querySelector('[data-testid="worktrees-panel-error"]')?.textContent?.trim() ?? '',
+  };
+}
+
 function collectAutomationsUiState() {
   const panel = document.querySelector('[data-testid="automations-panel"]');
   if (!(panel instanceof HTMLElement)) {
@@ -1915,6 +1961,7 @@ export function useUiAutomationBridge({
   sendRuntimeInput,
   isRuntimeAttached,
   openAutomationsPanel,
+  openWorktreesPanel,
   presentationNotices,
   resetSessionPaneTerminal,
   injectSessionPaneBytes,
@@ -3531,6 +3578,41 @@ export function useUiAutomationBridge({
         // still mounted: name the seed rather than taking the first tile.
         const seedId = typeof payload.seedId === 'string' ? payload.seedId : '';
         return collectSeedDocumentState(scope, seedId);
+      }
+      case 'worktrees_open_panel': {
+        if (!openWorktreesPanel) {
+          throw new Error('worktrees_open_panel is not configured');
+        }
+        openWorktreesPanel();
+        await settleUi(3);
+        return collectWorktreesUiState();
+      }
+      case 'worktrees_get_state':
+        return collectWorktreesUiState();
+      case 'worktrees_refresh': {
+        clickTestId('worktrees-refresh');
+        await settleUi(3);
+        return collectWorktreesUiState();
+      }
+      case 'worktrees_toggle_log': {
+        clickTestId('worktrees-toggle-log');
+        await settleUi(3);
+        return collectWorktreesUiState();
+      }
+      case 'worktrees_toggle_pin': {
+        clickTestId(`worktree-pin-${requireWorktreePath(payload)}`);
+        await settleUi(3);
+        return collectWorktreesUiState();
+      }
+      // Two clicks because deleting is a one-way door: the row asks first, and
+      // the scenario has to go through the same confirmation a person does.
+      case 'worktrees_delete': {
+        const path = requireWorktreePath(payload);
+        clickTestId(`worktree-delete-${path}`);
+        await waitForTestId(`worktree-delete-confirm-${path}`);
+        clickTestId(`worktree-delete-confirm-${path}`);
+        await settleUi(3);
+        return collectWorktreesUiState();
       }
       case 'automations_open_panel': {
         if (!openAutomationsPanel) {

@@ -6,6 +6,8 @@ import type {
   Workspace as GeneratedWorkspaceSnapshot,
   PR as GeneratedPR,
   Worktree as GeneratedWorktree,
+  WorktreeListResult,
+  WorktreeSweepLogResult,
   PluginInfo as GeneratedPluginInfo,
   AppRegistryEntry as GeneratedAppRegistryEntry,
   ViewElement as GeneratedAppViewInfo,
@@ -120,6 +122,8 @@ import { useWorkflowRunsStore } from '../store/workflowRuns';
 import { useConversationsStore, type AgentPromptMode } from '../store/conversations';
 import { useAutoModePushStore } from '../store/autoMode';
 import { useAutomationsStore } from '../store/automations';
+import { useWorktreeStore } from '../store/worktrees';
+import { handleWorktreeDaemonEvent } from './daemonWorktreeEvents';
 
 export type DaemonSession = GeneratedSession;
 
@@ -290,7 +294,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 
-export const PROTOCOL_VERSION = '286';
+export const PROTOCOL_VERSION = '287';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 const CLIENT_INSTANCE_ID =
@@ -2870,6 +2874,10 @@ export function useDaemonSocket({
             if (handleAppDaemonEvent(data, pending)) break;
             if (docSubscriptions.handleEvent(data)) break;
             if (handleAutoModeDaemonEvent(data, pending)) break;
+            if (handleWorktreeDaemonEvent(data, pending, {
+              onWorktreeState: (worktree) => useWorktreeStore.getState().observe(worktree),
+              onWorktreeSwept: (entry) => useWorktreeStore.getState().swept(entry),
+            })) break;
             break;
           }
         }
@@ -2884,6 +2892,7 @@ export function useDaemonSocket({
       canceledAttachIdsRef.current.clear();
       docSubscriptions.markDisconnected();
       useAutoModePushStore.getState().clear();
+      useWorktreeStore.getState().clear();
 
       if (circuitOpenRef.current) {
         console.error('[Daemon] Circuit open, not retrying');
@@ -5071,6 +5080,36 @@ export function useDaemonSocket({
     }, 'List workflow runs timed out');
   }, [sendKeyedRequest]);
 
+  // Reads the daemon's registry; it never runs git, so it answers at request speed
+  // however slow the repository is.
+  const listWorktrees = useCallback((mainRepo?: string): Promise<WorktreeListResult> => {
+    return sendRequest<WorktreeListResult>(
+      'worktree_list',
+      mainRepo ? { main_repo: mainRepo } : {},
+      'Listing worktrees timed out',
+    );
+  }, [sendRequest]);
+
+  const setWorktreeKeep = useCallback((path: string, keep: boolean): Promise<DaemonWorktree> => {
+    return sendRequest<DaemonWorktree>(
+      'worktree_keep',
+      { path, keep },
+      'Changing the keep pin timed out',
+    );
+  }, [sendRequest]);
+
+  const getWorktreeSweepLog = useCallback((mainRepo?: string, limit?: number): Promise<WorktreeSweepLogResult> => {
+    return sendRequest<WorktreeSweepLogResult>(
+      'worktree_sweep_log',
+      { ...(mainRepo ? { main_repo: mainRepo } : {}), ...(limit ? { limit } : {}) },
+      'Reading the sweep log timed out',
+    );
+  }, [sendRequest]);
+
+  const refreshWorktrees = useCallback((): Promise<boolean> => {
+    return sendRequest<boolean>('worktree_refresh', {}, 'Queueing the worktree refresh timed out');
+  }, [sendRequest]);
+
   const listAutomationDefinitions = useCallback((): Promise<AutomationDefinitionSummary[]> => {
     return new Promise((resolve, reject) => {
       const ws = wsRef.current;
@@ -5476,6 +5515,10 @@ export function useDaemonSocket({
     getRepoInfo,
     getWorkflowRun,
     listWorkflowRuns,
+    listWorktrees,
+    setWorktreeKeep,
+    getWorktreeSweepLog,
+    refreshWorktrees,
     listAutomationDefinitions,
     listAutomationRuns,
     setAutomationEnabled,

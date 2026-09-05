@@ -1,6 +1,6 @@
 // To parse this data:
 //
-//   import { Convert, ActivityStatusMessage, ActivityStatusResult, ActivityStatusSession, AddEndpointMessage, AgentAttachMessage, AgentClearQueueMessage, AgentEventMessage, AgentHistoryMessage, AgentInboxBatchResult, AgentInboxItem, AgentInboxMessage, AgentMessageState, AgentMsgMessage, AgentMsgResult, AgentMsgStatus, AgentMsgStatusMessage, AgentPeekExit, AgentPeekMessage, AgentPeekResult, AgentPeekScreen, AgentPeerMessage, AgentPromptMessage, AgentSetModelMessage, AgentToolDetailMessage, AppApplyMessage, AppApplyResult, AppCommandInfo, AppCommandMessage, AppCommandResultMessage, AppConsumerInfo, AppInvocationInfo, AppListMessage, AppListResult, AppLogsMessage, AppLogsResult, AppReconcileGapInfo, AppReconcileReasonInfo, AppReconcileStatus, AppRegistryEntry, AppRemoveMessage, AppRemoveResult, AppRollbackMessage, AppRollbackResult, AppRuntimeInfo, AppRuntimeRestartMessage, AppRuntimeRestartResult, AppRuntimeStatusMessage, AppRuntimeStatusResult, AppSetEnabledMessage, AppSetEnabledResult, AppStallInfo, AppStatusMessage, AppStatusResult, AppSummary, AppVersionInfo, AppViewCrashMessage, AppViewInfo, AppWatchMessage, AppWatchResult, ApprovePRMessage, AppsUpdatedMessage, AttachBlock, AttachPolicy, AttachResultMessage, AttachSessionMessage, AttachSnapshot, AuthorState, AuthorsUpdatedMessage, AutoModeCatalogModel, AutoModeConfigInfo, AutoModeDenialInfo, AutoModeDenialsMessage, AutoModeDenialsResult, AutoModeDiscardMessage, AutoModeDiscardResultMessage, AutoModeEnvNotesMessage, AutoModeEnvResult, AutoModeEnvSetResultMessage, AutoModeEnvSlotMessage, AutoModeEnvironmentInfo, AutoModeEnvironmentSlot, AutoModeEnvironmentSlotValue, AutoModeGetMessage, AutoModeModelProvider, AutoModeModelSetMessage, AutoModeModelSetResultMessage, AutoModeModelsMessage, AutoModeModelsResultMessage, AutoModePatternAddMessage, AutoModePatternRemoveMessage, AutoModePatternResultMessage, AutoModePromoteMessage, AutoModePromoteResultMessage, AutoModeProposalInfo, AutoModeProposeMessage, AutoModeProposeResult, AutoModeShowMessage, AutoModeShowResult, AutoModeStateChangedMessage, AutoModeStateResultMessage, AutomationApplyMessage, AutomationApplyResultMessage, AutomationCleanupMessage, AutomationCleanupResultMessage, AutomationDefinitionGetMessage, AutomationDefinitionResultMessage, AutomationDefinitionSummary, AutomationDefinitionsGetMessage, AutomationDefinitionsResultMessage, AutomationDeleteMessage, AutomationDeleteResultMessage, AutomationProvenance, AutomationRunMessage, AutomationRunResultMessage, AutomationRunSummary, AutomationRunsGetMessage, AutomationRunsResultMessage, AutomationSetEnabledMessage, AutomationSetEnabledResultMessage, AutomationValidateMessage, AutomationValidateResultMessage, AutomationsChangedMessage, BootstrapEndpointMessage, Branch, BranchChangedMessage, BranchesResultMessage, BrowseDirectoryMessage, BrowseDirectoryResultMessage, BrowserControlMessage, BrowserControlRequestMessage, BrowserControlResponseMessage, BrowserControlResultMessage, BusConsumerStatus, BusHealthEntry, BusProducerStatus, BusSetConsumerEnabledMessage, BusSetConsumerEnabledResultMessage, BusStatusGetMessage, BusStatusResultMessage, CancelCountdownMessage, ChiefOfStaffResultMessage, ClearSessionActivityMessage, ClearSessionsMessage, ClearWarningsMessage, ClientEvictionNoticeMessage, ClientHelloMessage, CollapseRepoMessage, CommandErrorMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, CrewDayClose, CrewHandoffMessage, CrewHandoffResult, CrewListMessage, CrewListResult, CrewMember, CrewPrimeMessage, CrewPrimeResult, CrewSetMessage, CrewSetResult, CrewSleepMessage, CrewSleepResult, CrewSleepResultMessage, CrewUpdatedMessage, CrewWakeMessage, CrewWakeResult, CrewWakeResultMessage, DaemonWarning, DelegateMessage, DelegateResult, DelegateResultMessage, DelegateStatusMessage, DelegateWorktreeRequest, DelegationOperation, DelegationOperationMessage, DelegationOperationState, DeleteWorktreeMessage, DeleteWorktreeResultMessage, DetachSessionMessage, DirectoryEntry, DispatchWorkState, DocCollectionsMessage, DocCollectionsResult, DocCountMessage, DocCountResult, DocDefineMessage, DocDefineResult, DocDeleteMessage, DocDeleteResult, DocGetMessage, DocGetResult, DocPutMessage, DocPutResult, DocQueryMessage, DocQueryResult, DocSubscribeMessage, DocSubscribeResult, DocSubscriptionDeliveryMessage, DocSubscriptionEndedMessage, DocUndefineMessage, DocUndefineResult, DocUnsubscribeMessage, DocumentCollectionSchema, DocumentConflict, DocumentFieldSpec, DocumentFilter, DocumentQuery, DocumentRevision, DocumentSort, EndpointActionResultMessage, EndpointCapabilities, EndpointInfo, EndpointStatusChangedMessage, EndpointsUpdatedMessage, EnsureRepoMessage, EnsureRepoResultMessage, EvidenceExcerpt, FetchPRDetailsMessage, FetchPRDetailsResultMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileActivity, FileDiffResultMessage, FilesEditedMessage, FSChangedMessage, FSDeleteMessage, FSDeleteResult, FSDeleteResultMessage, FSEntry, FSExistsMessage, FSExistsResult, FSExistsResultMessage, FSIndexMessage, FSIndexResultMessage, FSListMessage, FSListResultMessage, FSReadAssetMessage, FSReadAssetResult, FSReadAssetResultMessage, FSReadMessage, FSReadResult, FSReadResultMessage, FSRenameMessage, FSRenameResult, FSRenameResultMessage, FSUnwatchMessage, FSUnwatchResultMessage, FSWatchMessage, FSWatchResultMessage, FSWriteMessage, FSWriteResult, FSWriteResultMessage, GardenReview, GardenReviewEvidence, GardenReviewItem, GardenReviewRecipe, GardenReviewRun, GardenReviewUpdatedMessage, GardenSeedsUpdatedMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetFileDiffMessage, GetKittyImageMessage, GetPresentationRoundMessage, GetPresentationRoundResultMessage, GetPresentationsMessage, GetPresentationsResultMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetScreenSnapshotMessage, GetScreenSnapshotResultMessage, GetSettingsMessage, GitFileChange, GitHubHostsUpdatedMessage, GitOperation, GitOperationFinishedMessage, GitOperationKind, GitOperationStartedMessage, GitOperationStatus, GitStatusUpdateMessage, HeartbeatMessage, HeatState, HookCompactionMessage, HookNotificationMessage, HookStopFailureMessage, InitialStateMessage, InjectTestPRMessage, InjectTestSessionMessage, InspectPathMessage, InspectPathResultMessage, InstallBundledPluginMessage, InstallPluginMessage, JournalAppendMessage, JournalAppendResult, KillSessionMessage, KittyImageResultMessage, KittyPlacement, KittyPlacementsMessage, ListBranchesMessage, ListEndpointsMessage, ListPastConversationsMessage, ListPluginsMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkdownAnnotation, MarkdownAnnotationAnchor, MarkdownAnnotationsClearMessage, MarkdownAnnotationsClearResultMessage, MarkdownAnnotationsGetMessage, MarkdownAnnotationsGetResultMessage, MarkdownAnnotationsSaveMessage, MarkdownAnnotationsSaveResultMessage, MarkdownAnnotationsSubmitMessage, MarkdownAnnotationsSubmitResultMessage, MergePRMessage, MuteAuthorMessage, MutePRMessage, MuteRepoMessage, MuteWorkspaceMessage, NotebookBacklinksMessage, NotebookBacklinksResultMessage, NotebookChangedMessage, NotebookEntry, NotebookGuideMessage, NotebookGuideResult, NotebookListMessage, NotebookListResultMessage, NotebookReadMessage, NotebookReadResult, NotebookReadResultMessage, NotebookSendToChiefMessage, NotebookSendToChiefResult, NotebookSendToChiefResultMessage, NotebookWriteMessage, NotebookWriteResult, NotebookWriteResultMessage, Notification, NotificationListMessage, NotificationListResultMessage, NotificationMarkReadMessage, NotificationMarkReadResultMessage, NotificationSeverity, NotificationsUpdatedMessage, OpenBrowserMessage, OpenMarkdownMessage, OpenMarkdownResultMessage, OpenSeedMessage, OpenSeedResultMessage, OpenSentFilesMessage, PR, PRActionResultMessage, PRRole, PRVisitedMessage, PRsUpdatedMessage, PastConversation, PastConversationsResultMessage, PathInspection, PinSessionMessage, PinWorkspaceMessage, PluginActionResultMessage, PluginInfo, PluginIssue, PluginsUpdatedMessage, PresentAnnotation, PresentCloseMessage, PresentCloseResultMessage, PresentCommentInput, PresentFeedbackMessage, PresentFeedbackResult, PresentFile, PresentManifestView, PresentOpenMessage, PresentOpenResult, PresentSubmitRoundMessage, PresentSubmitRoundResultMessage, Presentation, PresentationAddedMessage, PresentationComment, PresentationRound, PresentationUpdatedMessage, PtyDesyncMessage, PtyInputMessage, PtyInputProbeResultMessage, PtyOutputMessage, PtyResizeMessage, PtyResizedMessage, PullRequestCreatedMessage, PullRequestForgetMessage, PullRequestProvenance, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentFilesMessage, RecentFilesResultMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RegisterWorkspaceMessage, ReloadSessionMessage, ReloadSessionResultMessage, RemoveEndpointMessage, RemovePluginMessage, RenameResultMessage, RenameSessionMessage, RenameWorkspaceMessage, RepoInfo, RepoState, ReposUpdatedMessage, Response, ReviewComment, RuntimeRespawnedMessage, Seed, SeedArtifact, SeedArtifactReference, SeedArtifactTargetMessage, SeedArtifactTargetResult, SeedArtifactTargetResultMessage, SeedArtifactTransferMessage, SeedArtifactTransferResult, SeedArtifactTransferResultMessage, SeedContinuation, SeedDocument, SeedDocumentGetMessage, SeedDocumentGetResultMessage, SeedEdge, SeedEditMessage, SeedEditResult, SeedHandoverRequest, SeedHarvestCondition, SeedHarvestWhenMerged, SeedLinkMessage, SeedLinkResult, SeedListMessage, SeedListResult, SeedNote, SeedNoteMessage, SeedNoteResult, SeedNoteResultMessage, SeedNotesMessage, SeedNotesResult, SeedPlantMessage, SeedPlantResult, SeedPlotChild, SeedPlotMessage, SeedPlotProgress, SeedPlotResult, SeedReadyMessage, SeedReadyResult, SeedRelation, SeedResumeMessage, SeedResumeResultMessage, SeedReviewActionContext, SeedReviewCancelMessage, SeedReviewDraftMessage, SeedReviewDraftResultMessage, SeedReviewKeepMessage, SeedReviewResult, SeedReviewResultMessage, SeedReviewRetryMessage, SeedReviewShowMessage, SeedReviewStartMessage, SeedSendToChiefMessage, SeedSendToChiefResult, SeedSendToChiefResultMessage, SeedSetResumeMessage, SeedSetResumeResult, SeedShowMessage, SeedShowResult, SeedTransitionMessage, SeedTransitionResult, SeedTransitionResultMessage, SeedVar, SeedWatchMessage, SeedWatchResult, Session, SessionAnnotation, SessionAnnotationsClearMessage, SessionAnnotationsClearResultMessage, SessionAnnotationsGetMessage, SessionAnnotationsGetResultMessage, SessionAnnotationsSaveMessage, SessionAnnotationsSaveResultMessage, SessionAnnotationsSubmitMessage, SessionAnnotationsSubmitResultMessage, SessionContextWindowCapResultMessage, SessionExitedMessage, SessionInstructionsMessage, SessionInstructionsResult, SessionMessage, SessionMessageWindowStatus, SessionMessagesChangedMessage, SessionMessagesGetMessage, SessionMessagesGetResultMessage, SessionPullRequest, SessionRegisteredMessage, SessionSelectedMessage, SessionState, SessionStateChangedMessage, SessionTodosUpdatedMessage, SessionTranscriptEvent, SessionTranscriptMessage, SessionTranscriptResult, SessionUnregisteredMessage, SessionUsage, SessionUsageModel, SessionsUpdatedMessage, SetChiefOfStaffMessage, SetClientPresenceMessage, SetEndpointRemoteWebMessage, SetPluginPriorityMessage, SetSessionContextWindowCapMessage, SetSessionResumeIDMessage, SetSettingMessage, SetTerminalThemeMessage, SetTicketStatusMessage, SetWorkspaceRankMessage, SettingsUpdatedMessage, SettleTurnMessage, SnoozeTurnMessage, SpawnResultMessage, SpawnSessionMessage, StateExplainEntry, StateExplainMessage, StateExplainResult, StateMessage, StopBackgroundTask, StopMessage, StoredDocument, SubscribeGitStatusMessage, Task, TaskListMessage, TaskListResultMessage, TaskRetryMessage, TaskRetryResultMessage, TasksChangedMessage, TerminalPointerActivityMessage, Ticket, TicketActivity, TicketActivityKind, TicketArtifact, TicketAttachFile, TicketAttachMessage, TicketAttachResult, TicketAttachResultMessage, TicketCommentMessage, TicketCommentResult, TicketCreateMessage, TicketCreateResult, TicketEvent, TicketEventBundle, TicketEventKind, TicketInboxMessage, TicketInboxMode, TicketInboxResult, TicketListMessage, TicketListResult, TicketShowMessage, TicketShowResult, TicketStatus, TicketStatusResult, TicketSubscribeMessage, TicketSubscribeResult, TicketTakeMessage, TicketTakeResult, TicketUnsubscribeMessage, TicketUnsubscribeResult, TodosMessage, TriggerNudgeMessage, UninstallPluginMessage, UnregisterMessage, UnregisterWorkspaceMessage, UnsubscribeGitStatusMessage, UpdateEndpointMessage, WakeTurnMessage, WebSocketEvent, WorkflowActionResultMessage, WorkflowAgentCall, WorkflowAgentCallStatus, WorkflowCallUpsertMessage, WorkflowRun, WorkflowRunCancelMessage, WorkflowRunGetMessage, WorkflowRunListMessage, WorkflowRunStatus, WorkflowRunUpdatedMessage, WorkflowRunUpsertMessage, Workspace, WorkspaceContext, WorkspaceContextChangedMessage, WorkspaceContextCheckoutMessage, WorkspaceContextCompactMessage, WorkspaceContextListMessage, WorkspaceContextListResultMessage, WorkspaceContextMaintenanceAction, WorkspaceContextMaintenanceResult, WorkspaceContextResult, WorkspaceContextResultMessage, WorkspaceContextRollbackMessage, WorkspaceContextStatusMessage, WorkspaceContextUpdateMessage, WorkspaceLayout, WorkspaceLayoutActionResultMessage, WorkspaceLayoutAddSessionPaneMessage, WorkspaceLayoutClosePaneMessage, WorkspaceLayoutDockEdge, WorkspaceLayoutDockTileMessage, WorkspaceLayoutFocusPaneMessage, WorkspaceLayoutGetMessage, WorkspaceLayoutMessage, WorkspaceLayoutMoveLeafMessage, WorkspaceLayoutMoveLeafToNewWorkspaceMessage, WorkspaceLayoutMoveLeafToWorkspaceMessage, WorkspaceLayoutPane, WorkspaceLayoutPaneKind, WorkspaceLayoutPaneStatus, WorkspaceLayoutRenamePaneMessage, WorkspaceLayoutSetSplitRatioMessage, WorkspaceLayoutSplitDirection, WorkspaceLayoutUndockTileMessage, WorkspaceLayoutUpdateTileMessage, WorkspaceLayoutUpdatedMessage, WorkspaceRegisteredMessage, WorkspaceSelectedMessage, WorkspaceStateChangedMessage, WorkspaceStatus, WorkspaceTileContentGetMessage, WorkspaceTileContentMessage, WorkspaceUnregisteredMessage, Worktree, WorktreeCreatedEvent, WorktreeDeletedEvent, WorktreesUpdatedMessage } from "./generated";
+//   import { Convert, ActivityStatusMessage, ActivityStatusResult, ActivityStatusSession, AddEndpointMessage, AgentAttachMessage, AgentClearQueueMessage, AgentEventMessage, AgentHistoryMessage, AgentInboxBatchResult, AgentInboxItem, AgentInboxMessage, AgentMessageState, AgentMsgMessage, AgentMsgResult, AgentMsgStatus, AgentMsgStatusMessage, AgentPeekExit, AgentPeekMessage, AgentPeekResult, AgentPeekScreen, AgentPeerMessage, AgentPromptMessage, AgentSetModelMessage, AgentToolDetailMessage, AppApplyMessage, AppApplyResult, AppCommandInfo, AppCommandMessage, AppCommandResultMessage, AppConsumerInfo, AppInvocationInfo, AppListMessage, AppListResult, AppLogsMessage, AppLogsResult, AppReconcileGapInfo, AppReconcileReasonInfo, AppReconcileStatus, AppRegistryEntry, AppRemoveMessage, AppRemoveResult, AppRollbackMessage, AppRollbackResult, AppRuntimeInfo, AppRuntimeRestartMessage, AppRuntimeRestartResult, AppRuntimeStatusMessage, AppRuntimeStatusResult, AppSetEnabledMessage, AppSetEnabledResult, AppStallInfo, AppStatusMessage, AppStatusResult, AppSummary, AppVersionInfo, AppViewCrashMessage, AppViewInfo, AppWatchMessage, AppWatchResult, ApprovePRMessage, AppsUpdatedMessage, AttachBlock, AttachPolicy, AttachResultMessage, AttachSessionMessage, AttachSnapshot, AuthorState, AuthorsUpdatedMessage, AutoModeCatalogModel, AutoModeConfigInfo, AutoModeDenialInfo, AutoModeDenialsMessage, AutoModeDenialsResult, AutoModeDiscardMessage, AutoModeDiscardResultMessage, AutoModeEnvNotesMessage, AutoModeEnvResult, AutoModeEnvSetResultMessage, AutoModeEnvSlotMessage, AutoModeEnvironmentInfo, AutoModeEnvironmentSlot, AutoModeEnvironmentSlotValue, AutoModeGetMessage, AutoModeModelProvider, AutoModeModelSetMessage, AutoModeModelSetResultMessage, AutoModeModelsMessage, AutoModeModelsResultMessage, AutoModePatternAddMessage, AutoModePatternRemoveMessage, AutoModePatternResultMessage, AutoModePromoteMessage, AutoModePromoteResultMessage, AutoModeProposalInfo, AutoModeProposeMessage, AutoModeProposeResult, AutoModeShowMessage, AutoModeShowResult, AutoModeStateChangedMessage, AutoModeStateResultMessage, AutomationApplyMessage, AutomationApplyResultMessage, AutomationCleanupMessage, AutomationCleanupResultMessage, AutomationDefinitionGetMessage, AutomationDefinitionResultMessage, AutomationDefinitionSummary, AutomationDefinitionsGetMessage, AutomationDefinitionsResultMessage, AutomationDeleteMessage, AutomationDeleteResultMessage, AutomationProvenance, AutomationRunMessage, AutomationRunResultMessage, AutomationRunSummary, AutomationRunsGetMessage, AutomationRunsResultMessage, AutomationSetEnabledMessage, AutomationSetEnabledResultMessage, AutomationValidateMessage, AutomationValidateResultMessage, AutomationsChangedMessage, BootstrapEndpointMessage, Branch, BranchChangedMessage, BranchesResultMessage, BrowseDirectoryMessage, BrowseDirectoryResultMessage, BrowserControlMessage, BrowserControlRequestMessage, BrowserControlResponseMessage, BrowserControlResultMessage, BusConsumerStatus, BusHealthEntry, BusProducerStatus, BusSetConsumerEnabledMessage, BusSetConsumerEnabledResultMessage, BusStatusGetMessage, BusStatusResultMessage, CancelCountdownMessage, ChiefOfStaffResultMessage, ClearSessionActivityMessage, ClearSessionsMessage, ClearWarningsMessage, ClientEvictionNoticeMessage, ClientHelloMessage, CollapseRepoMessage, CommandErrorMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, CrewDayClose, CrewHandoffMessage, CrewHandoffResult, CrewListMessage, CrewListResult, CrewMember, CrewPrimeMessage, CrewPrimeResult, CrewSetMessage, CrewSetResult, CrewSleepMessage, CrewSleepResult, CrewSleepResultMessage, CrewUpdatedMessage, CrewWakeMessage, CrewWakeResult, CrewWakeResultMessage, DaemonWarning, DelegateMessage, DelegateResult, DelegateResultMessage, DelegateStatusMessage, DelegateWorktreeRequest, DelegationOperation, DelegationOperationMessage, DelegationOperationState, DeleteWorktreeMessage, DeleteWorktreeResultMessage, DetachSessionMessage, DirectoryEntry, DispatchWorkState, DocCollectionsMessage, DocCollectionsResult, DocCountMessage, DocCountResult, DocDefineMessage, DocDefineResult, DocDeleteMessage, DocDeleteResult, DocGetMessage, DocGetResult, DocPutMessage, DocPutResult, DocQueryMessage, DocQueryResult, DocSubscribeMessage, DocSubscribeResult, DocSubscriptionDeliveryMessage, DocSubscriptionEndedMessage, DocUndefineMessage, DocUndefineResult, DocUnsubscribeMessage, DocumentCollectionSchema, DocumentConflict, DocumentFieldSpec, DocumentFilter, DocumentQuery, DocumentRevision, DocumentSort, EndpointActionResultMessage, EndpointCapabilities, EndpointInfo, EndpointStatusChangedMessage, EndpointsUpdatedMessage, EnsureRepoMessage, EnsureRepoResultMessage, EvidenceExcerpt, FetchPRDetailsMessage, FetchPRDetailsResultMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileActivity, FileDiffResultMessage, FilesEditedMessage, FSChangedMessage, FSDeleteMessage, FSDeleteResult, FSDeleteResultMessage, FSEntry, FSExistsMessage, FSExistsResult, FSExistsResultMessage, FSIndexMessage, FSIndexResultMessage, FSListMessage, FSListResultMessage, FSReadAssetMessage, FSReadAssetResult, FSReadAssetResultMessage, FSReadMessage, FSReadResult, FSReadResultMessage, FSRenameMessage, FSRenameResult, FSRenameResultMessage, FSUnwatchMessage, FSUnwatchResultMessage, FSWatchMessage, FSWatchResultMessage, FSWriteMessage, FSWriteResult, FSWriteResultMessage, GardenReview, GardenReviewEvidence, GardenReviewItem, GardenReviewRecipe, GardenReviewRun, GardenReviewUpdatedMessage, GardenSeedsUpdatedMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetFileDiffMessage, GetKittyImageMessage, GetPresentationRoundMessage, GetPresentationRoundResultMessage, GetPresentationsMessage, GetPresentationsResultMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetScreenSnapshotMessage, GetScreenSnapshotResultMessage, GetSettingsMessage, GitFileChange, GitHubHostsUpdatedMessage, GitOperation, GitOperationFinishedMessage, GitOperationKind, GitOperationStartedMessage, GitOperationStatus, GitStatusUpdateMessage, HeartbeatMessage, HeatState, HookCompactionMessage, HookNotificationMessage, HookStopFailureMessage, InitialStateMessage, InjectTestPRMessage, InjectTestSessionMessage, InspectPathMessage, InspectPathResultMessage, InstallBundledPluginMessage, InstallPluginMessage, JournalAppendMessage, JournalAppendResult, KillSessionMessage, KittyImageResultMessage, KittyPlacement, KittyPlacementsMessage, ListBranchesMessage, ListEndpointsMessage, ListPastConversationsMessage, ListPluginsMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkdownAnnotation, MarkdownAnnotationAnchor, MarkdownAnnotationsClearMessage, MarkdownAnnotationsClearResultMessage, MarkdownAnnotationsGetMessage, MarkdownAnnotationsGetResultMessage, MarkdownAnnotationsSaveMessage, MarkdownAnnotationsSaveResultMessage, MarkdownAnnotationsSubmitMessage, MarkdownAnnotationsSubmitResultMessage, MergePRMessage, MuteAuthorMessage, MutePRMessage, MuteRepoMessage, MuteWorkspaceMessage, NotebookBacklinksMessage, NotebookBacklinksResultMessage, NotebookChangedMessage, NotebookEntry, NotebookGuideMessage, NotebookGuideResult, NotebookListMessage, NotebookListResultMessage, NotebookReadMessage, NotebookReadResult, NotebookReadResultMessage, NotebookSendToChiefMessage, NotebookSendToChiefResult, NotebookSendToChiefResultMessage, NotebookWriteMessage, NotebookWriteResult, NotebookWriteResultMessage, Notification, NotificationListMessage, NotificationListResultMessage, NotificationMarkReadMessage, NotificationMarkReadResultMessage, NotificationSeverity, NotificationsUpdatedMessage, OpenBrowserMessage, OpenMarkdownMessage, OpenMarkdownResultMessage, OpenSeedMessage, OpenSeedResultMessage, OpenSentFilesMessage, PR, PRActionResultMessage, PRRole, PRVisitedMessage, PRsUpdatedMessage, PastConversation, PastConversationsResultMessage, PathInspection, PinSessionMessage, PinWorkspaceMessage, PluginActionResultMessage, PluginInfo, PluginIssue, PluginsUpdatedMessage, PresentAnnotation, PresentCloseMessage, PresentCloseResultMessage, PresentCommentInput, PresentFeedbackMessage, PresentFeedbackResult, PresentFile, PresentManifestView, PresentOpenMessage, PresentOpenResult, PresentSubmitRoundMessage, PresentSubmitRoundResultMessage, Presentation, PresentationAddedMessage, PresentationComment, PresentationRound, PresentationUpdatedMessage, PtyDesyncMessage, PtyInputMessage, PtyInputProbeResultMessage, PtyOutputMessage, PtyResizeMessage, PtyResizedMessage, PullRequestCreatedMessage, PullRequestForgetMessage, PullRequestProvenance, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentFilesMessage, RecentFilesResultMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RegisterWorkspaceMessage, ReloadSessionMessage, ReloadSessionResultMessage, RemoveEndpointMessage, RemovePluginMessage, RenameResultMessage, RenameSessionMessage, RenameWorkspaceMessage, RepoInfo, RepoState, ReposUpdatedMessage, Response, ReviewComment, RuntimeRespawnedMessage, Seed, SeedArtifact, SeedArtifactReference, SeedArtifactTargetMessage, SeedArtifactTargetResult, SeedArtifactTargetResultMessage, SeedArtifactTransferMessage, SeedArtifactTransferResult, SeedArtifactTransferResultMessage, SeedContinuation, SeedDocument, SeedDocumentGetMessage, SeedDocumentGetResultMessage, SeedEdge, SeedEditMessage, SeedEditResult, SeedHandoverRequest, SeedHarvestCondition, SeedHarvestWhenMerged, SeedLinkMessage, SeedLinkResult, SeedListMessage, SeedListResult, SeedNote, SeedNoteMessage, SeedNoteResult, SeedNoteResultMessage, SeedNotesMessage, SeedNotesResult, SeedPlantMessage, SeedPlantResult, SeedPlotChild, SeedPlotMessage, SeedPlotProgress, SeedPlotResult, SeedReadyMessage, SeedReadyResult, SeedRelation, SeedResumeMessage, SeedResumeResultMessage, SeedReviewActionContext, SeedReviewCancelMessage, SeedReviewDraftMessage, SeedReviewDraftResultMessage, SeedReviewKeepMessage, SeedReviewResult, SeedReviewResultMessage, SeedReviewRetryMessage, SeedReviewShowMessage, SeedReviewStartMessage, SeedSendToChiefMessage, SeedSendToChiefResult, SeedSendToChiefResultMessage, SeedSetResumeMessage, SeedSetResumeResult, SeedShowMessage, SeedShowResult, SeedTransitionMessage, SeedTransitionResult, SeedTransitionResultMessage, SeedVar, SeedWatchMessage, SeedWatchResult, Session, SessionAnnotation, SessionAnnotationsClearMessage, SessionAnnotationsClearResultMessage, SessionAnnotationsGetMessage, SessionAnnotationsGetResultMessage, SessionAnnotationsSaveMessage, SessionAnnotationsSaveResultMessage, SessionAnnotationsSubmitMessage, SessionAnnotationsSubmitResultMessage, SessionContextWindowCapResultMessage, SessionExitedMessage, SessionInstructionsMessage, SessionInstructionsResult, SessionMessage, SessionMessageWindowStatus, SessionMessagesChangedMessage, SessionMessagesGetMessage, SessionMessagesGetResultMessage, SessionPullRequest, SessionRegisteredMessage, SessionSelectedMessage, SessionState, SessionStateChangedMessage, SessionTodosUpdatedMessage, SessionTranscriptEvent, SessionTranscriptMessage, SessionTranscriptResult, SessionUnregisteredMessage, SessionUsage, SessionUsageModel, SessionsUpdatedMessage, SetChiefOfStaffMessage, SetClientPresenceMessage, SetEndpointRemoteWebMessage, SetPluginPriorityMessage, SetSessionContextWindowCapMessage, SetSessionResumeIDMessage, SetSettingMessage, SetTerminalThemeMessage, SetTicketStatusMessage, SetWorkspaceRankMessage, SettingsUpdatedMessage, SettleTurnMessage, SnoozeTurnMessage, SpawnResultMessage, SpawnSessionMessage, StateExplainEntry, StateExplainMessage, StateExplainResult, StateMessage, StopBackgroundTask, StopMessage, StoredDocument, SubscribeGitStatusMessage, Task, TaskListMessage, TaskListResultMessage, TaskRetryMessage, TaskRetryResultMessage, TasksChangedMessage, TerminalPointerActivityMessage, Ticket, TicketActivity, TicketActivityKind, TicketArtifact, TicketAttachFile, TicketAttachMessage, TicketAttachResult, TicketAttachResultMessage, TicketCommentMessage, TicketCommentResult, TicketCreateMessage, TicketCreateResult, TicketEvent, TicketEventBundle, TicketEventKind, TicketInboxMessage, TicketInboxMode, TicketInboxResult, TicketListMessage, TicketListResult, TicketShowMessage, TicketShowResult, TicketStatus, TicketStatusResult, TicketSubscribeMessage, TicketSubscribeResult, TicketTakeMessage, TicketTakeResult, TicketUnsubscribeMessage, TicketUnsubscribeResult, TodosMessage, TriggerNudgeMessage, UninstallPluginMessage, UnregisterMessage, UnregisterWorkspaceMessage, UnsubscribeGitStatusMessage, UpdateEndpointMessage, WakeTurnMessage, WebSocketEvent, WorkflowActionResultMessage, WorkflowAgentCall, WorkflowAgentCallStatus, WorkflowCallUpsertMessage, WorkflowRun, WorkflowRunCancelMessage, WorkflowRunGetMessage, WorkflowRunListMessage, WorkflowRunStatus, WorkflowRunUpdatedMessage, WorkflowRunUpsertMessage, Workspace, WorkspaceContext, WorkspaceContextChangedMessage, WorkspaceContextCheckoutMessage, WorkspaceContextCompactMessage, WorkspaceContextListMessage, WorkspaceContextListResultMessage, WorkspaceContextMaintenanceAction, WorkspaceContextMaintenanceResult, WorkspaceContextResult, WorkspaceContextResultMessage, WorkspaceContextRollbackMessage, WorkspaceContextStatusMessage, WorkspaceContextUpdateMessage, WorkspaceLayout, WorkspaceLayoutActionResultMessage, WorkspaceLayoutAddSessionPaneMessage, WorkspaceLayoutClosePaneMessage, WorkspaceLayoutDockEdge, WorkspaceLayoutDockTileMessage, WorkspaceLayoutFocusPaneMessage, WorkspaceLayoutGetMessage, WorkspaceLayoutMessage, WorkspaceLayoutMoveLeafMessage, WorkspaceLayoutMoveLeafToNewWorkspaceMessage, WorkspaceLayoutMoveLeafToWorkspaceMessage, WorkspaceLayoutPane, WorkspaceLayoutPaneKind, WorkspaceLayoutPaneStatus, WorkspaceLayoutRenamePaneMessage, WorkspaceLayoutSetSplitRatioMessage, WorkspaceLayoutSplitDirection, WorkspaceLayoutUndockTileMessage, WorkspaceLayoutUpdateTileMessage, WorkspaceLayoutUpdatedMessage, WorkspaceRegisteredMessage, WorkspaceSelectedMessage, WorkspaceStateChangedMessage, WorkspaceStatus, WorkspaceTileContentGetMessage, WorkspaceTileContentMessage, WorkspaceUnregisteredMessage, Worktree, WorktreeCreatedEvent, WorktreeDeletedEvent, WorktreeKeepMessage, WorktreeKeepResult, WorktreeKeepResultEvent, WorktreeListMessage, WorktreeListResult, WorktreeListResultEvent, WorktreeRefreshMessage, WorktreeRefreshResult, WorktreeRefreshResultEvent, WorktreeRepository, WorktreeStateChangedEvent, WorktreeSweepEntry, WorktreeSweepLogMessage, WorktreeSweepLogResult, WorktreeSweepLogResultEvent, WorktreeSweptEvent, WorktreesUpdatedMessage } from "./generated";
 //
 //   const activityStatusMessage = Convert.toActivityStatusMessage(json);
 //   const activityStatusResult = Convert.toActivityStatusResult(json);
@@ -640,6 +640,22 @@
 //   const worktree = Convert.toWorktree(json);
 //   const worktreeCreatedEvent = Convert.toWorktreeCreatedEvent(json);
 //   const worktreeDeletedEvent = Convert.toWorktreeDeletedEvent(json);
+//   const worktreeKeepMessage = Convert.toWorktreeKeepMessage(json);
+//   const worktreeKeepResult = Convert.toWorktreeKeepResult(json);
+//   const worktreeKeepResultEvent = Convert.toWorktreeKeepResultEvent(json);
+//   const worktreeListMessage = Convert.toWorktreeListMessage(json);
+//   const worktreeListResult = Convert.toWorktreeListResult(json);
+//   const worktreeListResultEvent = Convert.toWorktreeListResultEvent(json);
+//   const worktreeRefreshMessage = Convert.toWorktreeRefreshMessage(json);
+//   const worktreeRefreshResult = Convert.toWorktreeRefreshResult(json);
+//   const worktreeRefreshResultEvent = Convert.toWorktreeRefreshResultEvent(json);
+//   const worktreeRepository = Convert.toWorktreeRepository(json);
+//   const worktreeStateChangedEvent = Convert.toWorktreeStateChangedEvent(json);
+//   const worktreeSweepEntry = Convert.toWorktreeSweepEntry(json);
+//   const worktreeSweepLogMessage = Convert.toWorktreeSweepLogMessage(json);
+//   const worktreeSweepLogResult = Convert.toWorktreeSweepLogResult(json);
+//   const worktreeSweepLogResultEvent = Convert.toWorktreeSweepLogResultEvent(json);
+//   const worktreeSweptEvent = Convert.toWorktreeSweptEvent(json);
 //   const worktreesUpdatedMessage = Convert.toWorktreesUpdatedMessage(json);
 //
 // These functions will throw an error if the JSON doesn't
@@ -3155,14 +3171,14 @@ export interface DelegationOperationObject {
 }
 
 export interface DeleteWorktreeMessage {
-    cmd:          GitOperationKind;
+    cmd:          DeleteWorktreeMessageCmd;
     endpoint_id?: string;
     force?:       boolean;
     path:         string;
     [property: string]: any;
 }
 
-export enum GitOperationKind {
+export enum DeleteWorktreeMessageCmd {
     DeleteWorktree = "delete_worktree",
 }
 
@@ -4543,10 +4559,27 @@ export interface Info {
 }
 
 export interface WorktreeElement {
-    branch:      string;
-    created_at?: string;
-    main_repo:   string;
-    path:        string;
+    branch:            string;
+    created_at?:       string;
+    detached?:         boolean;
+    dirty?:            boolean;
+    dirty_files?:      number;
+    head_sha?:         string;
+    last_activity_at?: string;
+    main_repo:         string;
+    merged_signal?:    string;
+    observed_at?:      string;
+    origin?:           string;
+    path:              string;
+    pinned?:           boolean;
+    pinned_at?:        string;
+    prunable?:         boolean;
+    refresh_error?:    string;
+    stashes?:          number;
+    sweep_at?:         string;
+    sweep_reason?:     string;
+    sweep_status?:     string;
+    unpushed?:         number;
     [property: string]: any;
 }
 
@@ -4618,6 +4651,12 @@ export interface GitOperation {
     started_at:   string;
     status:       GitOperationStatus;
     [property: string]: any;
+}
+
+export enum GitOperationKind {
+    DeleteWorktree = "delete_worktree",
+    RefreshRepository = "refresh_repository",
+    RefreshWorktree = "refresh_worktree",
 }
 
 export enum GitOperationStatus {
@@ -6556,6 +6595,10 @@ export interface Response {
     workspace_context_result?:             WorkspaceContextResultObject;
     workspace_contexts?:                   WorkspaceContextElement[];
     workspaces?:                           WorkspaceElement[];
+    worktree_keep_result?:                 WorktreeKeepResultObject;
+    worktree_list_result?:                 WorktreeListResultObject;
+    worktree_refresh_result?:              WorktreeRefreshResultObject;
+    worktree_sweep_log_result?:            WorktreeSweepLogResultObject;
     [property: string]: any;
 }
 
@@ -7260,6 +7303,47 @@ export interface WorkspaceContextElement {
     updated_at:            string;
     updated_by_session_id: string;
     workspace_id:          string;
+    [property: string]: any;
+}
+
+export interface WorktreeKeepResultObject {
+    worktree: WorktreeElement;
+    [property: string]: any;
+}
+
+export interface WorktreeListResultObject {
+    omitted:      number;
+    repositories: RepositoryElement[];
+    worktrees:    WorktreeElement[];
+    [property: string]: any;
+}
+
+export interface RepositoryElement {
+    integration_branch?: string;
+    integration_source?: string;
+    main_repo:           string;
+    [property: string]: any;
+}
+
+export interface WorktreeRefreshResultObject {
+    queued: boolean;
+    [property: string]: any;
+}
+
+export interface WorktreeSweepLogResultObject {
+    entries: SweepEntry[];
+    omitted: number;
+    [property: string]: any;
+}
+
+export interface SweepEntry {
+    action:    string;
+    at:        string;
+    branch?:   string;
+    id:        string;
+    main_repo: string;
+    path:      string;
+    reason?:   string;
     [property: string]: any;
 }
 
@@ -9165,82 +9249,86 @@ export enum WakeTurnMessageCmd {
 }
 
 export interface WebSocketEvent {
-    action?:                   string;
-    authors?:                  AuthorElement[];
-    base_ref?:                 string;
-    branch?:                   string;
-    branches?:                 BranchElement[];
-    chief_of_staff?:           boolean;
-    cloned?:                   boolean;
-    cmd?:                      string;
-    cols?:                     number;
-    conflict?:                 boolean;
-    content?:                  string;
-    data?:                     string;
-    directory?:                string;
-    dirty?:                    boolean;
-    error?:                    string;
-    error_code?:               string;
-    event:                     string;
-    exit_code?:                number;
-    found?:                    boolean;
-    id?:                       string;
-    last_seq?:                 number;
-    modified?:                 string;
-    name?:                     string;
-    operation?:                GitOperationFinishedMessageOperation;
-    original?:                 string;
-    pane_id?:                  string;
-    path?:                     string;
-    pid?:                      number;
-    plugin_issues?:            IssueElement[];
-    plugins?:                  PluginElement[];
-    previous_session_id?:      string;
-    priority?:                 number;
-    probe_id?:                 string;
-    protocol_version?:         string;
-    prs?:                      PRElement[];
-    rate_limit_reset_at?:      string;
-    rate_limit_resource?:      string;
-    reason?:                   string;
-    recent_locations?:         RecentLocationElement[];
-    repos?:                    RepoElement[];
-    rows?:                     number;
-    running?:                  boolean;
-    runtime_id?:               string;
-    screen_cols?:              number;
-    screen_rows?:              number;
-    screen_snapshot?:          string;
-    scrollback_truncated?:     boolean;
-    seeds?:                    SeedElement[];
-    seq?:                      number;
-    session?:                  SessionObject;
-    session_id?:               string;
-    sessions?:                 SessionObject[];
-    settings?:                 { [key: string]: string };
-    signal?:                   string;
-    split_id?:                 string;
-    staged?:                   StagedElement[];
-    stash_ref?:                string;
-    success?:                  boolean;
-    target_path?:              string;
-    ticket?:                   TicketElement;
-    tile_id?:                  string;
-    tile_kind?:                string;
-    total?:                    number;
-    unstaged?:                 StagedElement[];
-    untracked?:                StagedElement[];
-    warnings?:                 WarningElement[];
-    workspace?:                WorkspaceElement;
-    workspace_context_result?: WorkspaceContextResultObject;
-    workspace_contexts?:       WorkspaceContextElement[];
-    workspace_id?:             string;
-    workspace_layout?:         Layout;
-    workspaces?:               WorkspaceElement[];
-    worktrees?:                WorktreeElement[];
-    write_duration_us?:        number;
-    xpixel?:                   number;
-    ypixel?:                   number;
+    action?:                    string;
+    authors?:                   AuthorElement[];
+    base_ref?:                  string;
+    branch?:                    string;
+    branches?:                  BranchElement[];
+    chief_of_staff?:            boolean;
+    cloned?:                    boolean;
+    cmd?:                       string;
+    cols?:                      number;
+    conflict?:                  boolean;
+    content?:                   string;
+    data?:                      string;
+    directory?:                 string;
+    dirty?:                     boolean;
+    error?:                     string;
+    error_code?:                string;
+    event:                      string;
+    exit_code?:                 number;
+    found?:                     boolean;
+    id?:                        string;
+    last_seq?:                  number;
+    modified?:                  string;
+    name?:                      string;
+    operation?:                 GitOperationFinishedMessageOperation;
+    original?:                  string;
+    pane_id?:                   string;
+    path?:                      string;
+    pid?:                       number;
+    plugin_issues?:             IssueElement[];
+    plugins?:                   PluginElement[];
+    previous_session_id?:       string;
+    priority?:                  number;
+    probe_id?:                  string;
+    protocol_version?:          string;
+    prs?:                       PRElement[];
+    rate_limit_reset_at?:       string;
+    rate_limit_resource?:       string;
+    reason?:                    string;
+    recent_locations?:          RecentLocationElement[];
+    repos?:                     RepoElement[];
+    request_id?:                string;
+    rows?:                      number;
+    running?:                   boolean;
+    runtime_id?:                string;
+    screen_cols?:               number;
+    screen_rows?:               number;
+    screen_snapshot?:           string;
+    scrollback_truncated?:      boolean;
+    seeds?:                     SeedElement[];
+    seq?:                       number;
+    session?:                   SessionObject;
+    session_id?:                string;
+    sessions?:                  SessionObject[];
+    settings?:                  { [key: string]: string };
+    signal?:                    string;
+    split_id?:                  string;
+    staged?:                    StagedElement[];
+    stash_ref?:                 string;
+    success?:                   boolean;
+    sweep_entry?:               SweepEntry;
+    target_path?:               string;
+    ticket?:                    TicketElement;
+    tile_id?:                   string;
+    tile_kind?:                 string;
+    total?:                     number;
+    unstaged?:                  StagedElement[];
+    untracked?:                 StagedElement[];
+    warnings?:                  WarningElement[];
+    workspace?:                 WorkspaceElement;
+    workspace_context_result?:  WorkspaceContextResultObject;
+    workspace_contexts?:        WorkspaceContextElement[];
+    workspace_id?:              string;
+    workspace_layout?:          Layout;
+    workspaces?:                WorkspaceElement[];
+    worktree_list_result?:      WorktreeListResultObject;
+    worktree_sweep_log_result?: WorktreeSweepLogResultObject;
+    worktrees?:                 WorktreeElement[];
+    write_duration_us?:         number;
+    xpixel?:                    number;
+    ypixel?:                    number;
     [property: string]: any;
 }
 
@@ -9856,10 +9944,27 @@ export enum WorkspaceUnregisteredMessageEvent {
 }
 
 export interface Worktree {
-    branch:      string;
-    created_at?: string;
-    main_repo:   string;
-    path:        string;
+    branch:            string;
+    created_at?:       string;
+    detached?:         boolean;
+    dirty?:            boolean;
+    dirty_files?:      number;
+    head_sha?:         string;
+    last_activity_at?: string;
+    main_repo:         string;
+    merged_signal?:    string;
+    observed_at?:      string;
+    origin?:           string;
+    path:              string;
+    pinned?:           boolean;
+    pinned_at?:        string;
+    prunable?:         boolean;
+    refresh_error?:    string;
+    stashes?:          number;
+    sweep_at?:         string;
+    sweep_reason?:     string;
+    sweep_status?:     string;
+    unpushed?:         number;
     [property: string]: any;
 }
 
@@ -9881,6 +9986,161 @@ export interface WorktreeDeletedEvent {
 
 export enum WorktreeDeletedEventEvent {
     WorktreeDeleted = "worktree_deleted",
+}
+
+export interface WorktreeKeepMessage {
+    cmd:         WorktreeKeepMessageCmd;
+    keep:        boolean;
+    path:        string;
+    request_id?: string;
+    [property: string]: any;
+}
+
+export enum WorktreeKeepMessageCmd {
+    WorktreeKeep = "worktree_keep",
+}
+
+export interface WorktreeKeepResult {
+    worktree: WorktreeElement;
+    [property: string]: any;
+}
+
+export interface WorktreeKeepResultEvent {
+    error?:      string;
+    event:       WorktreeKeepResultEventEvent;
+    request_id?: string;
+    success:     boolean;
+    worktrees?:  WorktreeElement[];
+    [property: string]: any;
+}
+
+export enum WorktreeKeepResultEventEvent {
+    WorktreeKeepResult = "worktree_keep_result",
+}
+
+export interface WorktreeListMessage {
+    cmd:         WorktreeListMessageCmd;
+    limit?:      number;
+    main_repo?:  string;
+    request_id?: string;
+    [property: string]: any;
+}
+
+export enum WorktreeListMessageCmd {
+    WorktreeList = "worktree_list",
+}
+
+export interface WorktreeListResult {
+    omitted:      number;
+    repositories: RepositoryElement[];
+    worktrees:    WorktreeElement[];
+    [property: string]: any;
+}
+
+export interface WorktreeListResultEvent {
+    event:                WorktreeListResultEventEvent;
+    request_id?:          string;
+    success:              boolean;
+    worktree_list_result: WorktreeListResultObject;
+    [property: string]: any;
+}
+
+export enum WorktreeListResultEventEvent {
+    WorktreeListResult = "worktree_list_result",
+}
+
+export interface WorktreeRefreshMessage {
+    cmd:         WorktreeRefreshMessageCmd;
+    request_id?: string;
+    [property: string]: any;
+}
+
+export enum WorktreeRefreshMessageCmd {
+    WorktreeRefresh = "worktree_refresh",
+}
+
+export interface WorktreeRefreshResult {
+    queued: boolean;
+    [property: string]: any;
+}
+
+export interface WorktreeRefreshResultEvent {
+    event:       WorktreeRefreshResultEventEvent;
+    request_id?: string;
+    success:     boolean;
+    [property: string]: any;
+}
+
+export enum WorktreeRefreshResultEventEvent {
+    WorktreeRefreshResult = "worktree_refresh_result",
+}
+
+export interface WorktreeRepository {
+    integration_branch?: string;
+    integration_source?: string;
+    main_repo:           string;
+    [property: string]: any;
+}
+
+export interface WorktreeStateChangedEvent {
+    event:     WorktreeStateChangedEventEvent;
+    worktrees: WorktreeElement[];
+    [property: string]: any;
+}
+
+export enum WorktreeStateChangedEventEvent {
+    WorktreeStateChanged = "worktree_state_changed",
+}
+
+export interface WorktreeSweepEntry {
+    action:    string;
+    at:        string;
+    branch?:   string;
+    id:        string;
+    main_repo: string;
+    path:      string;
+    reason?:   string;
+    [property: string]: any;
+}
+
+export interface WorktreeSweepLogMessage {
+    cmd:         WorktreeSweepLogMessageCmd;
+    limit?:      number;
+    main_repo?:  string;
+    request_id?: string;
+    [property: string]: any;
+}
+
+export enum WorktreeSweepLogMessageCmd {
+    WorktreeSweepLog = "worktree_sweep_log",
+}
+
+export interface WorktreeSweepLogResult {
+    entries: SweepEntry[];
+    omitted: number;
+    [property: string]: any;
+}
+
+export interface WorktreeSweepLogResultEvent {
+    event:                     WorktreeSweepLogResultEventEvent;
+    request_id?:               string;
+    success:                   boolean;
+    worktree_sweep_log_result: WorktreeSweepLogResultObject;
+    [property: string]: any;
+}
+
+export enum WorktreeSweepLogResultEventEvent {
+    WorktreeSweepLogResult = "worktree_sweep_log_result",
+}
+
+export interface WorktreeSweptEvent {
+    event:       WorktreeSweptEventEvent;
+    sweep_entry: SweepEntry;
+    [property: string]: any;
+}
+
+export enum WorktreeSweptEventEvent {
+    WorktreeSwept = "worktree_swept",
 }
 
 export interface WorktreesUpdatedMessage {
@@ -15000,6 +15260,134 @@ export class Convert {
         return JSON.stringify(uncast(value, r("WorktreeDeletedEvent")), null, 2);
     }
 
+    public static toWorktreeKeepMessage(json: string): WorktreeKeepMessage {
+        return cast(JSON.parse(json), r("WorktreeKeepMessage"));
+    }
+
+    public static worktreeKeepMessageToJson(value: WorktreeKeepMessage): string {
+        return JSON.stringify(uncast(value, r("WorktreeKeepMessage")), null, 2);
+    }
+
+    public static toWorktreeKeepResult(json: string): WorktreeKeepResult {
+        return cast(JSON.parse(json), r("WorktreeKeepResult"));
+    }
+
+    public static worktreeKeepResultToJson(value: WorktreeKeepResult): string {
+        return JSON.stringify(uncast(value, r("WorktreeKeepResult")), null, 2);
+    }
+
+    public static toWorktreeKeepResultEvent(json: string): WorktreeKeepResultEvent {
+        return cast(JSON.parse(json), r("WorktreeKeepResultEvent"));
+    }
+
+    public static worktreeKeepResultEventToJson(value: WorktreeKeepResultEvent): string {
+        return JSON.stringify(uncast(value, r("WorktreeKeepResultEvent")), null, 2);
+    }
+
+    public static toWorktreeListMessage(json: string): WorktreeListMessage {
+        return cast(JSON.parse(json), r("WorktreeListMessage"));
+    }
+
+    public static worktreeListMessageToJson(value: WorktreeListMessage): string {
+        return JSON.stringify(uncast(value, r("WorktreeListMessage")), null, 2);
+    }
+
+    public static toWorktreeListResult(json: string): WorktreeListResult {
+        return cast(JSON.parse(json), r("WorktreeListResult"));
+    }
+
+    public static worktreeListResultToJson(value: WorktreeListResult): string {
+        return JSON.stringify(uncast(value, r("WorktreeListResult")), null, 2);
+    }
+
+    public static toWorktreeListResultEvent(json: string): WorktreeListResultEvent {
+        return cast(JSON.parse(json), r("WorktreeListResultEvent"));
+    }
+
+    public static worktreeListResultEventToJson(value: WorktreeListResultEvent): string {
+        return JSON.stringify(uncast(value, r("WorktreeListResultEvent")), null, 2);
+    }
+
+    public static toWorktreeRefreshMessage(json: string): WorktreeRefreshMessage {
+        return cast(JSON.parse(json), r("WorktreeRefreshMessage"));
+    }
+
+    public static worktreeRefreshMessageToJson(value: WorktreeRefreshMessage): string {
+        return JSON.stringify(uncast(value, r("WorktreeRefreshMessage")), null, 2);
+    }
+
+    public static toWorktreeRefreshResult(json: string): WorktreeRefreshResult {
+        return cast(JSON.parse(json), r("WorktreeRefreshResult"));
+    }
+
+    public static worktreeRefreshResultToJson(value: WorktreeRefreshResult): string {
+        return JSON.stringify(uncast(value, r("WorktreeRefreshResult")), null, 2);
+    }
+
+    public static toWorktreeRefreshResultEvent(json: string): WorktreeRefreshResultEvent {
+        return cast(JSON.parse(json), r("WorktreeRefreshResultEvent"));
+    }
+
+    public static worktreeRefreshResultEventToJson(value: WorktreeRefreshResultEvent): string {
+        return JSON.stringify(uncast(value, r("WorktreeRefreshResultEvent")), null, 2);
+    }
+
+    public static toWorktreeRepository(json: string): WorktreeRepository {
+        return cast(JSON.parse(json), r("WorktreeRepository"));
+    }
+
+    public static worktreeRepositoryToJson(value: WorktreeRepository): string {
+        return JSON.stringify(uncast(value, r("WorktreeRepository")), null, 2);
+    }
+
+    public static toWorktreeStateChangedEvent(json: string): WorktreeStateChangedEvent {
+        return cast(JSON.parse(json), r("WorktreeStateChangedEvent"));
+    }
+
+    public static worktreeStateChangedEventToJson(value: WorktreeStateChangedEvent): string {
+        return JSON.stringify(uncast(value, r("WorktreeStateChangedEvent")), null, 2);
+    }
+
+    public static toWorktreeSweepEntry(json: string): WorktreeSweepEntry {
+        return cast(JSON.parse(json), r("WorktreeSweepEntry"));
+    }
+
+    public static worktreeSweepEntryToJson(value: WorktreeSweepEntry): string {
+        return JSON.stringify(uncast(value, r("WorktreeSweepEntry")), null, 2);
+    }
+
+    public static toWorktreeSweepLogMessage(json: string): WorktreeSweepLogMessage {
+        return cast(JSON.parse(json), r("WorktreeSweepLogMessage"));
+    }
+
+    public static worktreeSweepLogMessageToJson(value: WorktreeSweepLogMessage): string {
+        return JSON.stringify(uncast(value, r("WorktreeSweepLogMessage")), null, 2);
+    }
+
+    public static toWorktreeSweepLogResult(json: string): WorktreeSweepLogResult {
+        return cast(JSON.parse(json), r("WorktreeSweepLogResult"));
+    }
+
+    public static worktreeSweepLogResultToJson(value: WorktreeSweepLogResult): string {
+        return JSON.stringify(uncast(value, r("WorktreeSweepLogResult")), null, 2);
+    }
+
+    public static toWorktreeSweepLogResultEvent(json: string): WorktreeSweepLogResultEvent {
+        return cast(JSON.parse(json), r("WorktreeSweepLogResultEvent"));
+    }
+
+    public static worktreeSweepLogResultEventToJson(value: WorktreeSweepLogResultEvent): string {
+        return JSON.stringify(uncast(value, r("WorktreeSweepLogResultEvent")), null, 2);
+    }
+
+    public static toWorktreeSweptEvent(json: string): WorktreeSweptEvent {
+        return cast(JSON.parse(json), r("WorktreeSweptEvent"));
+    }
+
+    public static worktreeSweptEventToJson(value: WorktreeSweptEvent): string {
+        return JSON.stringify(uncast(value, r("WorktreeSweptEvent")), null, 2);
+    }
+
     public static toWorktreesUpdatedMessage(json: string): WorktreesUpdatedMessage {
         return cast(JSON.parse(json), r("WorktreesUpdatedMessage"));
     }
@@ -16760,7 +17148,7 @@ const typeMap: any = {
         { json: "worktree_path", js: "worktree_path", typ: u(undefined, "") },
     ], "any"),
     "DeleteWorktreeMessage": o([
-        { json: "cmd", js: "cmd", typ: r("GitOperationKind") },
+        { json: "cmd", js: "cmd", typ: r("DeleteWorktreeMessageCmd") },
         { json: "endpoint_id", js: "endpoint_id", typ: u(undefined, "") },
         { json: "force", js: "force", typ: u(undefined, true) },
         { json: "path", js: "path", typ: "" },
@@ -17636,8 +18024,25 @@ const typeMap: any = {
     "WorktreeElement": o([
         { json: "branch", js: "branch", typ: "" },
         { json: "created_at", js: "created_at", typ: u(undefined, "") },
+        { json: "detached", js: "detached", typ: u(undefined, true) },
+        { json: "dirty", js: "dirty", typ: u(undefined, true) },
+        { json: "dirty_files", js: "dirty_files", typ: u(undefined, 0) },
+        { json: "head_sha", js: "head_sha", typ: u(undefined, "") },
+        { json: "last_activity_at", js: "last_activity_at", typ: u(undefined, "") },
         { json: "main_repo", js: "main_repo", typ: "" },
+        { json: "merged_signal", js: "merged_signal", typ: u(undefined, "") },
+        { json: "observed_at", js: "observed_at", typ: u(undefined, "") },
+        { json: "origin", js: "origin", typ: u(undefined, "") },
         { json: "path", js: "path", typ: "" },
+        { json: "pinned", js: "pinned", typ: u(undefined, true) },
+        { json: "pinned_at", js: "pinned_at", typ: u(undefined, "") },
+        { json: "prunable", js: "prunable", typ: u(undefined, true) },
+        { json: "refresh_error", js: "refresh_error", typ: u(undefined, "") },
+        { json: "stashes", js: "stashes", typ: u(undefined, 0) },
+        { json: "sweep_at", js: "sweep_at", typ: u(undefined, "") },
+        { json: "sweep_reason", js: "sweep_reason", typ: u(undefined, "") },
+        { json: "sweep_status", js: "sweep_status", typ: u(undefined, "") },
+        { json: "unpushed", js: "unpushed", typ: u(undefined, 0) },
     ], "any"),
     "GetScreenSnapshotMessage": o([
         { json: "cmd", js: "cmd", typ: r("GetScreenSnapshotMessageCmd") },
@@ -18852,6 +19257,10 @@ const typeMap: any = {
         { json: "workspace_context_result", js: "workspace_context_result", typ: u(undefined, r("WorkspaceContextResultObject")) },
         { json: "workspace_contexts", js: "workspace_contexts", typ: u(undefined, a(r("WorkspaceContextElement"))) },
         { json: "workspaces", js: "workspaces", typ: u(undefined, a(r("WorkspaceElement"))) },
+        { json: "worktree_keep_result", js: "worktree_keep_result", typ: u(undefined, r("WorktreeKeepResultObject")) },
+        { json: "worktree_list_result", js: "worktree_list_result", typ: u(undefined, r("WorktreeListResultObject")) },
+        { json: "worktree_refresh_result", js: "worktree_refresh_result", typ: u(undefined, r("WorktreeRefreshResultObject")) },
+        { json: "worktree_sweep_log_result", js: "worktree_sweep_log_result", typ: u(undefined, r("WorktreeSweepLogResultObject")) },
     ], "any"),
     "ActivityStatusResultObject": o([
         { json: "enabled", js: "enabled", typ: true },
@@ -19362,6 +19771,35 @@ const typeMap: any = {
         { json: "updated_at", js: "updated_at", typ: "" },
         { json: "updated_by_session_id", js: "updated_by_session_id", typ: "" },
         { json: "workspace_id", js: "workspace_id", typ: "" },
+    ], "any"),
+    "WorktreeKeepResultObject": o([
+        { json: "worktree", js: "worktree", typ: r("WorktreeElement") },
+    ], "any"),
+    "WorktreeListResultObject": o([
+        { json: "omitted", js: "omitted", typ: 0 },
+        { json: "repositories", js: "repositories", typ: a(r("RepositoryElement")) },
+        { json: "worktrees", js: "worktrees", typ: a(r("WorktreeElement")) },
+    ], "any"),
+    "RepositoryElement": o([
+        { json: "integration_branch", js: "integration_branch", typ: u(undefined, "") },
+        { json: "integration_source", js: "integration_source", typ: u(undefined, "") },
+        { json: "main_repo", js: "main_repo", typ: "" },
+    ], "any"),
+    "WorktreeRefreshResultObject": o([
+        { json: "queued", js: "queued", typ: true },
+    ], "any"),
+    "WorktreeSweepLogResultObject": o([
+        { json: "entries", js: "entries", typ: a(r("SweepEntry")) },
+        { json: "omitted", js: "omitted", typ: 0 },
+    ], "any"),
+    "SweepEntry": o([
+        { json: "action", js: "action", typ: "" },
+        { json: "at", js: "at", typ: "" },
+        { json: "branch", js: "branch", typ: u(undefined, "") },
+        { json: "id", js: "id", typ: "" },
+        { json: "main_repo", js: "main_repo", typ: "" },
+        { json: "path", js: "path", typ: "" },
+        { json: "reason", js: "reason", typ: u(undefined, "") },
     ], "any"),
     "ReviewComment": o([
         { json: "author", js: "author", typ: "" },
@@ -20562,6 +21000,7 @@ const typeMap: any = {
         { json: "reason", js: "reason", typ: u(undefined, "") },
         { json: "recent_locations", js: "recent_locations", typ: u(undefined, a(r("RecentLocationElement"))) },
         { json: "repos", js: "repos", typ: u(undefined, a(r("RepoElement"))) },
+        { json: "request_id", js: "request_id", typ: u(undefined, "") },
         { json: "rows", js: "rows", typ: u(undefined, 0) },
         { json: "running", js: "running", typ: u(undefined, true) },
         { json: "runtime_id", js: "runtime_id", typ: u(undefined, "") },
@@ -20580,6 +21019,7 @@ const typeMap: any = {
         { json: "staged", js: "staged", typ: u(undefined, a(r("StagedElement"))) },
         { json: "stash_ref", js: "stash_ref", typ: u(undefined, "") },
         { json: "success", js: "success", typ: u(undefined, true) },
+        { json: "sweep_entry", js: "sweep_entry", typ: u(undefined, r("SweepEntry")) },
         { json: "target_path", js: "target_path", typ: u(undefined, "") },
         { json: "ticket", js: "ticket", typ: u(undefined, r("TicketElement")) },
         { json: "tile_id", js: "tile_id", typ: u(undefined, "") },
@@ -20594,6 +21034,8 @@ const typeMap: any = {
         { json: "workspace_id", js: "workspace_id", typ: u(undefined, "") },
         { json: "workspace_layout", js: "workspace_layout", typ: u(undefined, r("Layout")) },
         { json: "workspaces", js: "workspaces", typ: u(undefined, a(r("WorkspaceElement"))) },
+        { json: "worktree_list_result", js: "worktree_list_result", typ: u(undefined, r("WorktreeListResultObject")) },
+        { json: "worktree_sweep_log_result", js: "worktree_sweep_log_result", typ: u(undefined, r("WorktreeSweepLogResultObject")) },
         { json: "worktrees", js: "worktrees", typ: u(undefined, a(r("WorktreeElement"))) },
         { json: "write_duration_us", js: "write_duration_us", typ: u(undefined, 0) },
         { json: "xpixel", js: "xpixel", typ: u(undefined, 0) },
@@ -20945,8 +21387,25 @@ const typeMap: any = {
     "Worktree": o([
         { json: "branch", js: "branch", typ: "" },
         { json: "created_at", js: "created_at", typ: u(undefined, "") },
+        { json: "detached", js: "detached", typ: u(undefined, true) },
+        { json: "dirty", js: "dirty", typ: u(undefined, true) },
+        { json: "dirty_files", js: "dirty_files", typ: u(undefined, 0) },
+        { json: "head_sha", js: "head_sha", typ: u(undefined, "") },
+        { json: "last_activity_at", js: "last_activity_at", typ: u(undefined, "") },
         { json: "main_repo", js: "main_repo", typ: "" },
+        { json: "merged_signal", js: "merged_signal", typ: u(undefined, "") },
+        { json: "observed_at", js: "observed_at", typ: u(undefined, "") },
+        { json: "origin", js: "origin", typ: u(undefined, "") },
         { json: "path", js: "path", typ: "" },
+        { json: "pinned", js: "pinned", typ: u(undefined, true) },
+        { json: "pinned_at", js: "pinned_at", typ: u(undefined, "") },
+        { json: "prunable", js: "prunable", typ: u(undefined, true) },
+        { json: "refresh_error", js: "refresh_error", typ: u(undefined, "") },
+        { json: "stashes", js: "stashes", typ: u(undefined, 0) },
+        { json: "sweep_at", js: "sweep_at", typ: u(undefined, "") },
+        { json: "sweep_reason", js: "sweep_reason", typ: u(undefined, "") },
+        { json: "sweep_status", js: "sweep_status", typ: u(undefined, "") },
+        { json: "unpushed", js: "unpushed", typ: u(undefined, 0) },
     ], "any"),
     "WorktreeCreatedEvent": o([
         { json: "event", js: "event", typ: r("WorktreeCreatedEventEvent") },
@@ -20955,6 +21414,89 @@ const typeMap: any = {
     "WorktreeDeletedEvent": o([
         { json: "event", js: "event", typ: r("WorktreeDeletedEventEvent") },
         { json: "worktrees", js: "worktrees", typ: a(r("WorktreeElement")) },
+    ], "any"),
+    "WorktreeKeepMessage": o([
+        { json: "cmd", js: "cmd", typ: r("WorktreeKeepMessageCmd") },
+        { json: "keep", js: "keep", typ: true },
+        { json: "path", js: "path", typ: "" },
+        { json: "request_id", js: "request_id", typ: u(undefined, "") },
+    ], "any"),
+    "WorktreeKeepResult": o([
+        { json: "worktree", js: "worktree", typ: r("WorktreeElement") },
+    ], "any"),
+    "WorktreeKeepResultEvent": o([
+        { json: "error", js: "error", typ: u(undefined, "") },
+        { json: "event", js: "event", typ: r("WorktreeKeepResultEventEvent") },
+        { json: "request_id", js: "request_id", typ: u(undefined, "") },
+        { json: "success", js: "success", typ: true },
+        { json: "worktrees", js: "worktrees", typ: u(undefined, a(r("WorktreeElement"))) },
+    ], "any"),
+    "WorktreeListMessage": o([
+        { json: "cmd", js: "cmd", typ: r("WorktreeListMessageCmd") },
+        { json: "limit", js: "limit", typ: u(undefined, 0) },
+        { json: "main_repo", js: "main_repo", typ: u(undefined, "") },
+        { json: "request_id", js: "request_id", typ: u(undefined, "") },
+    ], "any"),
+    "WorktreeListResult": o([
+        { json: "omitted", js: "omitted", typ: 0 },
+        { json: "repositories", js: "repositories", typ: a(r("RepositoryElement")) },
+        { json: "worktrees", js: "worktrees", typ: a(r("WorktreeElement")) },
+    ], "any"),
+    "WorktreeListResultEvent": o([
+        { json: "event", js: "event", typ: r("WorktreeListResultEventEvent") },
+        { json: "request_id", js: "request_id", typ: u(undefined, "") },
+        { json: "success", js: "success", typ: true },
+        { json: "worktree_list_result", js: "worktree_list_result", typ: r("WorktreeListResultObject") },
+    ], "any"),
+    "WorktreeRefreshMessage": o([
+        { json: "cmd", js: "cmd", typ: r("WorktreeRefreshMessageCmd") },
+        { json: "request_id", js: "request_id", typ: u(undefined, "") },
+    ], "any"),
+    "WorktreeRefreshResult": o([
+        { json: "queued", js: "queued", typ: true },
+    ], "any"),
+    "WorktreeRefreshResultEvent": o([
+        { json: "event", js: "event", typ: r("WorktreeRefreshResultEventEvent") },
+        { json: "request_id", js: "request_id", typ: u(undefined, "") },
+        { json: "success", js: "success", typ: true },
+    ], "any"),
+    "WorktreeRepository": o([
+        { json: "integration_branch", js: "integration_branch", typ: u(undefined, "") },
+        { json: "integration_source", js: "integration_source", typ: u(undefined, "") },
+        { json: "main_repo", js: "main_repo", typ: "" },
+    ], "any"),
+    "WorktreeStateChangedEvent": o([
+        { json: "event", js: "event", typ: r("WorktreeStateChangedEventEvent") },
+        { json: "worktrees", js: "worktrees", typ: a(r("WorktreeElement")) },
+    ], "any"),
+    "WorktreeSweepEntry": o([
+        { json: "action", js: "action", typ: "" },
+        { json: "at", js: "at", typ: "" },
+        { json: "branch", js: "branch", typ: u(undefined, "") },
+        { json: "id", js: "id", typ: "" },
+        { json: "main_repo", js: "main_repo", typ: "" },
+        { json: "path", js: "path", typ: "" },
+        { json: "reason", js: "reason", typ: u(undefined, "") },
+    ], "any"),
+    "WorktreeSweepLogMessage": o([
+        { json: "cmd", js: "cmd", typ: r("WorktreeSweepLogMessageCmd") },
+        { json: "limit", js: "limit", typ: u(undefined, 0) },
+        { json: "main_repo", js: "main_repo", typ: u(undefined, "") },
+        { json: "request_id", js: "request_id", typ: u(undefined, "") },
+    ], "any"),
+    "WorktreeSweepLogResult": o([
+        { json: "entries", js: "entries", typ: a(r("SweepEntry")) },
+        { json: "omitted", js: "omitted", typ: 0 },
+    ], "any"),
+    "WorktreeSweepLogResultEvent": o([
+        { json: "event", js: "event", typ: r("WorktreeSweepLogResultEventEvent") },
+        { json: "request_id", js: "request_id", typ: u(undefined, "") },
+        { json: "success", js: "success", typ: true },
+        { json: "worktree_sweep_log_result", js: "worktree_sweep_log_result", typ: r("WorktreeSweepLogResultObject") },
+    ], "any"),
+    "WorktreeSweptEvent": o([
+        { json: "event", js: "event", typ: r("WorktreeSweptEventEvent") },
+        { json: "sweep_entry", js: "sweep_entry", typ: r("SweepEntry") },
     ], "any"),
     "WorktreesUpdatedMessage": o([
         { json: "event", js: "event", typ: r("WorktreesUpdatedMessageEvent") },
@@ -21320,7 +21862,7 @@ const typeMap: any = {
     "DelegationOperationMessageEvent": [
         "delegation_operation",
     ],
-    "GitOperationKind": [
+    "DeleteWorktreeMessageCmd": [
         "delete_worktree",
     ],
     "DeleteWorktreeResultMessageEvent": [
@@ -21526,6 +22068,11 @@ const typeMap: any = {
     ],
     "GitHubHostsUpdatedMessageEvent": [
         "github_hosts_updated",
+    ],
+    "GitOperationKind": [
+        "delete_worktree",
+        "refresh_repository",
+        "refresh_worktree",
     ],
     "GitOperationStatus": [
         "failed",
@@ -22340,6 +22887,36 @@ const typeMap: any = {
     ],
     "WorktreeDeletedEventEvent": [
         "worktree_deleted",
+    ],
+    "WorktreeKeepMessageCmd": [
+        "worktree_keep",
+    ],
+    "WorktreeKeepResultEventEvent": [
+        "worktree_keep_result",
+    ],
+    "WorktreeListMessageCmd": [
+        "worktree_list",
+    ],
+    "WorktreeListResultEventEvent": [
+        "worktree_list_result",
+    ],
+    "WorktreeRefreshMessageCmd": [
+        "worktree_refresh",
+    ],
+    "WorktreeRefreshResultEventEvent": [
+        "worktree_refresh_result",
+    ],
+    "WorktreeStateChangedEventEvent": [
+        "worktree_state_changed",
+    ],
+    "WorktreeSweepLogMessageCmd": [
+        "worktree_sweep_log",
+    ],
+    "WorktreeSweepLogResultEventEvent": [
+        "worktree_sweep_log_result",
+    ],
+    "WorktreeSweptEventEvent": [
+        "worktree_swept",
     ],
     "WorktreesUpdatedMessageEvent": [
         "worktrees_updated",

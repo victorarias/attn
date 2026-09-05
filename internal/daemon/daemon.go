@@ -2747,6 +2747,14 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 		d.handleCreateWorktree(conn, msg.(*protocol.CreateWorktreeMessage))
 	case protocol.CmdDeleteWorktree: // wire: delete_worktree
 		d.handleDeleteWorktree(conn, msg.(*protocol.DeleteWorktreeMessage))
+	case protocol.CmdWorktreeList: // wire: worktree_list
+		d.handleWorktreeList(conn, msg.(*protocol.WorktreeListMessage))
+	case protocol.CmdWorktreeKeep: // wire: worktree_keep
+		d.handleWorktreeKeep(conn, msg.(*protocol.WorktreeKeepMessage))
+	case protocol.CmdWorktreeSweepLog: // wire: worktree_sweep_log
+		d.handleWorktreeSweepLog(conn, msg.(*protocol.WorktreeSweepLogMessage))
+	case protocol.CmdWorktreeRefresh: // wire: worktree_refresh
+		d.handleWorktreeRefresh(conn, msg.(*protocol.WorktreeRefreshMessage))
 	default:
 		d.sendError(conn, "unknown command")
 	}
