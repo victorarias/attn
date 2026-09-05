@@ -118,7 +118,7 @@ export default function(pi) {
     const answer = await availableModels(executable, env, { cwd: dir });
     expect(answer.providers).toEqual([{
       provider: "native-extension", ready: true,
-      models: [{ id: "judge", name: "Extension Judge", contextWindow: 500000 }],
+      models: [{ id: "judge", name: "Extension Judge", contextWindow: 500000, effortSupport: "unsupported", effortLevels: [] }],
     }]);
     expect(JSON.stringify(answer)).not.toContain("must-not-leave");
     const unauthenticated = await availableModels(executable, { ...env, PI_DISCOVERY_TEST_KEY: undefined }, { cwd: dir });

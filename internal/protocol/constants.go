@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-const ProtocolVersion = "284"
+const ProtocolVersion = "285"
 
 const (
 	ErrorCodeConflict             = "conflict"
@@ -51,6 +51,10 @@ const (
 	CmdClientHello                           = "client_hello"
 	CmdRegister                              = "register"
 	CmdDelegate                              = "delegate"
+	CmdDelegationPreferencesGet              = "delegation_preferences_get"
+	CmdDelegationPreferencesSave             = "delegation_preferences_save"
+	CmdDelegationModels                      = "delegation_models"
+	CmdDelegationRoles                       = "delegation_roles"
 	CmdDelegateStatus                        = "delegate_status"
 	CmdSetTicketStatus                       = "set_ticket_status"
 	CmdTicketInbox                           = "ticket_inbox"
@@ -619,6 +623,34 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 
 	case CmdAutomationCleanup:
 		var msg AutomationCleanupMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdDelegationPreferencesGet:
+		var msg DelegationPreferencesGetMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdDelegationPreferencesSave:
+		var msg DelegationPreferencesSaveMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdDelegationModels:
+		var msg DelegationModelsMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdDelegationRoles:
+		var msg DelegationRolesMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, err
 		}
@@ -2357,3 +2389,9 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 		return "", nil, errors.New("unknown command: " + peek.Cmd)
 	}
 }
+
+const (
+	EventDelegationPreferencesResult  = "delegation_preferences_result"
+	EventDelegationPreferencesChanged = "delegation_preferences_changed"
+	EventDelegationModelsResult       = "delegation_models_result"
+)

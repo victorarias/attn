@@ -8,8 +8,9 @@ A subagent is always a native runtime subagent, including in phrases such as
 
 Native subagents report to the calling agent. Attn delegation creates a visible,
 full interactive agent session for the user: an agent they can inspect, converse
-with, and steer directly. An explicit user request selects attn delegation;
-otherwise, use native subagents.
+with, and steer directly. Use it when the user requests it or your assigned
+task or role authorizes it. Use native subagents for internal subtasks.
+Configured preferences never grant delegation authority.
 
 Interpret the requested object first:
 
@@ -74,17 +75,54 @@ dispatch before any worktree or agent is created, naming who holds it. When the
 seed is a plot, `attn seed ready` in the delegate lists that plot's ready children.
 `--name`, placement and worktree flags behave as usual.
 
-## Agent Selection
+## Choose a role and model
 
-The source agent is used by default; `--agent` selects another supported one.
-Plugin agents work only when they declare delegated initial-prompt support.
-Copilot delegation is currently unsupported.
+After deciding to delegate, read the current preferences in one call:
 
-`--model` is required and pins the delegated agent's model for that delegation
-only. `--effort` takes the agent's native levels (claude: low, medium, high,
-xhigh, max; codex: minimal, low, medium, high, xhigh) and defaults to medium.
-Agents without a native effort mechanism reject an explicit `--effort`; the
-default is not applied to them.
+    attn delegate roles
+
+The response contains every active role, its instructions and stopping point,
+all model choices and their conditions, and the unmatched-work fallback. It
+includes the configuration revision. `--json` provides the same data as JSON.
+There is no separate role-detail lookup.
+
+If the response is nonempty and other instructions define another delegation
+router, role catalog, or model-selection policy, both systems are active. Stop
+before delegating and tell the user about the conflict. Recommend disabling attn
+preferences in Settings > Delegation or removing the other instructions.
+
+Choose the role that fits the task and an alternative whose condition fits,
+or its default choice. Roles describe the work; choices set the harness,
+provider, model, and effort. Keep the task's scope and approval boundaries.
+If no role fits, use the configured fallback. If the request needs missing
+configuration, direct the user to Settings > Delegation. An empty response
+leaves existing custom routing and direct delegation available.
+
+    attn delegate --brief-file "$brief_file" --role <role-id> --preferences-revision <revision>
+    attn delegate --brief-file "$brief_file" --role <role-id> --choice <choice-id> --preferences-revision <revision>
+    attn delegate --brief-file "$brief_file" --fallback --preferences-revision <revision>
+
+Explicit requests override that delegation only. An effort-only request keeps
+the selected model and role: “build this, high effort” adds `--effort high`.
+A model change keeps role instructions but clears inherited effort unless the
+request also names effort. For “build this, Sol high”, resolve Sol to an exact
+model in the chosen harness and pass `--model <id> --effort high`. Ask if the
+model or harness is ambiguous. Changing `--agent` clears inherited model,
+provider, and effort. `--provider` selects a plugin provider. Use `--model default`
+or `--effort default` to use that harness default explicitly.
+
+Never silently replace an unavailable choice or save a request override as a
+preference. A stale revision is an error; reread roles and reconsider before
+retrying. The launched agent receives the brief and selected role instructions,
+not the routing catalog.
+
+For direct delegation, `--agent` selects a harness (otherwise the source
+harness is used), and `--model` is required. Plugin harnesses must support an
+initial prompt; exact models use their native identifiers, including
+`provider/model` where applicable. Direct delegation keeps its existing default
+of medium effort on harnesses that support it. Configured choices with blank
+model or effort use the harness default. Capabilities and available models vary
+by harness and account; do not assume a universal list of effort levels.
 
 ## Placement
 

@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "id": "delegation-empty",
+  "description": "No configured roles, without exposing feature state.",
+  "recipient": "delegation-preferences",
+  "event": "empty",
+  "values": {}
+}

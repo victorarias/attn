@@ -484,25 +484,32 @@ func (c *Client) ForgetSessionPullRequest(id, url string) error {
 }
 
 type DelegateOptions struct {
-	RequestID          string
-	TicketID           string
-	Confirm            bool
-	Agent              string
-	Model              string
-	Effort             string
-	Label              string
-	Yolo               bool
-	Placement          string
-	Plot               string
-	WorkspaceID        string
-	CWD                string
-	WorktreeRepo       string
-	Worktree           string
-	WorktreePath       string
-	StartingFrom       string
-	NoWorktree         bool
-	AllowWorktreeReuse bool
-	Handover           *protocol.SeedHandoverRequest
+	Role                string
+	Choice              string
+	Fallback            bool
+	PreferencesRevision *int
+	Provider            *string
+	ModelOverride       *string
+	EffortOverride      *string
+	RequestID           string
+	TicketID            string
+	Confirm             bool
+	Agent               string
+	Model               string
+	Effort              string
+	Label               string
+	Yolo                bool
+	Placement           string
+	Plot                string
+	WorkspaceID         string
+	CWD                 string
+	WorktreeRepo        string
+	Worktree            string
+	WorktreePath        string
+	StartingFrom        string
+	NoWorktree          bool
+	AllowWorktreeReuse  bool
+	Handover            *protocol.SeedHandoverRequest
 }
 
 func (c *Client) StartDelegation(sourceSessionID, brief string, opts DelegateOptions) (*protocol.DelegationOperation, error) {
@@ -531,6 +538,23 @@ func (c *Client) StartDelegation(sourceSessionID, brief string, opts DelegateOpt
 	}
 	if value := strings.TrimSpace(opts.Effort); value != "" {
 		msg.Effort = protocol.Ptr(value)
+	}
+	if opts.Role != "" {
+		msg.Role = protocol.Ptr(opts.Role)
+	}
+	if opts.Choice != "" {
+		msg.Choice = protocol.Ptr(opts.Choice)
+	}
+	if opts.Fallback {
+		msg.Fallback = protocol.Ptr(true)
+	}
+	msg.PreferencesRevision = opts.PreferencesRevision
+	msg.Provider = opts.Provider
+	if opts.ModelOverride != nil {
+		msg.Model = opts.ModelOverride
+	}
+	if opts.EffortOverride != nil {
+		msg.Effort = opts.EffortOverride
 	}
 	if value := strings.TrimSpace(opts.Label); value != "" {
 		msg.Label = protocol.Ptr(value)

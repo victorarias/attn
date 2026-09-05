@@ -972,6 +972,12 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		d.handleClientHello(client, msg.(*protocol.ClientHelloMessage))
 	case protocol.CmdDelegate: // wire: delegate
 		go d.handleDelegateWS(client, msg.(*protocol.DelegateMessage))
+	case protocol.CmdDelegationModels: // wire: delegation_models
+		go d.handleDelegationModels(client, msg.(*protocol.DelegationModelsMessage))
+	case protocol.CmdDelegationPreferencesGet: // wire: delegation_preferences_get
+		d.handleDelegationPreferencesGet(client, msg.(*protocol.DelegationPreferencesGetMessage))
+	case protocol.CmdDelegationPreferencesSave: // wire: delegation_preferences_save
+		d.handleDelegationPreferencesSave(client, msg.(*protocol.DelegationPreferencesSaveMessage))
 	case protocol.CmdDelegateStatus: // wire: delegate_status
 		go d.handleDelegateStatusWS(client, msg.(*protocol.DelegateStatusMessage))
 	case protocol.CmdWorkspaceContextCheckout: // wire: workspace_context_checkout

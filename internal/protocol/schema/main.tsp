@@ -871,6 +871,123 @@ model PullRequestForgetMessage {
   url: string;
 }
 
+model DelegationSelection {
+  harness: string;
+  provider: string;
+  `model`: string; // Empty selects the harness default; empty harness is unconfigured.
+  effort: string; // Empty preserves the harness default.
+}
+
+model DelegationChoice {
+  id: string;
+  name: string;
+  when: string;
+  selection: DelegationSelection;
+}
+
+model DelegationRole {
+  id: string;
+  name: string;
+  icon: string;
+  enabled: boolean;
+  description: string;
+  instructions: string;
+  stopping_point: string;
+  default_choice_id: string;
+  choices: DelegationChoice[];
+}
+
+model DelegationFallback {
+  selection: DelegationSelection;
+  instructions: string;
+}
+
+model DelegationPreferences {
+  enabled: boolean;
+  revision: safeint;
+  roles: DelegationRole[];
+  fallback: DelegationFallback;
+}
+
+enum ModelCapabilitySupport {
+  supported,
+  unsupported,
+  capability_unknown: "unknown",
+}
+
+model DelegationModel {
+  harness: string;
+  provider: string;
+  id: string;
+  name: string;
+  description: string;
+  effort_support: ModelCapabilitySupport;
+  effort_levels: string[];
+  access: ModelCapabilitySupport;
+  detail: string;
+}
+
+model DelegationHarness {
+  id: string;
+  name: string;
+  available: boolean;
+  model_pin: boolean;
+  effort_pin: boolean;
+  discovery: boolean;
+}
+
+model DelegationPreferencesGetMessage {
+  cmd: "delegation_preferences_get";
+  request_id: string;
+}
+
+model DelegationPreferencesSaveMessage {
+  cmd: "delegation_preferences_save";
+  request_id: string;
+  preferences: DelegationPreferences;
+}
+
+model DelegationPreferencesResultMessage {
+  event: "delegation_preferences_result";
+  request_id: string;
+  success: boolean;
+  error?: string;
+  preferences?: DelegationPreferences;
+  templates?: DelegationRole[];
+  harnesses?: DelegationHarness[];
+}
+
+model DelegationPreferencesChangedMessage {
+  event: "delegation_preferences_changed";
+  revision: safeint;
+}
+
+model DelegationModelsMessage {
+  cmd: "delegation_models";
+  request_id: string;
+  harness: string;
+}
+
+model DelegationModelsResultMessage {
+  event: "delegation_models_result";
+  request_id: string;
+  success: boolean;
+  error?: string;
+  models: DelegationModel[];
+  detail: string;
+}
+
+model DelegationRolesMessage {
+  cmd: "delegation_roles";
+}
+
+model DelegationRolesResult {
+  revision: safeint;
+  roles: DelegationRole[];
+  fallback?: DelegationFallback;
+  guidance: string;
+}
+
 model DelegateMessage {
   cmd: "delegate";
   request_id: string; // Stable caller-supplied idempotency key for one logical delegation
@@ -892,6 +1009,11 @@ model DelegateMessage {
   // A guarded transfer of one existing seed. The expected fields are the
   // caller's read receipt; a changed seed is refreshed, never taken over.
   handover?: SeedHandoverRequest;
+  role?: string;
+  choice?: string;
+  fallback?: boolean;
+  preferences_revision?: safeint;
+  provider?: string;
 }
 
 model SeedHandoverRequest {
@@ -5959,6 +6081,7 @@ model Response {
   data?: string;
   delegate_result?: DelegateResult;
   delegation_operation?: DelegationOperation;
+  delegation_roles?: DelegationRolesResult;
   workspace_context_result?: WorkspaceContextResult;
   workspace_context_maintenance_result?: WorkspaceContextMaintenanceResult;
   workspace_contexts?: WorkspaceContext[];
@@ -7020,6 +7143,9 @@ alias DaemonEvent =
   | DeleteWorktreeResultMessage
   | GitOperationStartedMessage
   | GitOperationFinishedMessage
+  | DelegationPreferencesResultMessage
+  | DelegationPreferencesChangedMessage
+  | DelegationModelsResultMessage
   | SettingsUpdatedMessage
   | GitHubHostsUpdatedMessage
   | PluginsUpdatedMessage

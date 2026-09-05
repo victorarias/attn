@@ -55,6 +55,7 @@
 - Artifact: owned file under `<Notebook>/seeds/<seed-id>/`, retained across session/workspace/seed lifecycles.
 - Linked artifact: reference to an external file, Notebook document, or URL.
 - Note: seed log entry. Handoff: note for the next tender. Watch: interest in change notifications.
+- Delegation preferences: optional, daemon-local choices for already-authorized delegations. A role describes the work, instructions, and stopping point; its choices select a harness, provider, model, and effort. An alternative has a condition, and a separate fallback covers unmatched work. Preferences do not grant delegation authority.
 - Dispatch-at-plot: delegation bound to an existing seed as its tender.
 - Ticket: archived pre-Garden work item; user tickets and their history remain permanently.
 - Crew member: durable named identity with a charter. Day: its current session.

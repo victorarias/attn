@@ -37,15 +37,16 @@ can inspect, converse with, and steer directly.
 
 Choose your role before reading anything about delegation:
 
-- **Chief of staff**, if your system prompt says so: it already carries your
-  full delegation, garden, and Notebook guidance.
+- **Chief of staff**, if your system prompt says so: follow its delegation authority and read the delegation reference
+  for current mechanics and configured roles.
 - **A delegated leaf**, if your initial task opens with a line identifying you
   as a delegated attn session: do the work here. An explicit request from the
   user steering *this* session selects attn delegation; otherwise, use native
   subagents. See
   [references/delegated-agent.md](references/delegated-agent.md).
-- **Otherwise, an ordinary session:** an explicit user request selects attn
-  delegation; otherwise, use native subagents.
+- **Otherwise, an ordinary session:** use attn delegation when the user requests
+  it or your assigned task or role explicitly authorizes it. Use native subagents
+  for internal subtasks. Configured delegation roles do not grant this authority.
 
 A tracked task is still a leaf task. Every delegation binds a seed, so a bound
 seed says nothing about your role: it means your delegator and the chief are

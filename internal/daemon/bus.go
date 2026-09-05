@@ -100,7 +100,8 @@ const (
 
 	FactAutoModeDenied = "automode.denied"
 
-	FactAutoModeConfigChanged = "automode.config.changed"
+	FactDelegationPreferencesChanged = "delegation.preferences.changed"
+	FactAutoModeConfigChanged        = "automode.config.changed"
 
 	FactAutomationChanged  = "automation.changed"
 	FactWorkflowRunUpdated = "workflow.run.updated"
@@ -384,6 +385,10 @@ func buildWireProjections() []projection {
 		{
 			filter: bus.Filter{FactAutoModeDenied},
 			apply:  func(d *Daemon, _ bus.Event) { d.projectNotificationsUpdated() },
+		},
+		{
+			filter: bus.Filter{FactDelegationPreferencesChanged},
+			apply:  func(d *Daemon, _ bus.Event) { d.projectDelegationPreferencesChanged() },
 		},
 		{
 			filter: bus.Filter{FactAutoModeConfigChanged},

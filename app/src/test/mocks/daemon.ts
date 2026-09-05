@@ -85,6 +85,13 @@ export class MockDaemon {
     return response as T;
   }
 
+  createRequest<T>(method: string): (...args: unknown[]) => Promise<T> {
+    return async (...args: unknown[]) => {
+      this.recordCall(method, args);
+      return this.getResponse<T>(method, args);
+    };
+  }
+
   createFetchDiff(): (path: string, options?: { staged?: boolean; baseRef?: string }) => Promise<FileDiffResult> {
     return async (path: string, options?: { staged?: boolean; baseRef?: string }): Promise<FileDiffResult> => {
       this.recordCall('fetchDiff', [path, options]);

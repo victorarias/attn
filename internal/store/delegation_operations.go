@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/victorarias/attn/internal/delegationprefs"
 	"github.com/victorarias/attn/internal/protocol"
 )
 
@@ -19,14 +20,19 @@ var (
 // DelegationOperationRecord is the durable launch journal. RequestJSON lets a restart resume
 // the exact accepted request and reject a reused key whose inputs differ.
 type DelegationOperationRecord struct {
-	Operation      protocol.DelegationOperation
-	RequestJSON    string
-	WorktreeOwned  bool
-	WorktreeToken  string
-	ChiefSessionID string
+	Operation           protocol.DelegationOperation
+	ResolvedPreferences string
+	RequestJSON         string
+	WorktreeOwned       bool
+	WorktreeToken       string
+	ChiefSessionID      string
 }
 
 func (s *Store) ClaimDelegationOperation(requestID, operationID, sessionID, chiefSessionID, ticketID, requestJSON string, now time.Time) (*DelegationOperationRecord, bool, error) {
+	return s.ClaimDelegationOperationWithPreferences(requestID, operationID, sessionID, chiefSessionID, ticketID, requestJSON, "", now)
+}
+
+func (s *Store) ClaimDelegationOperationWithPreferences(requestID, operationID, sessionID, chiefSessionID, ticketID, requestJSON, resolvedPreferences string, now time.Time) (*DelegationOperationRecord, bool, error) {
 	if strings.HasPrefix(requestID, "op-") {
 		return nil, false, fmt.Errorf("request id uses reserved operation prefix op-")
 	}
@@ -35,12 +41,33 @@ func (s *Store) ClaimDelegationOperation(requestID, operationID, sessionID, chie
 	if s.db == nil {
 		return nil, false, errors.New("delegation idempotency requires a database")
 	}
+	if resolvedPreferences != "" {
+		if existing, err := getDelegationOperation(s.db, requestID); err == nil {
+			if existing.RequestJSON != requestJSON {
+				return nil, false, ErrDelegationRequestConflict
+			}
+			return existing, false, nil
+		} else if !errors.Is(err, sql.ErrNoRows) {
+			return nil, false, err
+		}
+		var resolved delegationprefs.Resolved
+		if err := json.Unmarshal([]byte(resolvedPreferences), &resolved); err != nil {
+			return nil, false, err
+		}
+		current, err := s.readDelegationPreferences(s.db)
+		if err != nil {
+			return nil, false, err
+		}
+		if !current.Enabled || current.Revision != resolved.Revision {
+			return nil, false, delegationprefs.ErrConflict
+		}
+	}
 	stamp := now.UTC().Format(sortableTimeFormat)
 	result, err := s.db.Exec(`INSERT INTO delegation_operations
-		(request_id, operation_id, request_json, state, progress, session_id, chief_session_id, ticket_id, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		(request_id, operation_id, request_json, state, progress, session_id, chief_session_id, ticket_id, resolved_preferences, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(request_id) DO NOTHING`, requestID, operationID, requestJSON,
-		string(protocol.DelegationOperationStateAccepted), "accepted by daemon", sessionID, chiefSessionID, ticketID, stamp, stamp)
+		string(protocol.DelegationOperationStateAccepted), "accepted by daemon", sessionID, chiefSessionID, ticketID, resolvedPreferences, stamp, stamp)
 	if err != nil {
 		if ticketID != "" && strings.Contains(err.Error(), "delegation_operations.ticket_id") {
 			return nil, false, fmt.Errorf("%w: %s", ErrTicketDelegationReserved, ticketID)
@@ -75,11 +102,11 @@ func getDelegationOperation(db *sql.DB, id string) (*DelegationOperationRecord, 
 	var state, workspaceID, ticketID, worktreePath, worktreeToken, chiefSessionID, resultJSON, errorText string
 	var worktreeOwned int
 	err := db.QueryRow(`SELECT request_id, operation_id, request_json, state, progress,
-		session_id, workspace_id, ticket_id, worktree_path, worktree_owned, worktree_token, chief_session_id, result_json, error, created_at, updated_at
+		session_id, workspace_id, ticket_id, worktree_path, worktree_owned, worktree_token, chief_session_id, result_json, error, resolved_preferences, created_at, updated_at
 		FROM delegation_operations WHERE request_id = ? OR operation_id = ?`, id, id).Scan(
 		&rec.Operation.RequestID, &rec.Operation.OperationID, &rec.RequestJSON, &state,
 		&rec.Operation.Progress, &rec.Operation.SessionID, &workspaceID, &ticketID,
-		&worktreePath, &worktreeOwned, &worktreeToken, &chiefSessionID, &resultJSON, &errorText, &rec.Operation.CreatedAt, &rec.Operation.UpdatedAt)
+		&worktreePath, &worktreeOwned, &worktreeToken, &chiefSessionID, &resultJSON, &errorText, &rec.ResolvedPreferences, &rec.Operation.CreatedAt, &rec.Operation.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}

@@ -9,7 +9,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/victorarias/attn/internal/delegationprefs"
 	"github.com/victorarias/attn/internal/protocol"
+	"github.com/victorarias/attn/internal/store"
 )
 
 func (d *Daemon) startDelegation(msg *protocol.DelegateMessage) (*protocol.DelegationOperation, error) {
@@ -26,11 +28,35 @@ func (d *Daemon) startDelegation(msg *protocol.DelegateMessage) (*protocol.Deleg
 	if err != nil {
 		return nil, fmt.Errorf("encode delegation request: %w", err)
 	}
+
+	if existing, lookupErr := d.store.GetDelegationOperation(requestID); lookupErr == nil {
+		if existing.RequestJSON != string(encoded) {
+			return nil, store.ErrDelegationRequestConflict
+		}
+		if existing.Operation.State == protocol.DelegationOperationStateAccepted || existing.Operation.State == protocol.DelegationOperationStatePreparing {
+			go d.runDelegationOperation(existing.Operation.OperationID)
+		}
+		return &existing.Operation, nil
+	} else if !errors.Is(lookupErr, sql.ErrNoRows) {
+		return nil, lookupErr
+	}
+	resolved, err := d.resolveDelegationPreferences(msg)
+	if err != nil {
+		return nil, err
+	}
+	resolvedJSON := ""
+	if resolved != nil {
+		raw, err := json.Marshal(resolved)
+		if err != nil {
+			return nil, err
+		}
+		resolvedJSON = string(raw)
+	}
 	chiefSessionID := ""
 	if currentChief := d.chiefOfStaffSessionID(); currentChief == strings.TrimSpace(msg.SourceSessionID) {
 		chiefSessionID = currentChief
 	}
-	record, claimed, err := d.store.ClaimDelegationOperation(requestID, "op-"+uuid.NewString(), uuid.NewString(), chiefSessionID, strings.TrimSpace(protocol.Deref(msg.TicketID)), string(encoded), time.Now())
+	record, claimed, err := d.store.ClaimDelegationOperationWithPreferences(requestID, "op-"+uuid.NewString(), uuid.NewString(), chiefSessionID, strings.TrimSpace(protocol.Deref(msg.TicketID)), string(encoded), resolvedJSON, time.Now())
 	if err != nil {
 		return nil, err
 	}
@@ -60,7 +86,14 @@ func (d *Daemon) runDelegationOperation(id string) {
 		d.finishDelegationFailure(id, fmt.Errorf("decode accepted delegation request: %w", err))
 		return
 	}
-	result, launchErr := d.delegateOperation(&msg, id, record.Operation.SessionID, protocol.Deref(record.Operation.WorktreePath), record.WorktreeOwned, record.WorktreeToken, record.ChiefSessionID)
+	var resolved *delegationprefs.Resolved
+	if record.ResolvedPreferences != "" {
+		if err := json.Unmarshal([]byte(record.ResolvedPreferences), &resolved); err != nil {
+			d.finishDelegationFailure(id, fmt.Errorf("decode resolved preferences: %w", err))
+			return
+		}
+	}
+	result, launchErr := d.delegateOperation(&msg, id, record.Operation.SessionID, protocol.Deref(record.Operation.WorktreePath), record.WorktreeOwned, record.WorktreeToken, record.ChiefSessionID, resolved)
 	if launchErr != nil {
 		d.finishDelegationFailure(id, launchErr)
 		return

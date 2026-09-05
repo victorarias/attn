@@ -107,6 +107,7 @@ export class PiDriver {
         resume: true,
         initial_prompt: true,
         model_pin: true,
+        model_discovery: true,
         effort_pin: true,
         state_reporting: true,
         message_delivery: true,
@@ -125,6 +126,20 @@ export class PiDriver {
     return this.modelQuery ??= this.queryModels(this.executable, this.env).finally(() => {
       this.modelQuery = undefined;
     });
+  }
+
+  async delegationModels(): Promise<{ models: unknown[]; detail: string }> {
+    const catalog = await this.models();
+    if (catalog.problem) throw new Error(catalog.problem);
+    return {
+      models: catalog.providers.flatMap(provider => provider.models.map(model => ({
+        harness: "pi", provider: provider.provider, id: model.id,
+        name: model.name ?? model.id, description: "",
+        effort_support: model.effortSupport ?? "unknown", effort_levels: model.effortLevels ?? [],
+        access: provider.ready ? "unknown" : "unsupported", detail: provider.detail ?? "",
+      }))),
+      detail: "Configured Pi models. Account access is checked by the provider when used.",
+    };
   }
 
   health(): { ok: boolean; message: string } {

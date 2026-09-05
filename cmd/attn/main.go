@@ -32,6 +32,7 @@ import (
 	"github.com/victorarias/attn/internal/pathutil"
 	"github.com/victorarias/attn/internal/present"
 	"github.com/victorarias/attn/internal/probetui"
+	"github.com/victorarias/attn/internal/prompts"
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/ptyworker"
 	"github.com/victorarias/attn/internal/workflowresult"
@@ -677,6 +678,23 @@ commands:
 }
 
 func runDelegate() {
+	if len(os.Args) >= 3 && os.Args[2] == "roles" {
+		if len(os.Args) > 4 || (len(os.Args) == 4 && os.Args[3] != "--json") {
+			fmt.Fprintln(os.Stderr, "usage: attn delegate roles [--json]")
+			os.Exit(2)
+		}
+		result, err := client.New("").DelegationRoles()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "delegate roles: %v\n", err)
+			os.Exit(1)
+		}
+		if len(os.Args) == 4 {
+			printJSON(result)
+		} else {
+			fmt.Println(prompts.DelegationRolesText(*result))
+		}
+		return
+	}
 	if len(os.Args) == 3 && (os.Args[2] == "-h" || os.Args[2] == "--help") {
 		writeDelegateHelp(os.Stdout)
 		return
@@ -750,7 +768,7 @@ func waitDelegationCLI(
 }
 
 func writeDelegateHelp(w io.Writer) {
-	fmt.Fprint(w, `usage: attn delegate (--brief <text> | --brief-file <path>) --model <name> [options]
+	fmt.Fprint(w, `usage: attn delegate (--brief <text> | --brief-file <path>) [--model <name> | --role <id> | --fallback] [options]
 
 A delegation binds a seed: the brief is its body, the delegate its tender, and
 the seed is where the delegate reports. Tickets retired.
@@ -782,8 +800,12 @@ repository placement (where the agent runs):
 session options:
 	--request-id <id>          stable retry key (generated and printed when omitted; op- is reserved)
   --agent <name>             configured prompt-capable built-in or plugin agent
-  --model <name>             required; pin the agent's model (alias or full id,
-                             e.g. "gpt-5.6-sol" or "opus")
+  --model <name>             pin the model; required for a manual launch
+  --role <id>                use a configured role and its default choice
+  --choice <id>              use an alternative within --role
+  --fallback                 use the configured unmatched-work fallback
+  --preferences-revision <n> require the revision returned by delegate roles
+  --provider <id>            provider for a plugin harness model
   --effort <level>           pin the agent's reasoning effort (claude: low,
                              medium, high, xhigh, max; codex: minimal, low,
                              medium, high, xhigh); defaults to medium for agents
@@ -804,6 +826,9 @@ session options:
                              seed's tender, and --all steps back out to the
                              whole garden.
 	--allow-worktree-reuse     explicitly allow another active session to share the worktree
+
+discovery:
+  attn delegate roles [--json]  complete active roles, choices, and fallback
 
 inspection:
   attn delegate status <request-or-operation-id>
@@ -1699,6 +1724,11 @@ func parseDelegateArgs(args []string) (delegateCLIArgs, error) {
 	ticketID := fs.String("ticket", "", "retired: delegations bind a seed, not a ticket")
 	confirm := fs.Bool("confirm", false, "retired: went with --ticket")
 	agentName := fs.String("agent", "", "target agent (defaults to the source session agent)")
+	role := fs.String("role", "", "configured delegation role")
+	choice := fs.String("choice", "", "choice within the role")
+	fallback := fs.Bool("fallback", false, "configured unmatched-work fallback")
+	revision := fs.Int("preferences-revision", 0, "expected configuration revision")
+	provider := fs.String("provider", "", "plugin model provider")
 	model := fs.String("model", "", "pin the delegated agent's model (alias or full id)")
 	effort := fs.String("effort", "", "pin the delegated agent's reasoning effort")
 	name := fs.String("name", "", "name for the agent and, when a new workspace is created, the workspace")
@@ -1722,8 +1752,49 @@ func parseDelegateArgs(args []string) (delegateCLIArgs, error) {
 		return delegateCLIArgs{}, fmt.Errorf("unexpected arguments: %v", fs.Args())
 	}
 	modelPin := strings.TrimSpace(*model)
-	if modelPin == "" {
+	if modelPin == "" && strings.TrimSpace(*role) == "" && !*fallback {
 		return delegateCLIArgs{}, errors.New("--model is required (for example, --model gpt-5.6-sol or --model opus); --effort defaults to medium when supported")
+	}
+
+	present := map[string]bool{}
+	fs.Visit(func(f *flag.Flag) { present[f.Name] = true })
+	var expectedRevision *int
+	if present["preferences-revision"] {
+		if *revision < 0 {
+			return delegateCLIArgs{}, errors.New("--preferences-revision must not be negative")
+		}
+		expectedRevision = revision
+	}
+	if *fallback && *role != "" {
+		return delegateCLIArgs{}, errors.New("--role and --fallback cannot be combined")
+	}
+	if *choice != "" && *role == "" {
+		return delegateCLIArgs{}, errors.New("--choice requires --role")
+	}
+	if expectedRevision != nil && *role == "" && !*fallback {
+		return delegateCLIArgs{}, errors.New("--preferences-revision requires --role or --fallback")
+	}
+	var modelOverride, effortOverride, providerOverride *string
+	if present["model"] {
+		value := strings.TrimSpace(*model)
+		if value == "default" {
+			value = ""
+		}
+		modelOverride = &value
+	}
+	if present["effort"] {
+		value := strings.TrimSpace(*effort)
+		if value == "default" {
+			value = ""
+		}
+		effortOverride = &value
+	}
+	if present["provider"] && *role == "" && !*fallback {
+		return delegateCLIArgs{}, errors.New("--provider requires --role or --fallback; direct plugin delegation uses provider/model")
+	}
+	if present["provider"] {
+		value := strings.TrimSpace(*provider)
+		providerOverride = &value
 	}
 	source := strings.TrimSpace(*sourceSessionID)
 	if source == "" {
@@ -1783,6 +1854,7 @@ func parseDelegateArgs(args []string) (delegateCLIArgs, error) {
 		sourceSessionID: source,
 		brief:           brief,
 		options: client.DelegateOptions{
+			Role: strings.TrimSpace(*role), Choice: strings.TrimSpace(*choice), Fallback: *fallback, PreferencesRevision: expectedRevision, Provider: providerOverride, ModelOverride: modelOverride, EffortOverride: effortOverride,
 			RequestID:          stableRequestID,
 			Agent:              strings.TrimSpace(*agentName),
 			Model:              modelPin,
