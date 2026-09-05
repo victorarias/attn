@@ -164,6 +164,10 @@ func TestAFailedResumeReturnsTheTenderToTheLedger(t *testing.T) {
 	d.persistResumeSessionID(leafID, "codex-conv-doomed")
 
 	d.closeSession(leafID, store.SessionClose{By: "sess-dispatcher", Reason: "brief delivered"})
+	closed := d.store.SessionLedgerEntry(leafID)
+	if closed == nil || protocol.Deref(closed.ClosedAt) == "" {
+		t.Fatalf("ledger entry after the close = %+v, want it closed", closed)
+	}
 	backend.spawnErr = errors.New("no pty available")
 
 	if _, err := d.resumeSeed(seedID); err == nil {
@@ -172,15 +176,8 @@ func TestAFailedResumeReturnsTheTenderToTheLedger(t *testing.T) {
 	if session := d.store.Get(leafID); session != nil {
 		t.Fatalf("store.Get after a failed resume = %+v, want no live session", session)
 	}
-	entry := d.store.SessionLedgerEntry(leafID)
-	if entry == nil || protocol.Deref(entry.ClosedAt) == "" {
-		t.Fatalf("ledger entry after a failed resume = %+v, want the row still closed", entry)
-	}
-	if by := protocol.Deref(entry.ClosedBy); by != "sess-dispatcher" {
-		t.Errorf("closed_by = %q, want the original closer sess-dispatcher", by)
-	}
-	if reason := protocol.Deref(entry.CloseReason); reason != "brief delivered" {
-		t.Errorf("close_reason = %q, want the original reason", reason)
+	if entry := d.store.SessionLedgerEntry(leafID); !reflect.DeepEqual(entry, closed) {
+		t.Errorf("a failed resume rewrote the ledger row:\n got=%+v\nwant=%+v", entry, closed)
 	}
 }
 

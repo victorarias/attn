@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -107,7 +108,7 @@ func TestClosingRefusesTwiceAndReopenBringsTheRowBack(t *testing.T) {
 		t.Errorf("AddChecked over a closed row = %v, want ErrSessionClosed", err)
 	}
 
-	reopened, err := s.ReopenSession("s1")
+	_, reopened, err := s.ReopenSession("s1")
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
@@ -306,6 +307,44 @@ func TestALateWriteCannotRewriteAClosedSession(t *testing.T) {
 	}
 }
 
+func TestALiftedCloseGoesBackExactly(t *testing.T) {
+	backings := map[string]func(*testing.T) *Store{
+		"sqlite": newSessionOwnedTableStore,
+		"maps":   func(*testing.T) *Store { return newMapBackedStore() },
+	}
+	for name, newStore := range backings {
+		t.Run(name, func(t *testing.T) {
+			s := newStore(t)
+			addSessionInDirectory(t, s, "s1", "/tmp/one")
+			closeAt(t, s, "s1", SessionClose{By: "sess-dispatcher", Reason: "brief delivered"},
+				time.Date(2026, 3, 4, 5, 6, 7, 89, time.UTC))
+			closed := s.SessionLedgerEntry("s1")
+			if closed == nil || protocol.Deref(closed.ClosedAt) == "" {
+				t.Fatalf("ledger entry after the close = %+v, want it closed", closed)
+			}
+
+			lifted, reopened, err := s.ReopenSession("s1")
+			if err != nil || !reopened {
+				t.Fatalf("ReopenSession = %v, %v, want the close lifted", reopened, err)
+			}
+			if s.Get("s1") == nil {
+				t.Fatal("Get(s1) = nil after reopening, want the session live again")
+			}
+
+			restored, err := s.RestoreSessionClose("s1", lifted)
+			if err != nil || !restored {
+				t.Fatalf("RestoreSessionClose = %v, %v, want the close back", restored, err)
+			}
+			if session := s.Get("s1"); session != nil {
+				t.Errorf("Get(s1) = %+v after restoring the close, want it hidden again", session)
+			}
+			if got := s.SessionLedgerEntry("s1"); !reflect.DeepEqual(got, closed) {
+				t.Errorf("ledger entry after reopen and restore:\n got=%+v\nwant=%+v", got, closed)
+			}
+		})
+	}
+}
+
 func TestClosingDropsTheCostObservationsAndKeepsTheTotals(t *testing.T) {
 	backings := map[string]func(*testing.T) *Store{
 		"sqlite": newSessionOwnedTableStore,
@@ -388,7 +427,7 @@ func TestNothingAfterAReopenCanInflateAFinalizedTotal(t *testing.T) {
 				t.Fatalf("SessionCost at the close: %v", err)
 			}
 
-			if reopened, err := s.ReopenSession("s1"); err != nil || !reopened {
+			if _, reopened, err := s.ReopenSession("s1"); err != nil || !reopened {
 				t.Fatalf("reopen = %v, %v", reopened, err)
 			}
 

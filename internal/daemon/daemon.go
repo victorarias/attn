@@ -2020,13 +2020,27 @@ func (d *Daemon) terminateSessionAsync(sessionID string, sig syscall.Signal, tea
 // closeSession keeps the row and its session-owned tables; the store stops
 // answering List and Get for it.
 func (d *Daemon) closeSession(sessionID string, closed store.SessionClose) {
+	d.recordSessionClose(sessionID, func() (bool, error) {
+		return d.store.CloseSession(sessionID, closed, time.Now())
+	})
+}
+
+// A rollback puts back the close it lifted, closed_at included: a resume that
+// failed must leave the historical record exactly as it found it.
+func (d *Daemon) restoreSessionClose(sessionID string, closed store.SessionCloseRecord) {
+	d.recordSessionClose(sessionID, func() (bool, error) {
+		return d.store.RestoreSessionClose(sessionID, closed)
+	})
+}
+
+func (d *Daemon) recordSessionClose(sessionID string, commit func() (bool, error)) {
 	if session := d.store.Get(sessionID); session != nil {
 		if _, err := d.captureGardenSessionSnapshot(session); err != nil {
 			d.logf("garden: preserving execution %s before closing it: %v", sessionID, err)
 		}
 	}
 	d.forgetSessionRuntime(sessionID)
-	recorded, err := d.store.CloseSession(sessionID, closed, time.Now())
+	recorded, err := commit()
 	if err != nil {
 		d.logf("close session %s: %v", sessionID, err)
 	}

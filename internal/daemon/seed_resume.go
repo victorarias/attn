@@ -97,15 +97,14 @@ func (d *Daemon) resumeSeedFromReview(
 	d.store.ClearSessionIntentionalClose(sessionID)
 
 	rollback := d.newDelegationRollback()
-	priorClose := d.sessionCloseAttribution(sessionID)
 	// Resume runs the same conversation under its own id, so the ledger close has to
 	// be lifted first: the store refuses a spawn that would re-register a closed row.
-	reopened, err := d.store.ReopenSession(sessionID)
+	lifted, reopened, err := d.store.ReopenSession(sessionID)
 	if err != nil {
 		return nil, err
 	}
 	if reopened {
-		rollback.onSessionReopened(sessionID, priorClose)
+		rollback.onSessionReopened(sessionID, lifted)
 	}
 
 	// Unregister on rollback only if this call created the workspace — a re-register is
@@ -281,22 +280,11 @@ func (d *Daemon) handleSeedResume(client *wsClient, msg *protocol.SeedResumeMess
 }
 
 // A resumed session predates this call, so a rollback returns it to the ledger
-// under its original closer instead of reaping the row and its history with it.
-func (r *delegationRollback) onSessionReopened(sessionID string, closed store.SessionClose) {
+// as it was instead of reaping the row and its history with it.
+func (r *delegationRollback) onSessionReopened(sessionID string, closed store.SessionCloseRecord) {
 	r.undo = append(r.undo, func() error {
 		r.d.terminateSession(sessionID, syscall.SIGTERM)
-		r.d.closeSession(sessionID, closed)
+		r.d.restoreSessionClose(sessionID, closed)
 		return nil
 	})
-}
-
-func (d *Daemon) sessionCloseAttribution(sessionID string) store.SessionClose {
-	entry := d.store.SessionLedgerEntry(sessionID)
-	if entry == nil {
-		return store.SessionClose{}
-	}
-	return store.SessionClose{
-		By:     protocol.Deref(entry.ClosedBy),
-		Reason: protocol.Deref(entry.CloseReason),
-	}
 }

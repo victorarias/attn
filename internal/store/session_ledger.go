@@ -149,29 +149,79 @@ func finalizeSessionCostTx(tx *sql.Tx, id string) error {
 	return err
 }
 
-// ReopenSession returns false when the id names no closed session.
-func (s *Store) ReopenSession(id string) (bool, error) {
+// SessionCloseRecord is a close as the ledger holds it, timestamp included, so a
+// lifted close can go back exactly as it was.
+type SessionCloseRecord struct {
+	At     string
+	By     string
+	Reason string
+}
+
+// ReopenSession hands back the close it lifted; ok is false when the id names no
+// closed session. Pass the record to RestoreSessionClose to undo the reopen.
+func (s *Store) ReopenSession(id string) (SessionCloseRecord, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	if s.db == nil {
 		mark, closed := s.sessionCloses[id]
 		if !closed {
-			return false, nil
+			return SessionCloseRecord{}, false, nil
 		}
 		s.sessions[id] = mark.session
 		delete(s.sessionCloses, id)
+		return SessionCloseRecord{At: mark.At, By: mark.By, Reason: mark.Reason}, true, nil
+	}
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return SessionCloseRecord{}, false, fmt.Errorf("reopen session %s: %w", id, err)
+	}
+	defer tx.Rollback()
+
+	var lifted SessionCloseRecord
+	err = tx.QueryRow("SELECT closed_at, closed_by, close_reason FROM sessions WHERE id = ? AND closed_at <> ''", id).
+		Scan(&lifted.At, &lifted.By, &lifted.Reason)
+	if errors.Is(err, sql.ErrNoRows) {
+		return SessionCloseRecord{}, false, nil
+	}
+	if err != nil {
+		return SessionCloseRecord{}, false, fmt.Errorf("reopen session %s: %w", id, err)
+	}
+	if _, err := tx.Exec(`UPDATE sessions SET closed_at = '', closed_by = '', close_reason = ''
+		WHERE id = ?`, id); err != nil {
+		return SessionCloseRecord{}, false, fmt.Errorf("reopen session %s: %w", id, err)
+	}
+	if err := tx.Commit(); err != nil {
+		return SessionCloseRecord{}, false, fmt.Errorf("reopen session %s: %w", id, err)
+	}
+	return lifted, true, nil
+}
+
+// RestoreSessionClose puts back a close ReopenSession lifted. The cost the close
+// finalized stayed finalized through the reopen, so only the mark returns.
+func (s *Store) RestoreSessionClose(id string, closed SessionCloseRecord) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.db == nil {
+		session := s.sessions[id]
+		if session == nil {
+			return false, nil
+		}
+		delete(s.sessions, id)
+		s.sessionCloses[id] = sessionCloseMark{At: closed.At, By: closed.By, Reason: closed.Reason, session: session}
 		return true, nil
 	}
 
-	result, err := s.db.Exec(`UPDATE sessions SET closed_at = '', closed_by = '', close_reason = ''
-		WHERE id = ? AND closed_at <> ''`, id)
+	result, err := s.db.Exec(`UPDATE sessions SET closed_at = ?, closed_by = ?, close_reason = ?
+		WHERE id = ? AND closed_at = ''`, closed.At, closed.By, closed.Reason, id)
 	if err != nil {
-		return false, fmt.Errorf("reopen session %s: %w", id, err)
+		return false, fmt.Errorf("restore the close of session %s: %w", id, err)
 	}
 	affected, err := result.RowsAffected()
 	if err != nil {
-		return false, fmt.Errorf("reopen session %s: %w", id, err)
+		return false, fmt.Errorf("restore the close of session %s: %w", id, err)
 	}
 	return affected == 1, nil
 }
