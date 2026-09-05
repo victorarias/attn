@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { Dispatch, SetStateAction } from 'react';
 import type { SessionLedgerEntry, SessionLedgerFacets } from '../types/generated';
 import type { SessionLedgerPage, SessionLedgerQuery } from './daemonSessionLedgerEvents';
 import {
@@ -41,7 +42,8 @@ export interface UseSessionLedgerOptions {
 
 export interface SessionLedgerView {
   filters: SessionLedgerFilters;
-  setFilters: (next: SessionLedgerFilters) => void;
+  /** Takes an updater, so two changes in one tick do not overwrite each other. */
+  setFilters: Dispatch<SetStateAction<SessionLedgerFilters>>;
   entries: SessionLedgerEntry[];
   facets: SessionLedgerFacets | null;
   omitted: number;

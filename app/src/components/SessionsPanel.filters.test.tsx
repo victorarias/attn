@@ -112,6 +112,22 @@ describe('SessionsPanel filters', () => {
     expect(calls).toHaveLength(2);
   });
 
+  it('keeps two filter changes made in one tick', async () => {
+    const { list, calls } = listing([page()]);
+    await open(list);
+
+    // The user clicks a scope and changes the range before React repaints; the
+    // second change must build on the first, not on the filters it replaced.
+    fireEvent.click(screen.getByRole('button', { name: 'Closed' }));
+    when('today');
+
+    await waitFor(() => {
+      const last = calls[calls.length - 1];
+      expect(last.closed).toBe(true);
+      expect(last.since).toBeTruthy();
+    });
+  });
+
   it('offers workspace and repository choices from the facets, with names', async () => {
     const { list, calls } = listing([page({
       entries: [entry({ id: 's1' })],

@@ -145,8 +145,8 @@ export function SessionsPanel({
   }, [entries, selected]);
 
   const update = useCallback((patch: Partial<SessionLedgerFilters>) => {
-    setFilters({ ...filters, ...patch });
-  }, [filters, setFilters]);
+    setFilters((current) => ({ ...current, ...patch }));
+  }, [setFilters]);
 
   const repositories = ledger.facets?.repositories ?? [];
   const workspaces = ledger.facets?.workspaces ?? [];
