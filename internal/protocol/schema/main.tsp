@@ -839,6 +839,36 @@ model AgentMsgMessage {
   content: string;
 }
 
+// One agent closes a session. A session may close itself, a session it dispatched
+// (the Garden dispatch document names it as the dispatcher), and the chief of
+// staff may close any. The reason is required: the ledger keeps the row, and the
+// reason is what the next reader has to go on.
+// Exactly one destination, the same shape as AgentMsgMessage: a session by id or
+// unique prefix, or a seed whose tender the daemon resolves.
+model AgentCloseMessage {
+  cmd: "agent_close";
+  target_session_id: string;    // full id or unique prefix; empty when addressing a seed
+  target_seed_id?: string;      // close whoever tends this seed
+  source_session_id: string;    // who is closing
+  reason: string;
+}
+
+// The rule that authorized a close. A refusal names the rules in its message
+// instead, so the caller learns which one it needed.
+enum AgentCloseRule {
+  self,
+  dispatcher,
+  chief_of_staff,
+}
+
+model AgentCloseResult {
+  target_session_id: string;
+  label: string;
+  reason: string;
+  rule: AgentCloseRule;
+  seed_ids: string[];           // the seeds the closed session tended, each of which got the note
+}
+
 // With a message id, the recipient reads one notified peer message through the
 // legacy adapter. Without one, it reads a bounded FIFO batch from its inbox.
 model AgentInboxMessage {
@@ -6057,6 +6087,7 @@ model Response {
   state_explain_result?: StateExplainResult;
   agent_peek_result?: AgentPeekResult;
   agent_msg_result?: AgentMsgResult;
+  agent_close_result?: AgentCloseResult;
   agent_inbox_result?: AgentPeerMessage;
   agent_inbox_batch_result?: AgentInboxBatchResult;
   agent_msg_status_result?: AgentPeerMessage;

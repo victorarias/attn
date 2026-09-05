@@ -30,6 +30,14 @@ Monitor-blocked session reads as busy, which suppresses crew heartbeats and
 auto-sleep. Monitors remain useful for external waits such as CI; they are a
 helper, not an attn integration mechanism.
 
+When you have what you needed from a delegate, close it:
+`attn agent close <seed-id> -m "why it is done"`. You may close a session you
+dispatched, and the reason is required. It is immediate, so read the seed first;
+the reason lands there as a note, and the seed keeps its tender and its state.
+See [converse-and-observe.md](converse-and-observe.md) for the rules and the
+refusals. Leaving finished delegates running is the cost this avoids: each one
+is a row the user has to judge later.
+
 For a delegation that returns a durable plan, read the seed before continuing.
 `attn seed show <seed-id>` renders its current artifacts. If one is a repository
 path, pass that path and its repository in the follow-on brief and say that Git
