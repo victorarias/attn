@@ -62,6 +62,12 @@ export const scenarioCatalog = [
     command: ['pnpm', 'run', 'real-app:scenario-session-close-ledger'],
   },
   {
+    id: 'session-reopen',
+    runnerId: 'SESSION-REOPEN',
+    label: 'A closed worktree session reopens under its own id, recreating a deleted worktree only when asked',
+    command: ['pnpm', 'run', 'real-app:scenario-session-reopen'],
+  },
+  {
     id: 'tile-only-workspace-select',
     runnerId: 'TILE-ONLY-WORKSPACE-SELECT',
     label: 'Tile-only workspace select + render',

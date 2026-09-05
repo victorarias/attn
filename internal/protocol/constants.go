@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-const ProtocolVersion = "287"
+const ProtocolVersion = "288"
 
 const (
 	ErrorCodeConflict             = "conflict"
@@ -127,6 +127,7 @@ const (
 	CmdSessionTranscript                     = "session_transcript"
 	CmdSessionList                           = "session_list"
 	CmdSessionShow                           = "session_show"
+	CmdSessionReopen                         = "session_reopen"
 	CmdStateExplain                          = "state_explain"
 	CmdAgentPeek                             = "agent_peek"
 	CmdAgentMsg                              = "agent_msg"
@@ -1188,6 +1189,13 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 
 	case CmdSessionShow:
 		var msg SessionShowMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdSessionReopen:
+		var msg SessionReopenMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, err
 		}

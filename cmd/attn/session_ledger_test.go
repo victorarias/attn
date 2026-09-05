@@ -83,15 +83,31 @@ func TestSessionListSaysWhereToLookWhenEmpty(t *testing.T) {
 
 func TestSessionShowRendersTheCloseAndItsReason(t *testing.T) {
 	var buf bytes.Buffer
-	fprintSessionShow(&buf, protocol.SessionLedgerEntry{
-		ID: "sess-1", Label: "ledger", Agent: "claude", Directory: "/tmp/one",
-		WorkspaceID: "ws-1", State: protocol.SessionStateIdle, LastSeen: "2026-09-05T11:00:00Z",
-		Branch: protocol.Ptr("feat/x"), IsWorktree: protocol.Ptr(true), MainRepo: protocol.Ptr("/repo"),
-		ClosedAt: protocol.Ptr("2026-09-05T11:30:00Z"), ClosedBy: protocol.Ptr("sess-boss"),
-		CloseReason: protocol.Ptr("brief delivered"),
+	fprintSessionShow(&buf, protocol.SessionShowResult{
+		Entry: protocol.SessionLedgerEntry{
+			ID: "sess-1", Label: "ledger", Agent: "claude", Directory: "/tmp/one",
+			WorkspaceID: "ws-1", State: protocol.SessionStateIdle, LastSeen: "2026-09-05T11:00:00Z",
+			Branch: protocol.Ptr("feat/x"), IsWorktree: protocol.Ptr(true), MainRepo: protocol.Ptr("/repo"),
+			ClosedAt: protocol.Ptr("2026-09-05T11:30:00Z"), ClosedBy: protocol.Ptr("sess-boss"),
+			CloseReason: protocol.Ptr("brief delivered"),
+		},
+		Reopen: &protocol.SessionReopen{
+			Reopenable:     false,
+			Reason:         protocol.Ptr("the directory /tmp/one no longer exists"),
+			Actions:        []protocol.SessionReopenAction{protocol.SessionReopenActionRecreateWorktreeAndReopen},
+			DirectoryState: "missing",
+			BranchState:    protocol.Ptr("local"),
+			WorkspaceID:    "workspace-sess-1",
+			WorkspacePlan:  "create",
+			PanePlan:       "add",
+		},
 	})
 	out := buf.String()
-	for _, want := range []string{"sess-1", "feat/x", "/repo", "sess-boss", "brief delivered", "closed"} {
+	for _, want := range []string{
+		"sess-1", "feat/x", "/repo", "sess-boss", "brief delivered", "closed",
+		"the directory /tmp/one no longer exists",
+		"attn session reopen sess-1 --action recreate_worktree_and_reopen",
+	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("session show output is missing %q:\n%s", want, out)
 		}

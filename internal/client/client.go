@@ -360,6 +360,33 @@ func (c *Client) SessionShow(sessionID string) (*protocol.SessionShowResult, err
 	return resp.SessionShowResult, nil
 }
 
+type SessionReopenOptions struct {
+	SessionID string
+	Action    string
+	Directory string
+}
+
+func (c *Client) SessionReopen(opts SessionReopenOptions) (*protocol.SessionReopenResult, error) {
+	msg := protocol.SessionReopenMessage{
+		Cmd:       protocol.CmdSessionReopen,
+		SessionID: strings.TrimSpace(opts.SessionID),
+	}
+	if action := strings.TrimSpace(opts.Action); action != "" {
+		msg.Action = protocol.Ptr(protocol.SessionReopenAction(action))
+	}
+	if directory := strings.TrimSpace(opts.Directory); directory != "" {
+		msg.Directory = protocol.Ptr(directory)
+	}
+	resp, err := c.send(msg)
+	if err != nil {
+		return nil, err
+	}
+	if resp.SessionReopenResult == nil {
+		return nil, errors.New("daemon returned no session reopen result")
+	}
+	return resp.SessionReopenResult, nil
+}
+
 func (c *Client) SessionTranscript(targetSessionID, afterCursor string) (*protocol.SessionTranscriptResult, error) {
 	msg := protocol.SessionTranscriptMessage{
 		Cmd:             protocol.CmdSessionTranscript,

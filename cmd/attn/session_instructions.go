@@ -61,6 +61,12 @@ func runSession() {
 			return
 		}
 		runSessionShow(os.Args[3:])
+	case "reopen":
+		if hasHelpFlag(os.Args[3:]) {
+			writeSessionHelp(os.Stdout)
+			return
+		}
+		runSessionReopen(os.Args[3:])
 	default:
 		fmt.Fprintf(os.Stderr, "session: unknown command %q\n", os.Args[2])
 		writeSessionHelp(os.Stderr)
@@ -290,5 +296,13 @@ commands:
         omitted the notice names the id to pass to --before for the next page.
   show <id>
         read one ledger row, live or closed, including who closed it and why.
+        A closed row also carries the reopen verdict: whether it comes back,
+        why not when it does not, and the actions offered instead.
+  reopen <id> [--action <name>] [--cwd <path>] [--json]
+        bring a closed session back under its own id. Without --action it
+        performs the plain reopen and refuses, naming what is offered, when the
+        verdict does not allow one. Actions that recreate a worktree or fetch a
+        branch write to the repository and only ever run when named here.
+        --cwd is where start_fresh_elsewhere starts.
 `)
 }

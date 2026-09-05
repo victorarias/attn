@@ -148,10 +148,11 @@ func runSessionShow(args []string) {
 		fmt.Fprintf(os.Stderr, "session show: %v\n", err)
 		os.Exit(1)
 	}
-	fprintSessionShow(os.Stdout, result.Entry)
+	fprintSessionShow(os.Stdout, *result)
 }
 
-func fprintSessionShow(w io.Writer, entry protocol.SessionLedgerEntry) {
+func fprintSessionShow(w io.Writer, result protocol.SessionShowResult) {
+	entry := result.Entry
 	fmt.Fprintf(w, "%s  %s\n", entry.ID, entry.Label)
 	fmt.Fprintf(w, "agent      %s\n", entry.Agent)
 	fmt.Fprintf(w, "state      %s\n", sessionLedgerState(entry))
@@ -170,4 +171,5 @@ func fprintSessionShow(w io.Writer, entry protocol.SessionLedgerEntry) {
 			fmt.Fprintf(w, "because    %s\n", reason)
 		}
 	}
+	fprintSessionReopenVerdict(w, entry.ID, result.Reopen)
 }

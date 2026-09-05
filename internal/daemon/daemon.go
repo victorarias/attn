@@ -133,6 +133,11 @@ type Daemon struct {
 	repoVisibilityKnown               map[string]string
 	repoVisibilityPending             map[string]bool
 	repoVisibilityMu                  sync.Mutex
+	// What the last inspect_branch saw, so a reopen verdict is served from stored
+	// state and git runs off the request path.
+	branchInspections                 map[string]branchInspection
+	branchInspectionsRunning          map[string]chan struct{}
+	branchInspectionsMu               sync.Mutex
 	gitCoordMu                        sync.Mutex
 	gitCoord                          *gitCoordinator
 	warnings                          []protocol.DaemonWarning
@@ -2643,6 +2648,8 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 		d.handleSessionList(conn, msg.(*protocol.SessionListMessage))
 	case protocol.CmdSessionShow: // wire: session_show
 		d.handleSessionShow(conn, msg.(*protocol.SessionShowMessage))
+	case protocol.CmdSessionReopen: // wire: session_reopen
+		d.handleSessionReopen(conn, msg.(*protocol.SessionReopenMessage))
 	case protocol.CmdStateExplain: // wire: state_explain
 		d.handleStateExplain(conn, msg.(*protocol.StateExplainMessage))
 	case protocol.CmdAgentPeek: // wire: agent_peek

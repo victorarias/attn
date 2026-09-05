@@ -10,11 +10,21 @@ import (
 type WorktreeEntry struct {
 	Path   string
 	Branch string
+	// Registered, but its directory is gone. `git worktree add` refuses the path
+	// until a prune clears it.
+	Prunable bool
 }
 
+// ListWorktrees clears stale registrations before reading, so what it returns is
+// what git will still honour.
 func ListWorktrees(repoDir string) ([]WorktreeEntry, error) {
-	_ = runGitNoOutput(OpWorktree, repoDir, "worktree", "prune")
+	_ = PruneWorktrees(repoDir)
+	return ObserveWorktrees(repoDir)
+}
 
+// ObserveWorktrees reads the registrations as they are, stale ones included, and
+// writes nothing. A caller deciding whether to write to the repository reads here.
+func ObserveWorktrees(repoDir string) ([]WorktreeEntry, error) {
 	out, err := runGitOutput(OpWorktree, repoDir, "worktree", "list", "--porcelain")
 	if err != nil {
 		return nil, err
@@ -24,13 +34,16 @@ func ListWorktrees(repoDir string) ([]WorktreeEntry, error) {
 	var current WorktreeEntry
 
 	for _, line := range strings.Split(string(out), "\n") {
-		if strings.HasPrefix(line, "worktree ") {
+		switch {
+		case strings.HasPrefix(line, "worktree "):
 			if current.Path != "" {
 				worktrees = append(worktrees, current)
 			}
 			current = WorktreeEntry{Path: CanonicalizePath(strings.TrimPrefix(line, "worktree "))}
-		} else if strings.HasPrefix(line, "branch refs/heads/") {
+		case strings.HasPrefix(line, "branch refs/heads/"):
 			current.Branch = strings.TrimPrefix(line, "branch refs/heads/")
+		case strings.TrimSpace(line) == "prunable" || strings.HasPrefix(line, "prunable "):
+			current.Prunable = true
 		}
 	}
 
@@ -39,6 +52,11 @@ func ListWorktrees(repoDir string) ([]WorktreeEntry, error) {
 	}
 
 	return worktrees, nil
+}
+
+// PruneWorktrees drops the registrations whose directory is gone.
+func PruneWorktrees(repoDir string) error {
+	return runGitNoOutput(OpWorktree, repoDir, "worktree", "prune")
 }
 
 func CreateWorktree(repoDir, branch, path string) error {

@@ -91,6 +91,9 @@ enum WorkspaceContextMaintenanceAction {
 
 enum GitOperationKind {
   delete_worktree,
+  // Reads whether a saved branch still exists locally or on a remote, so a
+  // reopen verdict never waits on git.
+  inspect_branch,
 }
 
 enum GitOperationStatus {
@@ -801,10 +804,23 @@ model SessionListMessage {
   before?: string;
 }
 
-// Reads one ledger row, live or closed, by exact session id.
+// Reads one ledger row, live or closed, by exact session id. A closed row
+// carries the reopen verdict alongside it.
 model SessionShowMessage {
   cmd: "session_show";
   session_id: string;
+}
+
+// Brings a closed session back under its own id. Without an action it performs
+// the plain reopen and refuses, naming what is offered, when the verdict does
+// not allow one. Every other action is an explicit second step, and the ones
+// that write to the repository only ever run because they were named here.
+model SessionReopenMessage {
+  cmd: "session_reopen";
+  session_id: string;
+  action?: SessionReopenAction;
+  // Where to start, for `start_fresh_elsewhere`.
+  directory?: string;
 }
 
 // Replays the daemon's per-session ring of state observations so a wrong color
@@ -6054,6 +6070,7 @@ model Response {
   session_transcript_result?: SessionTranscriptResult;
   session_list_result?: SessionListResult;
   session_show_result?: SessionShowResult;
+  session_reopen_result?: SessionReopenResult;
   state_explain_result?: StateExplainResult;
   agent_peek_result?: AgentPeekResult;
   agent_msg_result?: AgentMsgResult;
@@ -6513,6 +6530,59 @@ model SessionListResult {
 
 model SessionShowResult {
   entry: SessionLedgerEntry;
+  // Absent only when the daemon could not read the session's saved execution.
+  reopen?: SessionReopen;
+}
+
+// What `session_reopen` can be asked to do. `reopen` resumes the saved
+// conversation where it ran; the `start_fresh_*` actions bring the same session
+// id back with a new conversation; the worktree actions write to the repository.
+enum SessionReopenAction {
+  reopen,
+  recreate_worktree_and_reopen,
+  fetch_recreate_and_reopen,
+  start_fresh_same_place,
+  start_fresh_elsewhere,
+  start_fresh_default_branch,
+}
+
+// Whether a session in the ledger can be brought back, and what it would take.
+// Served from stored state so it never waits on git.
+model SessionReopen {
+  // Whether the plain `reopen` action is available right now.
+  reopenable: boolean;
+  // Why it is not, written for an agent to act on. Always present when
+  // reopenable is false.
+  reason?: string;
+  // The actions offered, in the order to prefer them. Empty means nothing here
+  // brings this session back.
+  actions: SessionReopenAction[];
+  // Something a working reopen would surprise the caller with, such as the
+  // saved directory sitting on another branch now.
+  warning?: string;
+  // A branch check is running off the request path; ask again for a sharper
+  // verdict. The actions offered meanwhile are the ones stored state already proves.
+  checking: boolean;
+  // present | missing | unavailable | unknown | remote
+  directory_state: string;
+  // local | remote_only | gone | merged | unknown. Absent when the saved
+  // execution names no branch.
+  branch_state?: string;
+  // The workspace a reopen would land in, and whether it is there already.
+  workspace_id: string;
+  workspace_plan: string; // reuse | create
+  pane_plan: string;      // reuse | add
+}
+
+model SessionReopenResult {
+  session_id: string;
+  workspace_id: string;
+  directory: string;
+  action: SessionReopenAction;
+  // The session was already running; nothing was reopened.
+  already_running?: boolean;
+  // The worktree this action recreated. Absent unless one was created.
+  worktree_created?: string;
 }
 
 model DelegateResult {

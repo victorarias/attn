@@ -1,0 +1,3 @@
+kind: added
+area: sessions
+change: A closed session can be reopened under its own id. `attn session show` says whether it comes back, why not when it does not, and the actions offered instead — recreating a worktree somebody deleted, fetching a branch that only lives on a remote, or starting fresh in a directory you name. `attn session reopen <id> [--action <name>]` performs one. Reading the verdict never writes to a repository; recreating a worktree or fetching a branch happens only when the action asks for it by name.

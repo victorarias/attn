@@ -322,6 +322,7 @@ var factsWithoutWire = map[string]string{
 	FactTicketAttached:               ticketFactsHaveNoClient,
 	FactTicketChanged:                ticketFactsHaveNoClient,
 	FactSessionClosed:                "the app learns a session left through session.unregistered, which already removes the row; the ledger row it records is read on demand through session_list and session_show",
+	FactSessionReopenRefreshed:       "no surface renders a reopen verdict yet; the Sessions surface adds a projection when it lands, and until then session_show serves the refreshed verdict on demand",
 }
 
 const ticketFactsHaveNoClient = "no WebSocket client renders a ticket; the read verbs and subscribing apps read these off the durable log"

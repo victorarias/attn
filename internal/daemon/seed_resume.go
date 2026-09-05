@@ -3,7 +3,6 @@ package daemon
 import (
 	"fmt"
 	"strings"
-	"syscall"
 
 	"github.com/victorarias/attn/internal/docstore"
 	"github.com/victorarias/attn/internal/garden"
@@ -85,93 +84,30 @@ func (d *Daemon) resumeSeedFromReview(
 		}
 		return nil, fmt.Errorf("%s cannot resume: %s", seedID, reason)
 	}
-	cwd := strings.TrimSpace(execution.Cwd)
-	agent := strings.TrimSpace(execution.Agent)
-	resumeID := strings.TrimSpace(execution.Resume)
-
-	directory, err := validateDelegationDirectory(cwd)
-	if err != nil {
-		return nil, err
-	}
-	d.waitForSessionTeardown(sessionID)
-	d.store.ClearSessionIntentionalClose(sessionID)
-
-	rollback := d.newDelegationRollback()
-	// Resume runs the same conversation under its own id, so the ledger close has to
-	// be lifted first: the store refuses a spawn that would re-register a closed row.
-	lifted, reopened, err := d.store.ReopenSession(sessionID)
-	if err != nil {
-		return nil, err
-	}
-	if reopened {
-		rollback.onSessionReopened(sessionID, lifted)
-	}
-
-	// Unregister on rollback only if this call created the workspace — a re-register is
-	// idempotent and preserves a stored rename (handleRegisterWorkspace's title guard).
-	workspaceID := "workspace-" + sessionID
-	if d.store.GetWorkspace(workspaceID) == nil {
-		d.handleRegisterWorkspace(nil, &protocol.RegisterWorkspaceMessage{
-			Cmd:       protocol.CmdRegisterWorkspace,
-			ID:        workspaceID,
-			Title:     seed.Title,
-			Directory: directory,
-		})
-		if d.store.GetWorkspace(workspaceID) == nil {
-			return nil, fmt.Errorf("create resume workspace")
+	afterSpawn := func() error {
+		if _, err := d.validateGardenReviewAction(review, seedID, "resume"); err != nil {
+			return err
 		}
-		rollback.onWorkspaceCreated(workspaceID)
+		return d.bindResumedSeed(seed, seedDoc, sessionID, strings.TrimSpace(execution.Cwd),
+			strings.TrimSpace(execution.Agent), strings.TrimSpace(execution.Resume))
 	}
-
-	paneID := "pane-" + sessionID
-	paneClient := newInternalWSClient()
-	d.handleWorkspaceLayoutAddSessionPane(paneClient, &protocol.WorkspaceLayoutAddSessionPaneMessage{
-		Cmd:         protocol.CmdWorkspaceLayoutAddSessionPane,
-		WorkspaceID: workspaceID,
-		PaneID:      protocol.Ptr(paneID),
+	reopened, err := d.reopenSessionRuntime(sessionReopenPlan{
 		SessionID:   sessionID,
-		Title:       protocol.Ptr(seed.Title),
-	})
-	if _, err := readInternalActionResult(paneClient); err != nil {
-		return nil, rollback.fail(fmt.Errorf("create resume pane: %w", err))
+		Directory:   execution.Cwd,
+		Agent:       execution.Agent,
+		ResumeID:    execution.Resume,
+		Title:       seed.Title,
+		WorkspaceID: reopenWorkspaceID(sessionID),
+	}, d.newDelegationRollback(), afterSpawn)
+	if err != nil {
+		return nil, err
 	}
-	rollback.onPaneCreated(sessionID)
-
-	spawnClient := newInternalWSClient()
-	d.handleSpawnSession(spawnClient, &protocol.SpawnSessionMessage{
-		Cmd:             protocol.CmdSpawnSession,
-		ID:              sessionID,
-		Cwd:             directory,
-		WorkspaceID:     workspaceID,
-		Agent:           agent,
-		Cols:            80,
-		Rows:            24,
-		Label:           protocol.Ptr(seed.Title),
-		ResumeSessionID: protocol.Ptr(resumeID),
-	})
-	if _, err := readInternalActionResult(spawnClient); err != nil {
-		return nil, rollback.fail(fmt.Errorf("spawn resume session: %w", err))
-	}
-
-	if session := d.store.Get(sessionID); session == nil {
-		return nil, rollback.fail(fmt.Errorf("resume session was not persisted"))
-	}
-	if !reopened {
-		rollback.onSessionSpawned(sessionID)
-	}
-	if _, err := d.validateGardenReviewAction(review, seedID, "resume"); err != nil {
-		return nil, rollback.fail(err)
-	}
-	if err := d.bindResumedSeed(seed, seedDoc, sessionID, directory, agent, resumeID); err != nil {
-		return nil, rollback.fail(err)
-	}
-	rollback.abandon()
 	if err := d.resolveGardenReviewAction(review, seedID, "resume"); err != nil {
 		d.logf("Garden review: settle %s after Resume: %v", seedID, err)
 	}
 
-	d.logf("resume: reopened seed %q as session %s in %s", seedID, sessionID, directory)
-	return &seedResumeOutcome{SessionID: sessionID, WorkspaceID: workspaceID}, nil
+	d.logf("resume: reopened seed %q as session %s", seedID, sessionID)
+	return &seedResumeOutcome{SessionID: reopened.SessionID, WorkspaceID: reopened.WorkspaceID}, nil
 }
 
 func (d *Daemon) bindResumedSeed(
@@ -277,14 +213,4 @@ func (d *Daemon) handleSeedResume(client *wsClient, msg *protocol.SeedResumeMess
 		}
 	}
 	d.sendToClient(client, response)
-}
-
-// A resumed session predates this call, so a rollback returns it to the ledger
-// as it was instead of reaping the row and its history with it.
-func (r *delegationRollback) onSessionReopened(sessionID string, closed store.SessionCloseRecord) {
-	r.undo = append(r.undo, func() error {
-		r.d.terminateSession(sessionID, syscall.SIGTERM)
-		r.d.restoreSessionClose(sessionID, closed)
-		return nil
-	})
 }

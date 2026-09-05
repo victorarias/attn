@@ -4280,6 +4280,7 @@ type GitOperationFinishedMessage struct {
 type GitOperationKind string
 
 const GitOperationKindDeleteWorktree GitOperationKind = "delete_worktree"
+const GitOperationKindInspectBranch GitOperationKind = "inspect_branch"
 
 type GitOperationStartedMessage struct {
 	// Event corresponds to the JSON schema field "event".
@@ -6738,6 +6739,10 @@ type Response struct {
 	// SessionListResult corresponds to the JSON schema field "session_list_result".
 	SessionListResult *SessionListResult `json:"session_list_result,omitempty,omitzero"`
 
+	// SessionReopenResult corresponds to the JSON schema field
+	// "session_reopen_result".
+	SessionReopenResult *SessionReopenResult `json:"session_reopen_result,omitempty,omitzero"`
+
 	// SessionShowResult corresponds to the JSON schema field "session_show_result".
 	SessionShowResult *SessionShowResult `json:"session_show_result,omitempty,omitzero"`
 
@@ -8469,6 +8474,81 @@ type SessionRegisteredMessage struct {
 	Session Session `json:"session"`
 }
 
+type SessionReopen struct {
+	// Actions corresponds to the JSON schema field "actions".
+	Actions []SessionReopenAction `json:"actions"`
+
+	// BranchState corresponds to the JSON schema field "branch_state".
+	BranchState *string `json:"branch_state,omitempty,omitzero"`
+
+	// Checking corresponds to the JSON schema field "checking".
+	Checking bool `json:"checking"`
+
+	// DirectoryState corresponds to the JSON schema field "directory_state".
+	DirectoryState string `json:"directory_state"`
+
+	// PanePlan corresponds to the JSON schema field "pane_plan".
+	PanePlan string `json:"pane_plan"`
+
+	// Reason corresponds to the JSON schema field "reason".
+	Reason *string `json:"reason,omitempty,omitzero"`
+
+	// Reopenable corresponds to the JSON schema field "reopenable".
+	Reopenable bool `json:"reopenable"`
+
+	// Warning corresponds to the JSON schema field "warning".
+	Warning *string `json:"warning,omitempty,omitzero"`
+
+	// WorkspaceID corresponds to the JSON schema field "workspace_id".
+	WorkspaceID string `json:"workspace_id"`
+
+	// WorkspacePlan corresponds to the JSON schema field "workspace_plan".
+	WorkspacePlan string `json:"workspace_plan"`
+}
+
+type SessionReopenAction string
+
+const SessionReopenActionFetchRecreateAndReopen SessionReopenAction = "fetch_recreate_and_reopen"
+const SessionReopenActionRecreateWorktreeAndReopen SessionReopenAction = "recreate_worktree_and_reopen"
+const SessionReopenActionReopen SessionReopenAction = "reopen"
+const SessionReopenActionStartFreshDefaultBranch SessionReopenAction = "start_fresh_default_branch"
+const SessionReopenActionStartFreshElsewhere SessionReopenAction = "start_fresh_elsewhere"
+const SessionReopenActionStartFreshSamePlace SessionReopenAction = "start_fresh_same_place"
+
+type SessionReopenMessage struct {
+	// Action corresponds to the JSON schema field "action".
+	Action *SessionReopenAction `json:"action,omitempty,omitzero"`
+
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Directory corresponds to the JSON schema field "directory".
+	Directory *string `json:"directory,omitempty,omitzero"`
+
+	// SessionID corresponds to the JSON schema field "session_id".
+	SessionID string `json:"session_id"`
+}
+
+type SessionReopenResult struct {
+	// Action corresponds to the JSON schema field "action".
+	Action SessionReopenAction `json:"action"`
+
+	// AlreadyRunning corresponds to the JSON schema field "already_running".
+	AlreadyRunning *bool `json:"already_running,omitempty,omitzero"`
+
+	// Directory corresponds to the JSON schema field "directory".
+	Directory string `json:"directory"`
+
+	// SessionID corresponds to the JSON schema field "session_id".
+	SessionID string `json:"session_id"`
+
+	// WorkspaceID corresponds to the JSON schema field "workspace_id".
+	WorkspaceID string `json:"workspace_id"`
+
+	// WorktreeCreated corresponds to the JSON schema field "worktree_created".
+	WorktreeCreated *string `json:"worktree_created,omitempty,omitzero"`
+}
+
 type SessionSelectedMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
@@ -8488,6 +8568,9 @@ type SessionShowMessage struct {
 type SessionShowResult struct {
 	// Entry corresponds to the JSON schema field "entry".
 	Entry SessionLedgerEntry `json:"entry"`
+
+	// Reopen corresponds to the JSON schema field "reopen".
+	Reopen *SessionReopen `json:"reopen,omitempty,omitzero"`
 }
 
 type SessionState string

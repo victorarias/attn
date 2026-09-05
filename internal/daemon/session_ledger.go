@@ -52,8 +52,9 @@ func (d *Daemon) handleSessionShow(conn net.Conn, msg *protocol.SessionShowMessa
 		d.sendError(conn, "session_not_found")
 		return
 	}
-	_ = json.NewEncoder(conn).Encode(protocol.Response{
-		Ok:                true,
-		SessionShowResult: &protocol.SessionShowResult{Entry: *entry},
-	})
+	result := &protocol.SessionShowResult{Entry: *entry}
+	if verdict, found := d.reopenVerdict(entry.ID); found {
+		result.Reopen = verdict.toProtocol()
+	}
+	_ = json.NewEncoder(conn).Encode(protocol.Response{Ok: true, SessionShowResult: result})
 }
