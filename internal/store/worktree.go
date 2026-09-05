@@ -6,7 +6,6 @@ import (
 	"github.com/google/uuid"
 )
 
-// Rows that predate the column read unknown and stay that way.
 type WorktreeOrigin string
 
 const (
@@ -15,7 +14,6 @@ const (
 	WorktreeOriginGit     WorktreeOrigin = "git"
 )
 
-// One value per gate, so a kept row always says which gate held it.
 type WorktreeSweepStatus string
 
 const (
@@ -50,7 +48,6 @@ type Worktree struct {
 	Origin    WorktreeOrigin `json:"origin"`
 	PinnedAt  string         `json:"pinned_at,omitempty"`
 
-	// Observed state written by the background refresh. Empty means never refreshed.
 	ObservedAt     string       `json:"observed_at,omitempty"`
 	HeadSHA        string       `json:"head_sha,omitempty"`
 	Detached       bool         `json:"detached,omitempty"`
@@ -71,7 +68,6 @@ type Worktree struct {
 
 func (w *Worktree) Pinned() bool { return w != nil && w.PinnedAt != "" }
 
-// Written whole, so a partial pass never leaves half-fresh state on the row.
 type WorktreeObservation struct {
 	Branch         string
 	HeadSHA        string
@@ -90,8 +86,7 @@ const worktreeColumns = `path, branch, main_repo, created_at, origin, pinned_at,
 	observed_at, head_sha, detached, dirty, dirty_files, stashes, unpushed, merged_signal,
 	prunable, last_activity_at, sweep_status, sweep_reason, sweep_at, refresh_error`
 
-// Adoption is a refresh, so an existing row keeps its creation stamp, its origin,
-// its pin and its observed state; only what git just reported is overwritten.
+// Adoption is a refresh: the row keeps its pin, origin and observed state.
 func (s *Store) AddWorktree(wt *Worktree) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -254,7 +249,6 @@ func (s *Store) SetWorktreeSweep(path string, status WorktreeSweepStatus, reason
 		string(status), reason, stamp, path)
 }
 
-// Reports false when no row moved, so the caller can say the path is not registered.
 func (s *Store) SetWorktreePin(path string, pinned bool, now time.Time) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -280,14 +274,11 @@ type WorktreeSweepLogEntry struct {
 	Path     string `json:"path"`
 	MainRepo string `json:"main_repo"`
 	Branch   string `json:"branch,omitempty"`
-	// "removed", "kept" or "failed": what the sweep did, not what it saw.
-	Action string `json:"action"`
-	Reason string `json:"reason,omitempty"`
-	At     string `json:"at"`
+	Action   string `json:"action"`
+	Reason   string `json:"reason,omitempty"`
+	At       string `json:"at"`
 }
 
-// A removed worktree has no row left to carry its outcome; this log is where it
-// stays visible.
 func (s *Store) AppendWorktreeSweepLog(entry WorktreeSweepLogEntry, now time.Time) string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -311,7 +302,6 @@ func (s *Store) AppendWorktreeSweepLog(entry WorktreeSweepLogEntry, now time.Tim
 	return id
 }
 
-// Newest first, with the number of rows past the limit.
 func (s *Store) WorktreeSweepLog(mainRepo string, limit int) ([]WorktreeSweepLogEntry, int) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -359,9 +349,8 @@ func (s *Store) WorktreeSweepLog(mainRepo string, limit int) ([]WorktreeSweepLog
 }
 
 type RepoIntegrationBranch struct {
-	MainRepo string `json:"main_repo"`
-	Branch   string `json:"branch"`
-	// "pull_requests" when merged pull requests named it, "origin_head" for the fallback.
+	MainRepo   string `json:"main_repo"`
+	Branch     string `json:"branch"`
 	Source     string `json:"source"`
 	ResolvedAt string `json:"resolved_at"`
 }
@@ -404,13 +393,11 @@ type MergedBranch struct {
 	MergedAt string `json:"merged_at,omitempty"`
 	Number   int    `json:"number,omitempty"`
 	URL      string `json:"url,omitempty"`
-	// The tip that merged. A branch whose tip has moved past it carries commits
-	// the merge does not account for, which is what keeps the sweep off it.
+	// The tip that merged. A branch past it carries commits the merge misses.
 	HeadSHA string `json:"head_sha,omitempty"`
 }
 
-// Repository-scoped on purpose: session_pull_requests is session-owned and dropped
-// when a session is reaped, and this signal must outlive every session.
+// Repository-scoped: session_pull_requests dies with its session, this must not.
 func (s *Store) RecordRepoMergedBranches(mainRepo string, branches []MergedBranch, now time.Time) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

@@ -38,8 +38,6 @@ func TestWorktreeStore(t *testing.T) {
 	}
 }
 
-// Adoption is a refresh: a second AddWorktree for a path the registry already has
-// updates it in place instead of losing the pin and the observed state with it.
 func TestAddWorktreeIsAnUpsertThatKeepsThePinAndTheObservation(t *testing.T) {
 	store := New()
 	defer store.Close()
@@ -81,8 +79,6 @@ func TestAddWorktreeIsAnUpsertThatKeepsThePinAndTheObservation(t *testing.T) {
 	}
 }
 
-// The log outlives the rows, so it is the only place a removal can be inspected;
-// it pages newest first and says how much it did not show.
 func TestWorktreeSweepLogPagesNewestFirst(t *testing.T) {
 	store := New()
 	defer store.Close()
@@ -117,8 +113,6 @@ func TestWorktreeSweepLogPagesNewestFirst(t *testing.T) {
 	}
 }
 
-// The merged record is repository-scoped on purpose: it has to outlive every
-// session that opened the pull request.
 func TestRepoMergedBranchesReplaceTheRecordedSet(t *testing.T) {
 	store := New()
 	defer store.Close()

@@ -67,8 +67,6 @@ describe('WorktreesPanel actions', () => {
     fireEvent.click(screen.getAllByText('Delete')[1] ?? screen.getByText('Delete'));
     await waitFor(() => expect(deleteWorktree).toHaveBeenCalledWith('/projects/attn--feat-one', false));
 
-    // The panel invents nothing: the row goes when the daemon says it went, which
-    // is the same push that puts the one entry in the log.
     expect(screen.queryByText('attn--feat-one')).toBeTruthy();
     useWorktreeStore.getState().swept({
       id: 'entry-1',

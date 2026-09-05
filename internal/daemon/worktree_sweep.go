@@ -25,8 +25,7 @@ const (
 // candidate is at 19. Receipt in docs/worktree-sweep.md.
 const defaultWorktreeSweepIdleDays = 14
 
-// A full pass is ~12 s of git for 147 worktrees. Hourly keeps it far off any
-// request path and far under the window it watches.
+// A full pass is ~12 s of git for 147 worktrees, far under the window it watches.
 const defaultWorktreeSweepInterval = time.Hour
 
 func worktreeSweepIdle() time.Duration {
@@ -47,8 +46,7 @@ func worktreeSweepInterval() time.Duration {
 	return defaultWorktreeSweepInterval
 }
 
-// On unless the user turns it off: the gates were verified against real
-// repositories at 29 of 29 genuinely merged. See docs/worktree-sweep.md.
+// On by default: the gates were verified at 29 of 29 genuinely merged.
 func (d *Daemon) worktreeSweepEnabled() bool {
 	if d.store == nil {
 		return false
@@ -74,8 +72,6 @@ func (d *Daemon) worktreeSweepHandler(_ context.Context, _ *jobs.Job) (any, erro
 	return map[string]any{"refreshed": refreshed, "removed": removed, "kept": kept}, nil
 }
 
-// Decides from stored state only, so a verdict is always explainable from the row
-// the surface is showing.
 func (d *Daemon) worktreeSweepPass(now time.Time) (refreshed, removed, kept int) {
 	if d.store == nil {
 		return 0, 0, 0
@@ -94,8 +90,7 @@ func (d *Daemon) worktreeSweepPass(now time.Time) (refreshed, removed, kept int)
 	for _, repo := range repos {
 		facts := d.sweepContext(repo)
 		for _, wt := range d.store.ListWorktreesByRepo(repo) {
-			// The gates read stored state. When the pass could not observe this
-			// repository that state is old, and old state removes live work.
+			// State from a pass that failed removes live work.
 			if !current[repo] {
 				d.store.SetWorktreeSweep(wt.Path, store.WorktreeSweepUnknown,
 					"the repository could not be refreshed, so nothing here is decided", now)
@@ -125,7 +120,6 @@ func (d *Daemon) worktreeSweepPass(now time.Time) (refreshed, removed, kept int)
 	return refreshed, removed, kept
 }
 
-// What the gates read. Nothing here runs git.
 type sweepContext struct {
 	liveSessions map[string][]string
 	openSeeds    map[string][]string
@@ -153,7 +147,6 @@ type sweepVerdict struct {
 	At     time.Time
 }
 
-// In order: the first gate that holds names the kept reason.
 func worktreeSweepVerdict(wt *store.Worktree, facts sweepContext, now time.Time, idleFor time.Duration) sweepVerdict {
 	if wt.Prunable {
 		return sweepVerdict{store.WorktreeSweepKeptStale,
@@ -257,8 +250,6 @@ func (d *Daemon) removeSweptWorktree(wt *store.Worktree, verdict sweepVerdict, n
 	return true
 }
 
-// The registry drops the row, so every removal writes both the log entry and the
-// seed notes, whoever asked for it.
 func (d *Daemon) recordWorktreeRemoval(
 	wt *store.Worktree, seeds []string, opts deleteWorktreeOptions, now time.Time,
 ) {
@@ -282,7 +273,6 @@ func (d *Daemon) recordWorktreeRemoval(
 	}
 }
 
-// Every seed whose last execution ran in the worktree, open or closed.
 func (d *Daemon) seedsForWorktree(wt *store.Worktree) []string {
 	var seeds []string
 	d.eachSeedExecution(func(seed garden.Seed, dispatch garden.Dispatch) {

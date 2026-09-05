@@ -63,14 +63,12 @@ export function handleWorktreeDaemonEvent(
         pending,
         'worktree_refresh',
         event,
-        // False means the daemon had no job queue to enqueue onto: a failure the
-        // caller must see, not a quiet no-op.
+        // False means the daemon had no job queue: a failure the caller must see.
         (settled) => (settled.success ? true : undefined),
         'The daemon has no job queue running, so no refresh was queued',
       );
       return true;
 
-    // Both pushes are unsolicited: the background sweep moves rows nobody asked about.
     case 'worktree_state_changed':
       for (const worktree of event.worktrees ?? []) {
         callbacks.onWorktreeState?.(worktree);

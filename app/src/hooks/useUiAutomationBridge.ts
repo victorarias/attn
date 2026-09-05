@@ -3604,8 +3604,7 @@ export function useUiAutomationBridge({
         await settleUi(3);
         return collectWorktreesUiState();
       }
-      // Two clicks because deleting is a one-way door: the row asks first, and
-      // the scenario has to go through the same confirmation a person does.
+      // Two clicks: the scenario goes through the same confirmation a person does.
       case 'worktrees_delete': {
         const path = requireWorktreePath(payload);
         clickTestId(`worktree-delete-${path}`);

@@ -1707,8 +1707,7 @@ function AppContent({
     [daemonSessions],
   );
 
-  // The panel's own delete. sendDeleteWorktree refuses a dirty tree unless forced,
-  // and the panel only forces after the row's "Delete, losing changes" confirmation.
+  // Forced only after the row's "Delete, losing changes" confirmation.
   const handleDeleteWorktreeFromPanel = useCallback(async (path: string, force: boolean) => {
     const result = await sendDeleteWorktree(path, undefined, force ? { force: true } : {});
     if (!result.success) {

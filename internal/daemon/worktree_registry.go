@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"fmt"
 	"os"
 	"strings"
 	"time"
@@ -14,22 +15,18 @@ import (
 // Receipt in docs/worktree-sweep.md.
 const integrationBranchTTL = 24 * time.Hour
 
-// Built once per repository pass, so 141 worktrees cost one repository-wide git
-// call each rather than 141.
+// Built once per repository pass: 141 worktrees cost one git call each, not 141.
 type repositoryFacts struct {
 	repo              string
 	integrationBranch string
 	treeHashes        map[string]bool
 	stashes           map[string]int
 	mergedBranches    map[string]store.MergedBranch
-	// Keyed by canonical worktree path.
-	liveSessions    map[string][]string
-	openSeeds       map[string][]string
-	sessionActivity map[string]time.Time
+	liveSessions      map[string][]string
+	openSeeds         map[string][]string
+	sessionActivity   map[string]time.Time
 }
 
-// Includes the repositories live sessions sit in, so one with no worktree row yet
-// still reaches the surface.
 func (d *Daemon) trackedRepositories() []string {
 	seen := make(map[string]bool)
 	var repos []string
@@ -51,8 +48,7 @@ func (d *Daemon) trackedRepositories() []string {
 	for _, repo := range d.store.ListWorktreeRepos() {
 		add(repo)
 	}
-	// ResolveMainRepoPath, always: a session in a worktree resolves to its own root,
-	// and treating that as a repository would register the main worktree itself.
+	// A session in a worktree resolves to its own root, which is not a repository.
 	for _, session := range d.store.List("") {
 		if repo := strings.TrimSpace(protocol.Deref(session.MainRepo)); repo != "" {
 			add(git.ResolveMainRepoPath(repo))
@@ -65,8 +61,7 @@ func (d *Daemon) trackedRepositories() []string {
 	return repos
 }
 
-// Reports whether every row now holds state observed in this pass. False means the
-// rows are stale and no verdict on them may be acted on.
+// False means the rows are stale and no verdict on them may be acted on.
 func (d *Daemon) refreshRepositoryWorktrees(repo string, now time.Time) bool {
 	if d.store == nil {
 		return false
@@ -92,8 +87,6 @@ func (d *Daemon) refreshRepositoryWorktrees(repo string, now time.Time) bool {
 	return true
 }
 
-// What git reports becomes a row, what it no longer reports is dropped, and the
-// main worktree is never a row.
 func (d *Daemon) reconcileWorktreeRegistry(repo string, now time.Time) ([]git.WorktreeState, error) {
 	finish := d.beginGitOperation(protocol.GitOperationKindRefreshRepository, repo, nil)
 	states, err := git.ListWorktreeStates(repo)
@@ -138,13 +131,17 @@ func (d *Daemon) repositoryFacts(repo string, now time.Time) (*repositoryFacts, 
 	finish := d.beginGitOperation(protocol.GitOperationKindRefreshRepository, repo, nil)
 	treeHashes, err := git.TreeHashesOnHistory(repo, facts.integrationBranch)
 	if err != nil {
-		// A repository with no integration branch locally is not an error: the pull
-		// request record still answers rung 1 and the tree rung simply stays silent.
+		// Not an error: the pull request record still answers rung 1.
 		d.logf("worktree refresh: %s: tree hashes for %s: %v", repo, facts.integrationBranch, err)
 		treeHashes = nil
 	}
 	stashes, stashErr := git.StashCountsByBranch(repo)
 	finish(stashErr)
+	if stashErr != nil {
+		// A missing stash map reads as no stash, and that gate is all that stands
+		// between a stashed worktree and a removal that destroys it.
+		return nil, fmt.Errorf("stash counts for %s: %w", repo, stashErr)
+	}
 	facts.treeHashes = treeHashes
 	facts.stashes = stashes
 
@@ -152,7 +149,6 @@ func (d *Daemon) repositoryFacts(repo string, now time.Time) (*repositoryFacts, 
 	if facts.mergedBranches == nil {
 		facts.mergedBranches = make(map[string]store.MergedBranch)
 	}
-	// Counts a live session's pull request before the repository-wide refresh runs.
 	for branch, record := range d.store.MergedSessionPullRequestBranches() {
 		if _, known := facts.mergedBranches[branch]; !known {
 			facts.mergedBranches[branch] = record
@@ -182,8 +178,7 @@ func (d *Daemon) sessionActivityByWorktree(liveSessions map[string][]string) map
 	return activity
 }
 
-// One `gh pr list`-equivalent call per repository, measured at 899 ms; the sweep
-// itself reads stored state only and never touches the network.
+// One `gh pr list`-equivalent call per repository, measured at 899 ms.
 func (d *Daemon) refreshMergedPullRequests(repo string, now time.Time) {
 	host, ownerRepo := git.OriginHostOwnerRepo(repo)
 	if host == "" || ownerRepo == "" {
@@ -237,8 +232,6 @@ func modalBaseBranch(counts map[string]int) (string, bool) {
 	return best, best != ""
 }
 
-// origin/HEAD is the fallback, never the source. The returned ref is one git can
-// resolve in this repository.
 func (d *Daemon) integrationBranch(repo string, now time.Time) string {
 	if record := d.store.RepoIntegrationBranch(repo); record != nil && record.Branch != "" {
 		resolvedAt, err := time.Parse(time.RFC3339, record.ResolvedAt)
@@ -308,7 +301,6 @@ func observeWorktree(facts *repositoryFacts, state git.WorktreeState, now time.T
 	}
 
 	if _, err := os.Stat(state.Path); err != nil {
-		// git lists it, the directory is gone. Stale, never openable, never swept.
 		observation.Prunable = true
 		return observation, nil
 	}
@@ -352,8 +344,8 @@ func mergedSignal(facts *repositoryFacts, state git.WorktreeState) store.MergedS
 	return store.MergedSignalNone
 }
 
-// Commits the merge does not account for, not commits ahead: a squash merge is
-// accounted for only up to the tip GitHub recorded as merged.
+// Not commits ahead: a squash merge accounts for the branch only up to the tip
+// GitHub recorded as merged.
 func commitsBeyondTheMerge(facts *repositoryFacts, state git.WorktreeState, signal store.MergedSignal) int {
 	if facts.integrationBranch == "" || state.Branch == "" {
 		return 0
@@ -374,8 +366,6 @@ func commitsBeyondTheMerge(facts *repositoryFacts, state git.WorktreeState, sign
 		return 0
 	}
 	if record.HeadSHA == "" {
-		// No recorded tip to compare against: the merge accounts for the branch as
-		// the record found it, so the commits ahead are the merged ones.
 		return 0
 	}
 	beyond, err := git.CommitsAhead(facts.repo, record.HeadSHA, state.Branch)
@@ -385,8 +375,7 @@ func commitsBeyondTheMerge(facts *repositoryFacts, state git.WorktreeState, sign
 	return beyond
 }
 
-// max(newest tree mtime excluding .git and build dirs, last commit, last session
-// activity). The mtime is what makes idle honest where attn ran no session.
+// max(newest tree mtime excluding .git and build dirs, last commit, last activity).
 func worktreeLastActivity(facts *repositoryFacts, state git.WorktreeState, now time.Time) time.Time {
 	newest := time.Time{}
 	consider := func(candidate time.Time) {

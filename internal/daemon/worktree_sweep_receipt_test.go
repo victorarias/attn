@@ -14,8 +14,7 @@ import (
 	"github.com/victorarias/attn/internal/store"
 )
 
-// Applies the shipped gates read-only to real repositories and prints what the
-// sweep would do. Run it before changing a gate; docs/worktree-sweep.md says how.
+// Read-only against real repositories; run it before changing a gate. How: docs/worktree-sweep.md.
 func TestWorktreeSweepReceipt(t *testing.T) {
 	repos := strings.Split(strings.TrimSpace(os.Getenv("ATTN_SWEEP_RECEIPT_REPOS")), ",")
 	if len(repos) == 0 || repos[0] == "" {
@@ -94,8 +93,6 @@ func truncate(value string, width int) string {
 	return value[:width-1] + "…"
 }
 
-// The merged record comes from `gh`, the query the daemon runs through its GitHub
-// client, so the receipt exercises the shipped ladder without a daemon.
 func receiptFacts(t *testing.T, repo string, now time.Time) *repositoryFacts {
 	t.Helper()
 

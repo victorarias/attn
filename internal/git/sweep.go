@@ -15,7 +15,6 @@ type WorktreeState struct {
 	HeadSHA  string
 	Detached bool
 	Locked   bool
-	// git still lists it but the directory is gone. Never openable, never swept.
 	Prunable bool
 }
 
@@ -57,8 +56,7 @@ func ListWorktreeStates(repoDir string) ([]WorktreeState, error) {
 	return states, nil
 }
 
-// Untracked files count: 7 of 141 worktrees in the spike were untracked-only and
-// some of those files were real work.
+// Untracked files count: 7 of 141 worktrees in the spike were untracked-only.
 func WorktreeDirtyCount(path string) (int, error) {
 	out, err := runGitOutput(OpStatus, CanonicalizePath(path), "status", "--porcelain", "--untracked-files=all")
 	if err != nil {
@@ -71,8 +69,7 @@ func WorktreeDirtyCount(path string) (int, error) {
 	return len(strings.Split(trimmed, "\n")), nil
 }
 
-// 5 ms per branch measured. Reports false on any error: an unresolvable ref must
-// never read as merged.
+// 5 ms per branch. Any error reports false: an unresolvable ref never reads as merged.
 func IsAncestor(repoDir, commit, base string) bool {
 	if commit == "" || base == "" {
 		return false
@@ -88,8 +85,7 @@ func CommitsAhead(repoDir, base, ref string) (int, error) {
 	return strconv.Atoi(strings.TrimSpace(string(out)))
 }
 
-// Every tree hash reachable from base: 24 ms once per repository, then a map
-// lookup per branch. Content-identical by construction, never a heuristic.
+// Every tree hash reachable from base: 24 ms once per repository, then a map lookup.
 func TreeHashesOnHistory(repoDir, base string) (map[string]bool, error) {
 	out, err := runGitOutput(OpMetadata, repoDir, "rev-list", "--format=%T", base)
 	if err != nil {
@@ -115,8 +111,7 @@ func TreeHash(repoDir, ref string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-// Stashes live in the main repository's reflog: read once per repository and
-// attributed by the message git writes ("WIP on <branch>:" / "On <branch>:").
+// Attributed by the message git writes: "WIP on <branch>:" or "On <branch>:".
 func StashCountsByBranch(repoDir string) (map[string]int, error) {
 	out, err := runGitOutput(OpMetadata, repoDir, "stash", "list", "--format=%gs")
 	if err != nil {
@@ -153,8 +148,7 @@ func LastCommitTime(dir string) (time.Time, error) {
 	return time.Parse(time.RFC3339, strings.TrimSpace(string(out)))
 }
 
-// Directories a build writes into, excluded from the idle walk so a stale
-// node_modules or target does not make an abandoned worktree look busy.
+// A stale node_modules or target must not make an abandoned worktree look busy.
 var idleWalkSkipDirs = map[string]bool{
 	".git":         true,
 	"node_modules": true,
@@ -168,7 +162,6 @@ var idleWalkSkipDirs = map[string]bool{
 }
 
 // The newest modification time in the tree, 8.9 ms p50 per worktree measured.
-// It is what makes idle honest for a worktree attn never ran a session in.
 func NewestTreeModTime(path string) (time.Time, error) {
 	newest := time.Time{}
 	err := filepath.WalkDir(path, func(name string, entry fs.DirEntry, err error) error {

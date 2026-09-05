@@ -22,8 +22,7 @@ const REMOVAL_TIMEOUT_MS = 60_000;
 const RESTART_READY_TIMEOUT_MS = 60_000;
 const DELEGATE_TIMEOUT_MS = 180_000;
 
-// Measured on this fixture (macOS, APFS): 6.5 s of `git status --untracked-files=all`
-// and 1.9 s of tree walking across the worktrees. attn's own 147 cost ~12 s.
+// Measured here (macOS, APFS): 6.5 s of `git status`, 1.9 s of tree walking.
 const SLOW_REPO_FILES = 40_000;
 const FILLER_WORKTREES = 6;
 
@@ -48,8 +47,7 @@ function runJSON(binary, args, env, options) {
   return JSON.parse(run(binary, args, env, options));
 }
 
-// The fixture lives under /var/folders, a symlink to /private/var on macOS, and
-// the two sides of this comparison do not always agree on which form they hold.
+// /var/folders is a symlink to /private/var and the two sides disagree on which form they hold.
 function sameDir(left, right) {
   if (!left || !right) return false;
   try {
@@ -64,8 +62,7 @@ const GIT_ENV = {
   GIT_COMMITTER_NAME: 'harness', GIT_COMMITTER_EMAIL: 'harness@test',
 };
 
-// Quiet and unbuffered: committing 40k files overflows execFileSync's stdout
-// buffer, which fails the run with ENOBUFS rather than anything about git.
+// Committing 40k files overflows execFileSync's stdout buffer: ENOBUFS, not a git error.
 function git(dir, args) {
   execFileSync('git', args, { cwd: dir, env: { ...process.env, ...GIT_ENV }, stdio: 'ignore' });
 }
@@ -107,8 +104,6 @@ function fillWithFiles(dir, count) {
   }
 }
 
-// Every worktree is cut from the pushed tip, so all read merged and the gate each
-// one trips is what separates them.
 function buildFixtureRepo(root) {
   const origin = path.join(root, 'origin.git');
   const main = path.join(root, 'main');
@@ -146,8 +141,7 @@ function rowFor(state, worktreePath) {
   return (state?.rows || []).find((row) => row.path === worktreePath) || null;
 }
 
-// The registry outlives a run, so an earlier run's rows sit in the panel beside
-// this one's. Count only what this fixture put there.
+// The registry outlives a run, so count only what this fixture put there.
 function fixtureRows(state, fixture) {
   const root = path.dirname(fixture.main) + path.sep;
   return (state?.rows || []).filter((row) => row.path.startsWith(root));
@@ -238,8 +232,7 @@ async function main() {
       runner.assert(planted.length === 1, 'the delegation planted exactly one seed', planted);
       seed = planted[0];
 
-      // The CLI returns once the seed is planted; the session it spawns reaches
-      // the app a moment later, so wait for it rather than read the map now.
+      // The CLI returns once the seed is planted, before its session exists.
       await observer.waitFor(() => {
         delegateSession = [...observer.sessionsById.values()]
           .find((session) => !known.has(session.id) && sameDir(session.directory, fixture.worktrees.merged))
@@ -251,8 +244,7 @@ async function main() {
     await runner.step('leg1_the_panel_says_what_it_would_do_and_why', async () => {
       await client.request('worktrees_open_panel');
       await client.request('worktrees_refresh');
-      // Rows arrive as the pass walks the repository and the verdicts come after
-      // all of them, so a decided row is the end of the pass. Earlier races it.
+      // Verdicts come after every row, so a decided row is the end of the pass.
       const state = await poll(async () => {
         const current = await client.request('worktrees_get_state');
         return fixtureRows(current, fixture).length >= fixture.count
@@ -309,8 +301,7 @@ async function main() {
       runner.assert(/kept forever/.test(pinned.sweep + pinned.reason),
         'a pinned row says it is kept forever', pinned);
 
-      // Scoped to this repository: the CLI pages at 20 rows and the registry
-      // carries earlier runs, so an unscoped list can omit the row under test.
+      // The CLI pages at 20 rows and the registry carries earlier runs.
       const listed = runJSON(binary, ['worktree', 'list', '--repo', fixture.main, '--json'], daemonEnv);
       const stored = (listed.worktrees || []).find((row) => row.path === target);
       runner.assert(stored?.pinned === true, 'the CLI sees the pin the app set', stored);

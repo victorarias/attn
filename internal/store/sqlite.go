@@ -1735,8 +1735,7 @@ func applyMigration128(tx *sql.Tx) error {
 	return err
 }
 
-// Observed state lives on the row so no surface runs git. The columns default to
-// empty, which reads as "never refreshed" until the background pass writes them.
+// Observed state lives on the row so no surface runs git; empty means never refreshed.
 func applyMigration135(tx *sql.Tx, schema string) error {
 	columns := []struct {
 		name string

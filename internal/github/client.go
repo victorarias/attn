@@ -681,8 +681,6 @@ func (c *Client) Host() string {
 	return c.host
 }
 
-// The head branch is the sweep's strongest merged signal; the base branch is what
-// resolves the repository's integration branch.
 type MergedPullRequest struct {
 	Number   int
 	URL      string
@@ -693,7 +691,6 @@ type MergedPullRequest struct {
 }
 
 // 300 merged pull requests, past the 152 and 200 the measured repositories carry.
-// Receipts in docs/worktree-sweep.md.
 const mergedPullRequestPageLimit = 3
 
 func (c *Client) ListMergedPullRequests(repo string) ([]MergedPullRequest, error) {

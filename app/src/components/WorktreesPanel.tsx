@@ -56,8 +56,6 @@ export function stateChips(worktree: Worktree): string[] {
   return chips;
 }
 
-// "scheduled" is the only status with a date attached; the rest already read as a
-// reason on their own.
 export function sweepLabel(worktree: Worktree): string {
   const status = worktree.sweep_status ?? '';
   if (worktree.pinned) return 'kept forever';
@@ -176,8 +174,8 @@ export function WorktreesPanel({
     });
   }, [setKeep, withBusy]);
 
-  // The daemon's push is what drops the row and writes the log entry; a local
-  // guess here would be a second entry.
+  // The daemon's push drops the row and writes the entry; a local guess would
+  // be a second one.
   const remove = useCallback((worktree: Worktree) => {
     setConfirmDelete(null);
     return withBusy(worktree.path, () => deleteWorktree(worktree.path, Boolean(worktree.dirty)));

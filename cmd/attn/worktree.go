@@ -29,7 +29,6 @@ const worktreeUsage = `usage: attn worktree list [--repo <path>] [--limit <n>] [
   refresh   ask the daemon to refresh worktree state now instead of on its tick
 `
 
-// The default page: fits an 80x24 terminal with the header and the omitted notice.
 const worktreeListDefaultLimit = 20
 
 func runWorktree() {

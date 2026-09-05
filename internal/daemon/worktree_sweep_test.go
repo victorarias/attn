@@ -40,8 +40,8 @@ func newSweepRepo(t *testing.T) *sweepRepo {
 	return repo
 }
 
-// The message is a parameter because two commits with the same tree, parent, author
-// and second hash identically, and some cases need them distinct.
+// The message is a parameter because two commits with the same tree, parent,
+// author and second hash identically, and some cases need them distinct.
 func (r *sweepRepo) commitIn(dir, file, content, message string) string {
 	r.t.Helper()
 	if err := os.WriteFile(filepath.Join(dir, file), []byte(content), 0o600); err != nil {
@@ -106,8 +106,7 @@ func TestWorktreeRefreshObservesEachMergedSignal(t *testing.T) {
 	base := strings.TrimSpace(gitOutput(t, repo.main, "rev-parse", "HEAD"))
 	ancestor := repo.worktree("ancestor", "feat/ancestor", base)
 
-	// What a squash or rebase merge leaves behind: identical content on main
-	// through a different commit.
+	// What a squash or rebase merge leaves behind.
 	tree := repo.worktree("tree", "feat/tree", base)
 	repo.commitIn(tree, "shared.txt", "shared\n", "on the branch")
 	repo.commitOnMain("shared.txt", "shared\n", "on main")
@@ -167,8 +166,7 @@ func TestWorktreeSweepKeepsForEachReason(t *testing.T) {
 	unmerged := repo.worktree("unmerged", "feat/unmerged", base)
 	repo.commitIn(unmerged, "only-here.txt", "only here\n", "unmerged work")
 
-	// Merged by pull request, then one more commit past the recorded tip: rule 6
-	// counts only what the merge does not account for.
+	// One commit past the recorded merged tip.
 	unpushed := repo.worktree("unpushed", "feat/unpushed", base)
 	mergedHead := repo.commitIn(unpushed, "merged.txt", "merged\n", "the merged tip")
 	repo.commitIn(unpushed, "after.txt", "after\n", "after the merge")
@@ -406,7 +404,6 @@ func TestWorktreeSweepNotesTheRemovalOnItsSeed(t *testing.T) {
 		t.Fatalf("recording the dispatch: %v", err)
 	}
 	d.store.Remove("session-worked")
-	// What keeps the repository tracked once the delegated session is gone.
 	d.store.Add(&protocol.Session{ID: "session-main", Directory: repo.main})
 
 	if _, removed, _ := d.worktreeSweepPass(time.Now()); removed != 1 {
@@ -497,8 +494,7 @@ func TestDeletingAWorktreeByHandLeavesTheSameTrailAsTheSweep(t *testing.T) {
 	}
 }
 
-// The panel iterates both arrays. A nil slice marshals to null, and iterating
-// null takes the whole app down through its error boundary, not just the panel.
+// Iterating a null takes the whole app down through its error boundary.
 func TestTheWorktreeSurfaceNeverPutsNullWhereTheAppExpectsAnArray(t *testing.T) {
 	d := newEnrolledDaemon(t, "")
 	t.Cleanup(d.stopEventBus)
@@ -522,8 +518,6 @@ func TestTheWorktreeSurfaceNeverPutsNullWhereTheAppExpectsAnArray(t *testing.T) 
 	}
 }
 
-// A failed refresh leaves the rows holding whatever the last good pass saw. Acting
-// on that removes work done since, and the forced branch delete makes it permanent.
 func TestASweepNeverActsOnARepositoryItCouldNotRefresh(t *testing.T) {
 	t.Setenv("ATTN_WORKTREE_SWEEP_IDLE_DAYS", "0")
 	repo := newSweepRepo(t)
@@ -550,8 +544,7 @@ func TestASweepNeverActsOnARepositoryItCouldNotRefresh(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(stale, "new-work.txt")); err != nil {
 		t.Fatalf("the work committed since the last refresh is gone: %v", err)
 	}
-	// Not attempted, not merely survived: a removal the stale row asked for and
-	// git happened to refuse still writes its failure here.
+	// A removal git happened to refuse still writes its failure here.
 	if entries, _ := d.store.WorktreeSweepLog(repo.main, 10); len(entries) != 0 {
 		t.Fatalf("the sweep acted on a repository it could not refresh: %+v", entries)
 	}
@@ -560,6 +553,54 @@ func TestASweepNeverActsOnARepositoryItCouldNotRefresh(t *testing.T) {
 	if row.SweepStatus != store.WorktreeSweepUnknown ||
 		!strings.Contains(row.SweepReason, "could not be refreshed") {
 		t.Errorf("row after a failed refresh = %q / %q, want it to say nothing is decided",
+			row.SweepStatus, row.SweepReason)
+	}
+}
+
+func TestAFailedStashListingStopsTheSweepRatherThanReadingAsNoStash(t *testing.T) {
+	t.Setenv("ATTN_WORKTREE_SWEEP_IDLE_DAYS", "0")
+	repo := newSweepRepo(t)
+	d := sweepDaemon(t)
+	now := time.Now()
+	base := strings.TrimSpace(gitOutput(t, repo.main, "rev-parse", "HEAD"))
+
+	stashed := repo.worktree("stashed", "feat/stashed", base)
+	if err := os.WriteFile(filepath.Join(stashed, "tracked.txt"), []byte("one\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGitDaemon(t, stashed, "add", "tracked.txt")
+	runGitDaemon(t, stashed, "commit", "-m", "tracked")
+	if err := os.WriteFile(filepath.Join(stashed, "tracked.txt"), []byte("two\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGitDaemon(t, stashed, "stash", "push", "-m", "keep me")
+	d.store.RecordRepoMergedBranches(repo.main, []store.MergedBranch{{Branch: "feat/stashed", Number: 9}}, now)
+	d.store.SetRepoIntegrationBranch(repo.main, "main", "pull_requests", now)
+
+	d.refreshRepositoryWorktrees(repo.main, now)
+	if verdict := verdictFor(t, d, repo.main, stashed, 0, now); verdict.Status != store.WorktreeSweepKeptDirty {
+		t.Fatalf("the stash gate does not hold before the listing breaks: %q / %q", verdict.Status, verdict.Reason)
+	}
+
+	// A stash ref pointing at an object that is gone: git refuses the listing.
+	stashRef := filepath.Join(repo.root, "main", ".git", "refs", "stash")
+	if err := os.WriteFile(stashRef, []byte(strings.Repeat("0", 39)+"1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, removed, _ := d.worktreeSweepPass(time.Now()); removed != 0 {
+		t.Fatalf("the sweep removed %d worktrees while it could not see the stashes, want 0", removed)
+	}
+	if _, err := os.Stat(stashed); err != nil {
+		t.Fatalf("the worktree holding the stash is gone: %v", err)
+	}
+	if entries, _ := d.store.WorktreeSweepLog(repo.main, 10); len(entries) != 0 {
+		t.Fatalf("the sweep acted while it could not see the stashes: %+v", entries)
+	}
+	row := rowFor(t, d, stashed)
+	if row.SweepStatus != store.WorktreeSweepUnknown ||
+		!strings.Contains(row.SweepReason, "could not be refreshed") {
+		t.Errorf("row after a failed stash listing = %q / %q, want it to say nothing is decided",
 			row.SweepStatus, row.SweepReason)
 	}
 }
