@@ -8,6 +8,7 @@ import (
 	"syscall"
 
 	"github.com/victorarias/attn/internal/protocol"
+	"github.com/victorarias/attn/internal/store"
 )
 
 func (d *Daemon) handleClearSessionsWS() {
@@ -38,7 +39,7 @@ func (d *Daemon) handleUnregisterWS(client *wsClient, msg *protocol.UnregisterMe
 		d.sendCommandError(client, protocol.CmdUnregister, err.Error())
 		return
 	}
-	d.commitSessionUnregister(msg.ID)
+	d.commitSessionUnregister(msg.ID, store.SessionClose{By: store.SessionClosedByUser})
 	d.detachSession(client, msg.ID)
 	if teardown != nil && teardown.session != nil {
 		d.publishSessionUnregistered(teardown.session)

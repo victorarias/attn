@@ -1,0 +1,3 @@
+kind: changed
+area: sessions
+change: Closing a session now records it instead of deleting it. Closed sessions leave every live surface but keep their row and history, `attn session list` and `attn session show` read them back, and closing no longer asks whether to delete the worktree. Closing also finalizes the session's cost, keeping the per-model totals and dropping the per-observation usage behind them.

@@ -49,6 +49,18 @@ func runSession() {
 			return
 		}
 		runSessionTranscript(os.Args[3:])
+	case "list":
+		if hasHelpFlag(os.Args[3:]) {
+			writeSessionHelp(os.Stdout)
+			return
+		}
+		runSessionList(os.Args[3:])
+	case "show":
+		if hasHelpFlag(os.Args[3:]) {
+			writeSessionHelp(os.Stdout)
+			return
+		}
+		runSessionShow(os.Args[3:])
 	default:
 		fmt.Fprintf(os.Stderr, "session: unknown command %q\n", os.Args[2])
 		writeSessionHelp(os.Stderr)
@@ -272,5 +284,11 @@ commands:
         read provider-neutral, timestamped, redacted conversation and tool
         events. --after resumes strictly after a prior cursor; --follow polls
         until interrupted; --json emits one event per line.
+  list [--closed | --all] [--limit <n>] [--before <id>] [--json]
+        read the session ledger, newest first: live sessions by default,
+        --closed for the ones that ended, --all for both. When rows are
+        omitted the notice names the id to pass to --before for the next page.
+  show <id>
+        read one ledger row, live or closed, including who closed it and why.
 `)
 }

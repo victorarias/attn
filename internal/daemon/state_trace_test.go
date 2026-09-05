@@ -11,6 +11,7 @@ import (
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/pty"
 	"github.com/victorarias/attn/internal/statetrace"
+	"github.com/victorarias/attn/internal/store"
 )
 
 func newTraceDaemon(t *testing.T) *Daemon {
@@ -79,7 +80,7 @@ func TestTraceDoesNotResurrectARingAfterRemoval(t *testing.T) {
 	addCharacterizationSession(t, d, id, protocol.SessionAgentClaude, protocol.SessionStateWorking)
 	d.handlePTYState(id, heartbeatObs("not_busy", "test", time.Now()))
 
-	d.dropSessionRecord(id)
+	d.closeSession(id, store.SessionClose{By: store.SessionClosedByUser})
 	d.handlePTYState(id, heartbeatObs("busy", "test", time.Now()))
 
 	if got := traceOf(t, d, id); got != nil {
@@ -143,7 +144,7 @@ func TestTraceIsDroppedWhenTheSessionRecordGoes(t *testing.T) {
 		t.Fatal("precondition: expected a recorded observation")
 	}
 
-	d.dropSessionRecord(id)
+	d.closeSession(id, store.SessionClose{By: store.SessionClosedByUser})
 
 	if got := traceOf(t, d, id); got != nil {
 		t.Fatalf("trace survived session removal: %+v", got)
@@ -165,7 +166,7 @@ func TestTraceDoesNotLeakWhenRemovalRacesTheWrite(t *testing.T) {
 		once.Do(func() {
 			go func() {
 				defer close(removalDone)
-				d.dropSessionRecord(id)
+				d.closeSession(id, store.SessionClose{By: store.SessionClosedByUser})
 			}()
 			time.Sleep(20 * time.Millisecond)
 		})

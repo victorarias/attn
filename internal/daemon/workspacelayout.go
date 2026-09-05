@@ -11,6 +11,7 @@ import (
 	"github.com/victorarias/attn/internal/garden"
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/rankkey"
+	"github.com/victorarias/attn/internal/store"
 	"github.com/victorarias/attn/internal/workspacelayout"
 )
 
@@ -1132,7 +1133,7 @@ func (d *Daemon) handleWorkspaceLayoutClosePane(client *wsClient, msg *protocol.
 	}
 
 	if teardown != nil {
-		d.commitSessionUnregister(sessionID)
+		d.commitSessionUnregister(sessionID, store.SessionClose{By: store.SessionClosedByUser})
 		if teardown.session != nil {
 			d.publishSessionUnregistered(teardown.session)
 			d.dissociateSessionFromWorkspace(teardown.session.ID)

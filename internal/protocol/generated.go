@@ -6735,6 +6735,12 @@ type Response struct {
 	// "session_instructions_result".
 	SessionInstructionsResult *SessionInstructionsResult `json:"session_instructions_result,omitempty,omitzero"`
 
+	// SessionListResult corresponds to the JSON schema field "session_list_result".
+	SessionListResult *SessionListResult `json:"session_list_result,omitempty,omitzero"`
+
+	// SessionShowResult corresponds to the JSON schema field "session_show_result".
+	SessionShowResult *SessionShowResult `json:"session_show_result,omitempty,omitzero"`
+
 	// SessionTranscriptResult corresponds to the JSON schema field
 	// "session_transcript_result".
 	SessionTranscriptResult *SessionTranscriptResult `json:"session_transcript_result,omitempty,omitzero"`
@@ -8281,6 +8287,75 @@ type SessionInstructionsResult struct {
 	TranscriptPath string `json:"transcript_path"`
 }
 
+type SessionLedgerEntry struct {
+	// Agent corresponds to the JSON schema field "agent".
+	Agent string `json:"agent"`
+
+	// Branch corresponds to the JSON schema field "branch".
+	Branch *string `json:"branch,omitempty,omitzero"`
+
+	// CloseReason corresponds to the JSON schema field "close_reason".
+	CloseReason *string `json:"close_reason,omitempty,omitzero"`
+
+	// ClosedAt corresponds to the JSON schema field "closed_at".
+	ClosedAt *string `json:"closed_at,omitempty,omitzero"`
+
+	// ClosedBy corresponds to the JSON schema field "closed_by".
+	ClosedBy *string `json:"closed_by,omitempty,omitzero"`
+
+	// Directory corresponds to the JSON schema field "directory".
+	Directory string `json:"directory"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID string `json:"id"`
+
+	// IsWorktree corresponds to the JSON schema field "is_worktree".
+	IsWorktree *bool `json:"is_worktree,omitempty,omitzero"`
+
+	// Label corresponds to the JSON schema field "label".
+	Label string `json:"label"`
+
+	// LastSeen corresponds to the JSON schema field "last_seen".
+	LastSeen string `json:"last_seen"`
+
+	// MainRepo corresponds to the JSON schema field "main_repo".
+	MainRepo *string `json:"main_repo,omitempty,omitzero"`
+
+	// State corresponds to the JSON schema field "state".
+	State SessionState `json:"state"`
+
+	// WorkspaceID corresponds to the JSON schema field "workspace_id".
+	WorkspaceID string `json:"workspace_id"`
+}
+
+type SessionListMessage struct {
+	// All corresponds to the JSON schema field "all".
+	All *bool `json:"all,omitempty,omitzero"`
+
+	// Before corresponds to the JSON schema field "before".
+	Before *string `json:"before,omitempty,omitzero"`
+
+	// Closed corresponds to the JSON schema field "closed".
+	Closed *bool `json:"closed,omitempty,omitzero"`
+
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Limit corresponds to the JSON schema field "limit".
+	Limit *int `json:"limit,omitempty,omitzero"`
+}
+
+type SessionListResult struct {
+	// Entries corresponds to the JSON schema field "entries".
+	Entries []SessionLedgerEntry `json:"entries"`
+
+	// NextBefore corresponds to the JSON schema field "next_before".
+	NextBefore *string `json:"next_before,omitempty,omitzero"`
+
+	// Omitted corresponds to the JSON schema field "omitted".
+	Omitted int `json:"omitted"`
+}
+
 type SessionMessage struct {
 	// Key corresponds to the JSON schema field "key".
 	Key string `json:"key"`
@@ -8389,6 +8464,19 @@ type SessionSelectedMessage struct {
 
 	// ID corresponds to the JSON schema field "id".
 	ID string `json:"id"`
+}
+
+type SessionShowMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// SessionID corresponds to the JSON schema field "session_id".
+	SessionID string `json:"session_id"`
+}
+
+type SessionShowResult struct {
+	// Entry corresponds to the JSON schema field "entry".
+	Entry SessionLedgerEntry `json:"entry"`
 }
 
 type SessionState string

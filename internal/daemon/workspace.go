@@ -8,6 +8,7 @@ import (
 	"github.com/victorarias/attn/internal/bus"
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/rankkey"
+	"github.com/victorarias/attn/internal/store"
 	"github.com/victorarias/attn/internal/workspacelayout"
 )
 
@@ -514,7 +515,7 @@ func (d *Daemon) handleUnregisterWorkspace(client *wsClient, msg *protocol.Unreg
 	}
 	for _, sid := range memberIDs {
 		teardown := teardowns[sid]
-		d.commitSessionUnregister(sid)
+		d.commitSessionUnregister(sid, store.SessionClose{By: store.SessionClosedByUser})
 		d.publishSessionUnregistered(teardown.session)
 	}
 

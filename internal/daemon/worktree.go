@@ -280,8 +280,7 @@ func (d *Daemon) cleanupDeletedWorktreeSessions(path string) {
 			continue
 		}
 		d.terminateSession(session.ID, syscall.SIGTERM)
-		d.dropSessionRecord(session.ID)
-		d.clearChiefOfStaffIfSession(session.ID)
+		d.closeSession(session.ID, store.SessionClose{By: store.SessionClosedByUser, Reason: "worktree deleted"})
 		d.publishSessionUnregistered(session)
 		d.dissociateSessionFromWorkspace(session.ID)
 		d.removeWorkspaceLayoutPaneForSession(session.ID)

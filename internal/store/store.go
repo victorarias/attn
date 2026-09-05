@@ -34,6 +34,7 @@ type Store struct {
 	sessionCosts    map[string]SessionCostState
 	agentDriverRuns map[string]AgentDriverReportCursor
 	teardownIntents map[string]SessionTeardownIntent
+	sessionCloses   map[string]sessionCloseMark
 	agentMetadata   map[string]string
 	profileRoles    map[string]string
 	workspaces      map[string]workspacelayout.WorkspaceLayout
@@ -79,18 +80,23 @@ type LaunchIntent struct {
 func New() *Store {
 	db, err := OpenDB(":memory:")
 	if err != nil {
-		return &Store{
-			sessions:        make(map[string]*protocol.Session),
-			agentDriverRuns: make(map[string]AgentDriverReportCursor),
-			teardownIntents: make(map[string]SessionTeardownIntent),
-			sessionCosts:    make(map[string]SessionCostState),
-			agentMetadata:   make(map[string]string),
-			profileRoles:    make(map[string]string),
-			workspaces:      make(map[string]workspacelayout.WorkspaceLayout),
-			recentLocations: make(map[string]*protocol.RecentLocation),
-		}
+		return newMapBackedStore()
 	}
 	return &Store{db: db}
+}
+
+func newMapBackedStore() *Store {
+	return &Store{
+		sessions:        make(map[string]*protocol.Session),
+		agentDriverRuns: make(map[string]AgentDriverReportCursor),
+		teardownIntents: make(map[string]SessionTeardownIntent),
+		sessionCloses:   make(map[string]sessionCloseMark),
+		sessionCosts:    make(map[string]SessionCostState),
+		agentMetadata:   make(map[string]string),
+		profileRoles:    make(map[string]string),
+		workspaces:      make(map[string]workspacelayout.WorkspaceLayout),
+		recentLocations: make(map[string]*protocol.RecentLocation),
+	}
 }
 
 func cloneSession(session *protocol.Session) *protocol.Session {
@@ -191,10 +197,15 @@ func (s *Store) AddCheckedUnlessTeardown(session *protocol.Session) error {
 	return s.addCheckedLocked(session, true)
 }
 
+// A closed row is refused rather than overwritten: re-registering a closed id
+// would run a session no live surface can see. Reopening clears the close first.
 func (s *Store) addCheckedLocked(session *protocol.Session, rejectTeardown bool) error {
 	if s.db == nil {
 		if _, closing := s.teardownIntents[session.ID]; rejectTeardown && closing {
 			return fmt.Errorf("session %s is closing", session.ID)
+		}
+		if _, closed := s.sessionCloses[session.ID]; closed {
+			return fmt.Errorf("add session %s: %w", session.ID, ErrSessionClosed)
 		}
 		if s.sessions == nil {
 			s.sessions = make(map[string]*protocol.Session)
@@ -230,6 +241,10 @@ func (s *Store) addCheckedLocked(session *protocol.Session, rejectTeardown bool)
 		if closing == 1 {
 			return fmt.Errorf("session %s is closing", session.ID)
 		}
+	}
+
+	if s.sessionClosedLocked(session.ID) {
+		return fmt.Errorf("add session %s: %w", session.ID, ErrSessionClosed)
 	}
 
 	todosJSON, err := json.Marshal(session.Todos)
@@ -292,6 +307,8 @@ func (s *Store) addCheckedLocked(session *protocol.Session, rejectTeardown bool)
 	return nil
 }
 
+// Get answers about live sessions only: a closed session is reachable through
+// the ledger and nowhere else, which is what keeps every caller here honest.
 func (s *Store) Get(id string) *protocol.Session {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -309,7 +326,7 @@ func (s *Store) Get(id string) *protocol.Session {
 
 	err := s.db.QueryRow(`
 		SELECT id, label, agent, directory, endpoint_id, workspace_id, branch, is_worktree, main_repo, state, state_since, state_updated_at, last_model_request_at, pinned_at, context_window_cap, parent_session_id, activity, activity_at, todos, last_seen
-		FROM sessions WHERE id = ?`, id).Scan(
+		FROM sessions WHERE id = ? AND closed_at = ''`, id).Scan(
 		&session.ID,
 		&session.Label,
 		&session.Agent,
@@ -390,6 +407,7 @@ func (s *Store) Remove(id string) {
 
 	if s.db == nil {
 		delete(s.sessions, id)
+		delete(s.sessionCloses, id)
 		delete(s.turnStamps, id)
 		delete(s.agentDriverRuns, id)
 		delete(s.agentMetadata, id)
@@ -414,6 +432,7 @@ func (s *Store) ClearSessions() {
 
 	if s.db == nil {
 		s.sessions = make(map[string]*protocol.Session)
+		s.sessionCloses = make(map[string]sessionCloseMark)
 		s.agentDriverRuns = make(map[string]AgentDriverReportCursor)
 		s.agentMetadata = make(map[string]string)
 		s.sessionCosts = make(map[string]SessionCostState)
@@ -438,6 +457,7 @@ func (s *Store) ClearSessions() {
 	}
 }
 
+// List answers about live sessions only, like Get.
 func (s *Store) List(stateFilter string) []*protocol.Session {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -465,11 +485,11 @@ func (s *Store) List(stateFilter string) []*protocol.Session {
 	if stateFilter == "" {
 		rows, err = s.db.Query(`
 			SELECT id, label, agent, directory, endpoint_id, workspace_id, branch, is_worktree, main_repo, state, state_since, state_updated_at, last_model_request_at, pinned_at, context_window_cap, parent_session_id, activity, activity_at, todos, last_seen
-			FROM sessions ORDER BY label, id`)
+			FROM sessions WHERE closed_at = '' ORDER BY label, id`)
 	} else {
 		rows, err = s.db.Query(`
 			SELECT id, label, agent, directory, endpoint_id, workspace_id, branch, is_worktree, main_repo, state, state_since, state_updated_at, last_model_request_at, pinned_at, context_window_cap, parent_session_id, activity, activity_at, todos, last_seen
-			FROM sessions WHERE state = ? ORDER BY label, id`, stateFilter)
+			FROM sessions WHERE state = ? AND closed_at = '' ORDER BY label, id`, stateFilter)
 	}
 	if err != nil {
 		return nil
@@ -560,7 +580,10 @@ func (s *Store) HasSessionInDirectory(directory string) bool {
 	defer s.mu.RUnlock()
 
 	if s.db == nil {
-		for _, session := range s.sessions {
+		for id, session := range s.sessions {
+			if _, closed := s.sessionCloses[id]; closed {
+				continue
+			}
 			if session.Directory == directory && session.State != protocol.SessionStateIdle {
 				return true
 			}
@@ -569,7 +592,7 @@ func (s *Store) HasSessionInDirectory(directory string) bool {
 	}
 
 	var count int
-	err := s.db.QueryRow(`SELECT COUNT(*) FROM sessions WHERE directory = ? AND state != ?`, directory, string(protocol.SessionStateIdle)).Scan(&count)
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM sessions WHERE directory = ? AND state != ? AND closed_at = ''`, directory, string(protocol.SessionStateIdle)).Scan(&count)
 	if err != nil {
 		return false
 	}
@@ -620,7 +643,7 @@ func (s *Store) UpdateState(id, state string) bool {
 	}
 
 	now := time.Now().Format(time.RFC3339Nano)
-	result, err := s.db.Exec(`UPDATE sessions SET state = ?, state_since = ?, state_updated_at = ? WHERE id = ?`,
+	result, err := s.db.Exec(`UPDATE sessions SET state = ?, state_since = ?, state_updated_at = ? WHERE id = ? AND closed_at = ''`,
 		state, now, now, id)
 	if err != nil {
 		log.Printf("[store] UpdateState: failed for session %s: %v", id, err)
@@ -657,7 +680,7 @@ func (s *Store) MarkModelRequestStarted(id string, at time.Time) bool {
 	if !currentAt.IsZero() && !at.After(currentAt) {
 		return false
 	}
-	result, err := s.db.Exec("UPDATE sessions SET last_model_request_at = ? WHERE id = ?", stamp, id)
+	result, err := s.db.Exec("UPDATE sessions SET last_model_request_at = ? WHERE id = ? AND closed_at = ''", stamp, id)
 	if err != nil {
 		log.Printf("[store] MarkModelRequestStarted: failed for session %s: %v", id, err)
 		return false
@@ -682,7 +705,7 @@ func (s *Store) UpdateTodos(id string, todos []string) {
 		log.Printf("[store] UpdateTodos: failed to marshal todos for session %s: %v", id, err)
 		return
 	}
-	_, err = s.db.Exec("UPDATE sessions SET todos = ? WHERE id = ?", string(todosJSON), id)
+	_, err = s.db.Exec("UPDATE sessions SET todos = ? WHERE id = ? AND closed_at = ''", string(todosJSON), id)
 	if err != nil {
 		log.Printf("[store] UpdateTodos: failed for session %s: %v", id, err)
 	}
@@ -709,7 +732,7 @@ func (s *Store) UpdateBranch(id, branch string, isWorktree bool, mainRepo string
 		return
 	}
 
-	_, err := s.db.Exec(`UPDATE sessions SET branch = ?, is_worktree = ?, main_repo = ? WHERE id = ?`,
+	_, err := s.db.Exec(`UPDATE sessions SET branch = ?, is_worktree = ?, main_repo = ? WHERE id = ? AND closed_at = ''`,
 		branch, boolToInt(isWorktree), mainRepo, id)
 	if err != nil {
 		log.Printf("[store] UpdateBranch: failed for session %s: %v", id, err)
@@ -727,7 +750,7 @@ func (s *Store) UpdateSessionLabel(id, label string) {
 		return
 	}
 
-	if _, err := s.db.Exec(`UPDATE sessions SET label = ? WHERE id = ?`, label, id); err != nil {
+	if _, err := s.db.Exec(`UPDATE sessions SET label = ? WHERE id = ? AND closed_at = ''`, label, id); err != nil {
 		log.Printf("[store] UpdateSessionLabel: failed for session %s: %v", id, err)
 	}
 }
@@ -744,7 +767,7 @@ func (s *Store) Touch(id string) {
 	}
 
 	now := time.Now().Format(time.RFC3339Nano)
-	_, err := s.db.Exec("UPDATE sessions SET last_seen = ? WHERE id = ?", now, id)
+	_, err := s.db.Exec("UPDATE sessions SET last_seen = ? WHERE id = ? AND closed_at = ''", now, id)
 	if err != nil {
 		log.Printf("[store] Touch: failed for session %s: %v", id, err)
 	}
@@ -766,7 +789,7 @@ func (s *Store) SetResumeSessionID(id, resumeSessionID string) {
 				WHEN ? != '' AND resume_session_id = ? THEN transcript_path
 				ELSE ''
 			END
-		WHERE id = ?`, resumeSessionID, resumeSessionID, resumeSessionID, id)
+		WHERE id = ? AND closed_at = ''`, resumeSessionID, resumeSessionID, resumeSessionID, id)
 	if err != nil {
 		log.Printf("[store] SetResumeSessionID: failed for session %s: %v", id, err)
 	}
@@ -793,7 +816,7 @@ func (s *Store) SetLaunchIntent(id string, intent LaunchIntent) {
 		log.Printf("[store] SetLaunchIntent: failed to marshal launch intent for session %s: %v", id, err)
 		return
 	}
-	if _, err := s.db.Exec("UPDATE sessions SET launch_intent = ? WHERE id = ?", string(intentJSON), id); err != nil {
+	if _, err := s.db.Exec("UPDATE sessions SET launch_intent = ? WHERE id = ? AND closed_at = ''", string(intentJSON), id); err != nil {
 		log.Printf("[store] SetLaunchIntent: failed for session %s: %v", id, err)
 	}
 }
@@ -805,7 +828,7 @@ func (s *Store) ClearLaunchIntent(id string) {
 	if s.db == nil {
 		return
 	}
-	if _, err := s.db.Exec("UPDATE sessions SET launch_intent = '' WHERE id = ?", id); err != nil {
+	if _, err := s.db.Exec("UPDATE sessions SET launch_intent = '' WHERE id = ? AND closed_at = ''", id); err != nil {
 		log.Printf("[store] ClearLaunchIntent: failed for session %s: %v", id, err)
 	}
 }
@@ -952,7 +975,7 @@ func (s *Store) prepareSessionTeardown(id string, now time.Time, create bool) (A
 	}
 	if run.RunID != "" {
 		if _, err := tx.Exec(`UPDATE sessions SET agent_driver_plugin_name = '', agent_driver_run_id = '', agent_driver_report_seq = 0
-			WHERE id = ? AND agent_driver_plugin_name = ? AND agent_driver_run_id = ?`, id, run.PluginName, run.RunID); err != nil {
+			WHERE id = ? AND closed_at = '' AND agent_driver_plugin_name = ? AND agent_driver_run_id = ?`, id, run.PluginName, run.RunID); err != nil {
 			return AgentDriverReportCursor{}, false, fmt.Errorf("claim session %s driver owner: %w", id, err)
 		}
 	}
@@ -1041,7 +1064,7 @@ func (s *Store) CancelSessionTeardown(id string) error {
 	}
 	if run.RunID != "" {
 		if _, err := tx.Exec(`UPDATE sessions SET agent_driver_plugin_name = ?, agent_driver_run_id = ?, agent_driver_report_seq = ?
-			WHERE id = ? AND agent_driver_run_id = ''`, run.PluginName, run.RunID, run.Seq, id); err != nil {
+			WHERE id = ? AND closed_at = '' AND agent_driver_run_id = ''`, run.PluginName, run.RunID, run.Seq, id); err != nil {
 			return err
 		}
 	}
@@ -1111,7 +1134,7 @@ func (s *Store) ListAgentDriverRuns(pluginName string) []ActiveAgentDriverRun {
 	rows, err := s.db.Query(`
 		SELECT id, agent_driver_run_id, agent_metadata, agent_driver_report_seq
 		FROM sessions
-		WHERE agent_driver_plugin_name = ? AND agent_driver_run_id <> ''
+		WHERE agent_driver_plugin_name = ? AND agent_driver_run_id <> '' AND closed_at = ''
 		ORDER BY id`, pluginName)
 	if err != nil {
 		return nil
@@ -1155,7 +1178,7 @@ func (s *Store) ListActiveAgentDriverRuns() []ActiveAgentDriverRun {
 	rows, err := s.db.Query(`
 		SELECT id, agent_driver_run_id, agent_metadata, agent_driver_report_seq, agent_driver_plugin_name
 		FROM sessions
-		WHERE agent_driver_run_id <> ''
+		WHERE agent_driver_run_id <> '' AND closed_at = ''
 		ORDER BY id`)
 	if err != nil {
 		return nil
@@ -1195,7 +1218,7 @@ func (s *Store) BeginAgentDriverRun(id, pluginName, runID string) bool {
 		return true
 	}
 	result, err := s.db.Exec(
-		"UPDATE sessions SET agent_driver_plugin_name = ?, agent_driver_run_id = ?, agent_driver_report_seq = 0 WHERE id = ?",
+		"UPDATE sessions SET agent_driver_plugin_name = ?, agent_driver_run_id = ?, agent_driver_report_seq = 0 WHERE id = ? AND closed_at = ''",
 		pluginName,
 		runID,
 		id,
@@ -1233,7 +1256,7 @@ func (s *Store) EndAgentDriverRun(id string) AgentDriverReportCursor {
 
 	if s.db == nil {
 		cursor := s.agentDriverRuns[id]
-		if cursor.RunID == "" {
+		if cursor.RunID == "" || !s.sessionIsLiveLocked(id) {
 			return AgentDriverReportCursor{}
 		}
 		delete(s.agentDriverRuns, id)
@@ -1252,7 +1275,7 @@ func (s *Store) EndAgentDriverRun(id string) AgentDriverReportCursor {
 		return AgentDriverReportCursor{}
 	}
 	result, err := s.db.Exec(
-		"UPDATE sessions SET agent_driver_plugin_name = '', agent_driver_run_id = '', agent_driver_report_seq = 0 WHERE id = ? AND agent_driver_plugin_name = ? AND agent_driver_run_id = ?",
+		"UPDATE sessions SET agent_driver_plugin_name = '', agent_driver_run_id = '', agent_driver_report_seq = 0 WHERE id = ? AND closed_at = '' AND agent_driver_plugin_name = ? AND agent_driver_run_id = ?",
 		id,
 		cursor.PluginName,
 		cursor.RunID,
@@ -1309,7 +1332,7 @@ func (s *Store) ApplyAgentDriverState(id, runID string, seq uint64, state string
 		UPDATE sessions
 		SET state = ?, state_since = ?, state_updated_at = ?, agent_driver_report_seq = ?,
 			last_model_request_at = COALESCE(NULLIF(?, ''), last_model_request_at)
-		WHERE id = ? AND agent_driver_run_id = ? AND agent_driver_report_seq < ?`,
+		WHERE id = ? AND closed_at = '' AND agent_driver_run_id = ? AND agent_driver_report_seq < ?`,
 		state,
 		now,
 		now,
@@ -1351,7 +1374,7 @@ func (s *Store) ApplyAgentDriverMetadata(id, runID string, seq uint64, metadata 
 	result, err := s.db.Exec(`
 		UPDATE sessions
 		SET agent_metadata = ?, agent_driver_report_seq = ?
-		WHERE id = ? AND agent_driver_run_id = ? AND agent_driver_report_seq < ?`,
+		WHERE id = ? AND closed_at = '' AND agent_driver_run_id = ? AND agent_driver_report_seq < ?`,
 		strings.TrimSpace(metadata),
 		seq,
 		id,

@@ -287,7 +287,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 
-export const PROTOCOL_VERSION = '287';
+export const PROTOCOL_VERSION = '288';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 const CLIENT_INSTANCE_ID =

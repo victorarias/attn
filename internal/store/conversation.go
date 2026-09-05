@@ -76,12 +76,12 @@ func (s *Store) transitionSessionConversation(sessionID, nativeID, transcriptPat
 		transcriptPath = ""
 	}
 
-	query := `UPDATE sessions SET resume_session_id = ?, transcript_path = ? WHERE id = ?`
+	query := `UPDATE sessions SET resume_session_id = ?, transcript_path = ? WHERE id = ? AND closed_at = ''`
 	if current.NativeID != "" && current.NativeID != nativeID {
 		query = `
 			UPDATE sessions
 			SET resume_session_id = ?, transcript_path = ?, activity = '', activity_at = '', activity_cursor = ''
-			WHERE id = ?
+			WHERE id = ? AND closed_at = ''
 		`
 	}
 	if _, err := tx.Exec(query, nativeID, transcriptPath, sessionID); err != nil {

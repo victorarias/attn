@@ -637,7 +637,7 @@ commands:
   agent msg <target> "text"            notify a live session, crew member or seed's tender
   agent inbox [message-id]              read durable agent notifications
   agent msg-status <message-id>         inspect a sent peer message
-	  session <command>                 inspect a session's conversation
+  session <command>                 read the session ledger and a session's conversation
   state explain <id>                replay why a session's state is what it is
   delegate --brief-file <path> --model <name>  start another agent with a delegated brief
   delegate --plot <seed-id> --model <name>     start another agent at an existing seed

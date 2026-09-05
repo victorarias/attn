@@ -8,6 +8,7 @@ import (
 
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/pty"
+	"github.com/victorarias/attn/internal/store"
 )
 
 func seedDriverRun(t *testing.T, d *Daemon, sessionID, pluginName, runID string, state protocol.SessionState) {
@@ -151,7 +152,7 @@ func TestPluginDriverSilence_ClosedSessionCancelsTheAlarm(t *testing.T) {
 		seedDriverRun(t, d, "closed-driver", "snipe-plugin", "run-1", protocol.SessionStateWorking)
 
 		d.armPluginDriverSilenceWatch("snipe-plugin")
-		d.dropSessionRecord("closed-driver")
+		d.closeSession("closed-driver", store.SessionClose{By: store.SessionClosedByUser})
 		if d.pluginDriverSilence().disarm("closed-driver") {
 			t.Fatal("alarm still pending for a session that is gone")
 		}

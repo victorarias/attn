@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import './WorktreeCleanupPrompt.css';
+import './SessionCreationProgress.css';
 
 export type SessionCreationPhase = 'creating_worktree' | 'starting_session';
 
@@ -194,7 +194,7 @@ export function SessionCreationProgress({
     <>
       <div
         ref={overlayRef}
-        className={`worktree-cleanup-prompt ${isCompact ? 'surface-hidden' : ''}`}
+        className={`session-progress-prompt ${isCompact ? 'surface-hidden' : ''}`}
         role="presentation"
       >
         <div
@@ -234,7 +234,7 @@ export function SessionCreationProgress({
 
       <button
         ref={compactRef}
-        className={`worktree-cleanup-compact ${isCompact ? '' : 'surface-hidden'} ${hasError ? 'failed' : ''}`}
+        className={`session-progress-compact ${isCompact ? '' : 'surface-hidden'} ${hasError ? 'failed' : ''}`}
         type="button"
         aria-live="polite"
         onClick={() => setCompactAnimated(false)}
