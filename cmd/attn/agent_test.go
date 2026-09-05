@@ -507,3 +507,96 @@ func TestParseAgentMsgArgsTakesADashLeadingMessageAfterTheSeparator(t *testing.T
 		t.Fatalf("the usage error does not name the way through: %v", err)
 	}
 }
+
+func TestParseAgentCloseArgsRequiresATargetAReasonAndACaller(t *testing.T) {
+	tests := []struct {
+		name    string
+		args    []string
+		env     string
+		want    agentCloseArgs
+		wantErr string
+	}{
+		{
+			name: "the caller defaults to this session",
+			args: []string{"9f2a", "-m", "the PR merged"},
+			env:  "9f2a1111-2222-3333-4444-555566667777",
+			want: agentCloseArgs{target: "9f2a", reason: "the PR merged", source: "9f2a1111-2222-3333-4444-555566667777"},
+		},
+		{
+			name: "a seed id is a target like any other",
+			args: []string{"s-7k3f9m", "-m", "its report landed", "--json"},
+			env:  "bb22",
+			want: agentCloseArgs{target: "s-7k3f9m", reason: "its report landed", source: "bb22", json: true},
+		},
+		{
+			name: "an explicit caller wins over the environment",
+			args: []string{"9f2a", "-m", "done", "--source-session", "aa11"},
+			env:  "bb22",
+			want: agentCloseArgs{target: "9f2a", reason: "done", source: "aa11"},
+		},
+		{
+			name:    "no reason",
+			args:    []string{"9f2a"},
+			env:     "bb22",
+			wantErr: "a close needs a reason",
+		},
+		{
+			name:    "a blank reason",
+			args:    []string{"9f2a", "-m", "   "},
+			env:     "bb22",
+			wantErr: "a close needs a reason",
+		},
+		{
+			name:    "an unquoted reason",
+			args:    []string{"9f2a", "-m", "the", "PR", "merged"},
+			env:     "bb22",
+			wantErr: "quote the reason",
+		},
+		{
+			name:    "no target",
+			args:    []string{"-m", "done"},
+			env:     "bb22",
+			wantErr: "usage:",
+		},
+		{
+			name:    "outside a session with no caller",
+			args:    []string{"9f2a", "-m", "done"},
+			env:     "",
+			wantErr: "--source-session",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseAgentCloseArgs(tt.args, tt.env)
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("parseAgentCloseArgs() error = %v, want it to mention %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("parseAgentCloseArgs() error = %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("parseAgentCloseArgs() = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestPrintAgentCloseSaysWhatWasClosedAndWhereItWent(t *testing.T) {
+	var out strings.Builder
+	printAgentClose(&out, &protocol.AgentCloseResult{
+		TargetSessionID: "9f2a1111-2222-3333",
+		Label:           "sweep child",
+		Reason:          "reported back on the seed",
+		Rule:            protocol.AgentCloseRuleDispatcher,
+		SeedIds:         []string{"s-7k3f9m"},
+	})
+	text := out.String()
+	for _, want := range []string{"9f2a1111", "sweep child", "reported back on the seed", "s-7k3f9m", "attn session show"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("close output %q is missing %q", text, want)
+		}
+	}
+}

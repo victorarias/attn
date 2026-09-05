@@ -427,6 +427,27 @@ func (c *Client) AgentMsg(target, sourceSessionID, content string) (*protocol.Ag
 	return resp.AgentMsgResult, nil
 }
 
+func (c *Client) AgentClose(target, sourceSessionID, reason string) (*protocol.AgentCloseResult, error) {
+	msg := protocol.AgentCloseMessage{
+		Cmd:             protocol.CmdAgentClose,
+		TargetSessionID: target,
+		SourceSessionID: sourceSessionID,
+		Reason:          reason,
+	}
+	if garden.ValidateID(target) == nil {
+		msg.TargetSessionID = ""
+		msg.TargetSeedID = protocol.Ptr(target)
+	}
+	resp, err := c.send(msg)
+	if err != nil {
+		return nil, err
+	}
+	if resp.AgentCloseResult == nil {
+		return nil, errors.New("daemon returned no agent close result")
+	}
+	return resp.AgentCloseResult, nil
+}
+
 func (c *Client) AgentInbox(messageID, recipientSessionID string) (*protocol.AgentPeerMessage, error) {
 	resp, err := c.send(protocol.AgentInboxMessage{
 		Cmd: protocol.CmdAgentInbox, MessageID: protocol.Ptr(messageID),

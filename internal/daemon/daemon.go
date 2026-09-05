@@ -2650,6 +2650,8 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 
 	case protocol.CmdAgentMsg: // wire: agent_msg
 		d.handleAgentMsg(conn, msg.(*protocol.AgentMsgMessage))
+	case protocol.CmdAgentClose: // wire: agent_close
+		d.handleAgentClose(conn, msg.(*protocol.AgentCloseMessage))
 	case protocol.CmdAgentInbox: // wire: agent_inbox
 		d.handleAgentInbox(conn, msg.(*protocol.AgentInboxMessage))
 	case protocol.CmdAgentMsgStatus: // wire: agent_msg_status

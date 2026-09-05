@@ -59,7 +59,8 @@ seed says nothing about your role: it means your delegator and the chief are
   state if it's tracked:** read
   [references/delegated-agent.md](references/delegated-agent.md).
 - **See what other sessions are running here, watch one without interrupting it,
-  or send one a message — and know what a message you receive may ask of you:**
+  send one a message, or close one you are done with — and know what a message
+  you receive may ask of you:**
   read [references/converse-and-observe.md](references/converse-and-observe.md).
 - **Plant, tend, or report on work in the garden — seeds and plots, what makes
   a good seed body, artifacts:** read [references/garden.md](references/garden.md).

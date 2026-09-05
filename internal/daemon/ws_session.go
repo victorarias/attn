@@ -2,7 +2,6 @@ package daemon
 
 import (
 	"context"
-	"encoding/json"
 	"os"
 	"strings"
 	"syscall"
@@ -28,39 +27,12 @@ func (d *Daemon) handleUnregisterWS(client *wsClient, msg *protocol.UnregisterMe
 		return
 	}
 	d.logf("Unregistering session %s via WebSocket", msg.ID)
-	endpointID := ""
-	if d.hubManager != nil {
-		if resolved, ok := d.hubManager.EndpointIDForSession(msg.ID); ok {
-			endpointID = resolved
-		}
-	}
-	teardown, err := d.prepareSessionTeardown(msg.ID)
+	closing, err := d.beginSessionClose(msg.ID, store.SessionClose{By: store.SessionClosedByUser}, client)
 	if err != nil {
 		d.sendCommandError(client, protocol.CmdUnregister, err.Error())
 		return
 	}
-	d.commitSessionUnregister(msg.ID, store.SessionClose{By: store.SessionClosedByUser})
-	d.detachSession(client, msg.ID)
-	if teardown != nil && teardown.session != nil {
-		d.publishSessionUnregistered(teardown.session)
-		d.dissociateSessionFromWorkspace(teardown.session.ID)
-		d.removeWorkspaceLayoutPaneForSession(teardown.session.ID)
-		d.publishFact(FactSessionTerminated, teardown.session.ID, nil)
-	}
-	if endpointID != "" {
-		payload, err := json.Marshal(protocol.UnregisterMessage{
-			Cmd: protocol.CmdUnregister,
-			ID:  msg.ID,
-		})
-		if err != nil {
-			d.logf("marshal remote unregister failed for %s: %v", msg.ID, err)
-		} else if err := d.hubManager.ForwardEndpointCommand(context.Background(), endpointID, payload); err != nil {
-			d.logf("remote unregister forward failed for %s on endpoint %s: %v", msg.ID, endpointID, err)
-		}
-	}
-	if teardown != nil {
-		d.terminateSessionAsync(msg.ID, syscall.SIGTERM, teardown)
-	}
+	d.finishSessionClose(msg.ID, closing)
 }
 
 func (d *Daemon) handleGetRecentLocationsWS(client *wsClient, msg *protocol.GetRecentLocationsMessage) {

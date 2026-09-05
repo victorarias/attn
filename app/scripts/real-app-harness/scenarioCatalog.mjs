@@ -56,6 +56,13 @@ export const scenarioCatalog = [
     command: ['pnpm', 'run', 'real-app:scenario-close-pane-nonblocking'],
   },
   {
+    id: 'agent-close',
+    runnerId: 'AgentClose',
+    label: 'Agent close: a dispatcher closes its delegate, a sibling is refused, the seed keeps its tender',
+    command: ['pnpm', 'run', 'real-app:scenario-agent-close'],
+    timeoutMs: 240_000,
+  },
+  {
     id: 'session-close-ledger',
     runnerId: 'SESSION-CLOSE-LEDGER',
     label: 'Closing a worktree session records it and leaves the worktree alone',
