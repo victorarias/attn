@@ -221,6 +221,12 @@ func TestAFailedReopenPutsTheCloseBackAsItWas(t *testing.T) {
 		ClosedBy: "sess-boss", Reason: "brief delivered",
 	})
 
+	closed := d.store.SessionLedgerEntry("failed")
+	if closed == nil {
+		t.Fatal("the fixture did not close the session")
+	}
+	closedAt := protocol.Deref(closed.ClosedAt)
+
 	if _, err := d.reopenSession("failed", "", ""); err == nil {
 		t.Fatal("the reopen reported success although the spawn failed")
 	}
@@ -229,8 +235,8 @@ func TestAFailedReopenPutsTheCloseBackAsItWas(t *testing.T) {
 	if entry == nil {
 		t.Fatal("the failed reopen took the session out of the ledger")
 	}
-	if protocol.Deref(entry.ClosedAt) == "" {
-		t.Error("the failed reopen left the session open")
+	if at := protocol.Deref(entry.ClosedAt); at != closedAt {
+		t.Errorf("closed_at = %q, want the original close time %q", at, closedAt)
 	}
 	if by := protocol.Deref(entry.ClosedBy); by != "sess-boss" {
 		t.Errorf("closed_by = %q, want the original closer restored", by)

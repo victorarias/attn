@@ -703,13 +703,12 @@ func (d *Daemon) reopenSessionRuntime(
 	d.store.ClearSessionIntentionalClose(plan.SessionID)
 
 	// The store refuses a spawn that would re-register a closed row.
-	priorClose := d.sessionCloseAttribution(plan.SessionID)
-	reopened, err := d.store.ReopenSession(plan.SessionID)
+	lifted, reopened, err := d.store.ReopenSession(plan.SessionID)
 	if err != nil {
 		return nil, rollback.fail(err)
 	}
 	if reopened {
-		rollback.onSessionReopened(plan.SessionID, priorClose)
+		rollback.onSessionReopened(plan.SessionID, lifted)
 	}
 
 	// The spawn falls back to the binding the closed run left behind, so starting
@@ -785,10 +784,10 @@ func (d *Daemon) reopenSessionRuntime(
 }
 
 // Returns the row to the ledger under its original close instead of reaping its history.
-func (r *delegationRollback) onSessionReopened(sessionID string, closed store.SessionClose) {
+func (r *delegationRollback) onSessionReopened(sessionID string, closed store.SessionCloseRecord) {
 	r.undo = append(r.undo, func() error {
 		r.d.terminateSession(sessionID, syscall.SIGTERM)
-		r.d.closeSession(sessionID, closed)
+		r.d.restoreSessionClose(sessionID, closed)
 		return nil
 	})
 }
@@ -817,17 +816,6 @@ func (d *Daemon) forgetDispatchResume(sessionID string) {
 		return current, true, nil
 	}); err != nil {
 		d.logf("reopen: forgetting the resume id of session %s: %v", sessionID, err)
-	}
-}
-
-func (d *Daemon) sessionCloseAttribution(sessionID string) store.SessionClose {
-	entry := d.store.SessionLedgerEntry(sessionID)
-	if entry == nil {
-		return store.SessionClose{}
-	}
-	return store.SessionClose{
-		By:     protocol.Deref(entry.ClosedBy),
-		Reason: protocol.Deref(entry.CloseReason),
 	}
 }
 
