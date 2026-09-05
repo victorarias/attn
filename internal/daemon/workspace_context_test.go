@@ -265,11 +265,14 @@ func TestClosingFinalPaneRemovesContextWorkspace(t *testing.T) {
 	}
 
 	events := cap.snapshot()
-	if len(events) != 2 {
-		t.Fatalf("close broadcasts = %d, want 2: %+v", len(events), events)
+	// session_closed says where the session went; session_unregistered says the
+	// live one left. The Sessions surface reads the first, the workspace tree the second.
+	if len(events) != 3 {
+		t.Fatalf("close broadcasts = %d, want 3: %+v", len(events), events)
 	}
-	if events[0].Event != protocol.EventSessionUnregistered ||
-		events[1].Event != protocol.EventWorkspaceUnregistered {
-		t.Fatalf("close broadcast order = [%s, %s]", events[0].Event, events[1].Event)
+	if events[0].Event != protocol.EventSessionClosed ||
+		events[1].Event != protocol.EventSessionUnregistered ||
+		events[2].Event != protocol.EventWorkspaceUnregistered {
+		t.Fatalf("close broadcast order = [%s, %s, %s]", events[0].Event, events[1].Event, events[2].Event)
 	}
 }

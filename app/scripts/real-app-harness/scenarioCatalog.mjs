@@ -62,6 +62,12 @@ export const scenarioCatalog = [
     command: ['pnpm', 'run', 'real-app:scenario-session-close-ledger'],
   },
   {
+    id: 'sessions-surface',
+    runnerId: 'SESSIONS-SURFACE',
+    label: 'The Sessions surface lists, filters and updates live and closed sessions',
+    command: ['pnpm', 'run', 'real-app:scenario-sessions-surface'],
+  },
+  {
     id: 'tile-only-workspace-select',
     runnerId: 'TILE-ONLY-WORKSPACE-SELECT',
     label: 'Tile-only workspace select + render',

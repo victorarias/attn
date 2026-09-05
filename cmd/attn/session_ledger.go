@@ -6,19 +6,69 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strings"
 	"text/tabwriter"
+	"time"
 
 	"github.com/victorarias/attn/internal/client"
 	"github.com/victorarias/attn/internal/protocol"
 )
 
 type sessionListArgs struct {
-	closed bool
-	all    bool
-	limit  int
-	before string
-	json   bool
+	closed     bool
+	all        bool
+	limit      int
+	before     string
+	workspace  string
+	repository string
+	since      string
+	until      string
+	json       bool
+}
+
+// Resolved here, never by the daemon: only the client knows its timezone.
+// Calendar days, so "last 7 days" is today and the six before it.
+var sessionListPresets = map[string]int{"today": 0, "yesterday": 1, "7d": 6, "30d": 29}
+
+func sessionListPresetNames() string {
+	names := make([]string, 0, len(sessionListPresets))
+	for name := range sessionListPresets {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return strings.Join(names, ", ")
+}
+
+// Returns the half-open window a preset names: since inclusive, until exclusive
+// and empty when the preset runs up to now.
+func sessionListPresetWindow(name string, now time.Time) (string, string, error) {
+	back, known := sessionListPresets[name]
+	if !known {
+		return "", "", fmt.Errorf("--last %q is not a preset; pass one of: %s", name, sessionListPresetNames())
+	}
+	midnight := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	since := midnight.AddDate(0, 0, -back)
+	if name == "yesterday" {
+		return since.Format(time.RFC3339), midnight.Format(time.RFC3339), nil
+	}
+	return since.Format(time.RFC3339), "", nil
+}
+
+// A bare date means that day from its first instant, so --since 2026-09-05 does
+// not silently start at noon.
+func sessionListInstant(flagName, raw string, now time.Time) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", nil
+	}
+	if day, err := time.ParseInLocation("2006-01-02", raw, now.Location()); err == nil {
+		return day.Format(time.RFC3339), nil
+	}
+	if at, err := time.Parse(time.RFC3339, raw); err == nil {
+		return at.Format(time.RFC3339), nil
+	}
+	return "", fmt.Errorf("--%s %q is neither a date like 2026-09-05 nor an RFC3339 instant", flagName, raw)
 }
 
 func parseSessionListArgs(args []string) (sessionListArgs, error) {
@@ -28,6 +78,11 @@ func parseSessionListArgs(args []string) (sessionListArgs, error) {
 	all := fs.Bool("all", false, "list live and closed sessions together")
 	limit := fs.Int("limit", 0, "rows in one page (default 20)")
 	before := fs.String("before", "", "start after this session id, from a previous page's notice")
+	workspace := fs.String("workspace", "", "only sessions of this workspace id")
+	repository := fs.String("repository", "", "only sessions that ran in this repository path")
+	last := fs.String("last", "", "a date preset: "+sessionListPresetNames())
+	since := fs.String("since", "", "only sessions from this date or RFC3339 instant onwards")
+	until := fs.String("until", "", "only sessions before this date or RFC3339 instant")
 	jsonOut := fs.Bool("json", false, "print the page as JSON")
 	if err := fs.Parse(args); err != nil {
 		return sessionListArgs{}, err
@@ -41,7 +96,38 @@ func parseSessionListArgs(args []string) (sessionListArgs, error) {
 	if *limit < 0 {
 		return sessionListArgs{}, fmt.Errorf("--limit %d is not a number of rows", *limit)
 	}
-	return sessionListArgs{closed: *closed, all: *all, limit: *limit, before: strings.TrimSpace(*before), json: *jsonOut}, nil
+
+	parsed := sessionListArgs{
+		closed:     *closed,
+		all:        *all,
+		limit:      *limit,
+		before:     strings.TrimSpace(*before),
+		workspace:  strings.TrimSpace(*workspace),
+		repository: strings.TrimSpace(*repository),
+		json:       *jsonOut,
+	}
+
+	now := time.Now()
+	if preset := strings.TrimSpace(*last); preset != "" {
+		if strings.TrimSpace(*since) != "" || strings.TrimSpace(*until) != "" {
+			return sessionListArgs{}, errors.New("--last already names a window; pass --since/--until instead, not both")
+		}
+		windowSince, windowUntil, err := sessionListPresetWindow(preset, now)
+		if err != nil {
+			return sessionListArgs{}, err
+		}
+		parsed.since, parsed.until = windowSince, windowUntil
+		return parsed, nil
+	}
+
+	var err error
+	if parsed.since, err = sessionListInstant("since", *since, now); err != nil {
+		return sessionListArgs{}, err
+	}
+	if parsed.until, err = sessionListInstant("until", *until, now); err != nil {
+		return sessionListArgs{}, err
+	}
+	return parsed, nil
 }
 
 func runSessionList(args []string) {
@@ -57,6 +143,11 @@ func runSessionList(args []string) {
 		All:    parsed.all,
 		Limit:  parsed.limit,
 		Before: parsed.before,
+
+		WorkspaceID: parsed.workspace,
+		Repository:  parsed.repository,
+		Since:       parsed.since,
+		Until:       parsed.until,
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "session list: %v\n", err)
@@ -104,6 +195,8 @@ func emptySessionListMessage(args sessionListArgs) string {
 	switch {
 	case args.before != "":
 		return "no sessions past that page"
+	case args.workspace != "" || args.repository != "" || args.since != "" || args.until != "":
+		return "no sessions match those filters — drop one to widen the search"
 	case args.closed:
 		return "no closed sessions yet — closing one records it here"
 	case args.all:
@@ -161,6 +254,9 @@ func fprintSessionShow(w io.Writer, entry protocol.SessionLedgerEntry) {
 	}
 	if protocol.Deref(entry.IsWorktree) {
 		fmt.Fprintf(w, "worktree   yes, of %s\n", orDash(protocol.Deref(entry.MainRepo)))
+	}
+	if repository := protocol.Deref(entry.Repository); repository != "" {
+		fmt.Fprintf(w, "repository %s\n", repository)
 	}
 	fmt.Fprintf(w, "workspace  %s\n", orDash(entry.WorkspaceID))
 	fmt.Fprintf(w, "last seen  %s\n", shortStamp(entry.LastSeen))

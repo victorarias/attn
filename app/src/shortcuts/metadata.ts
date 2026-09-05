@@ -90,6 +90,7 @@ export const SHORTCUT_META: Record<ShortcutId, ShortcutMeta> = {
   'notebook.openFullscreen': { label: 'Open Notebook fullscreen', category: 'app' },
   // The id outlives the surface it was named for: it keys the user's saved rebindings.
   'board.open': { label: 'Open the garden', category: 'app' },
+  'sessions.open': { label: 'Open the sessions list', category: 'app' },
   'app.quit': { label: 'Quit attn', category: 'app', protected: true },
 };
 

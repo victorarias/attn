@@ -60,6 +60,7 @@
     "real-app:scenario-workspace-close-one-session-keeps-selection": "node scripts/real-app-harness/scenario-workspace-close-one-session-keeps-selection.mjs",
     "real-app:scenario-close-pane-nonblocking": "node scripts/real-app-harness/scenario-close-pane-nonblocking.mjs",
     "real-app:scenario-session-close-ledger": "node scripts/real-app-harness/scenario-session-close-ledger.mjs",
+    "real-app:scenario-sessions-surface": "node scripts/real-app-harness/scenario-sessions-surface.mjs",
     "real-app:scenario-tile-only-workspace-select": "node scripts/real-app-harness/scenario-tile-only-workspace-select.mjs",
     "real-app:scenario-markdown-opener": "node scripts/real-app-harness/scenario-markdown-opener.mjs",
     "real-app:scenario-notebook-tile-finder": "node scripts/real-app-harness/scenario-notebook-tile-finder.mjs",

@@ -6,6 +6,7 @@ import { getVersion } from '@tauri-apps/api/app';
 import { openPath, openUrl } from '@tauri-apps/plugin-opener';
 import { Sidebar, type SidebarHeaderAction, type DockItem, WorkflowIcon, EditorIcon, PRsIcon, NotebookIcon } from './components/Sidebar';
 import { Dashboard } from './components/Dashboard';
+import { SessionsPanel } from './components/SessionsPanel';
 import { activityStaleMs } from './utils/activitySettings';
 import { crewDisplayName } from './utils/crewName';
 import { AttentionDrawer } from './components/AttentionDrawer';
@@ -66,7 +67,7 @@ import {
   type WorkspaceSelectionStyle,
 } from './utils/workspaceSelectionStyle';
 import { useDaemonSocket, DaemonWorktree, DaemonSession, DaemonWorkspace, DaemonPR, DaemonEndpoint, DaemonPlugin, DaemonPluginIssue, GitStatusUpdate, SessionExitInfo, CriticalNotificationState, type SeedReviewActionContext } from './hooks/useDaemonSocket';
-import type { Presentation } from './types/generated';
+import type { Presentation, SessionLedgerEntry } from './types/generated';
 import { useSessionWorkspaceController } from './hooks/useSessionWorkspaceController';
 import { useGardenPresentation } from './hooks/useGardenPresentation';
 import { isAttentionSessionState, normalizeSessionState, type UISessionState } from './types/sessionState';
@@ -439,6 +440,8 @@ function App() {
   const installChannel = normalizeInstallChannel(import.meta.env.VITE_INSTALL_CHANNEL);
 
   const [presentationNotices, setPresentationNotices] = useState<Presentation[]>([]);
+  const [sessionCloseNotice, setSessionCloseNotice] =
+    useState<{ entry: SessionLedgerEntry; nonce: number }>();
 
   const {
     daemonSessions,
@@ -599,6 +602,7 @@ function App() {
     onWorktreesUpdate: setWorktrees,
     onGitStatusUpdate: setGitStatus,
     onSessionExited: handleSessionExited,
+    onSessionClosed: (entry) => setSessionCloseNotice((prev) => ({ entry, nonce: (prev?.nonce ?? 0) + 1 })),
   });
 
   const {
@@ -683,6 +687,7 @@ function App() {
           fsChangeSignals={fsChangeSignals}
           notebookTaskChangeSignal={notebookTaskChangeSignal}
           clearGitStatus={clearGitStatus}
+          sessionCloseNotice={sessionCloseNotice}
           registerSessionExitHandler={registerSessionExitHandler}
         />
       </DaemonApiProvider>
@@ -712,6 +717,7 @@ interface AppContentProps {
   fsChangeSignals: Record<string, number>;
   notebookTaskChangeSignal: number;
   clearGitStatus: () => void;
+  sessionCloseNotice?: { entry: SessionLedgerEntry; nonce: number };
   registerSessionExitHandler: (handler: ((info: SessionExitInfo) => void) | null) => void;
 }
 
@@ -736,6 +742,7 @@ function AppContent({
   fsChangeSignals,
   notebookTaskChangeSignal,
   clearGitStatus,
+  sessionCloseNotice,
   registerSessionExitHandler,
 }: AppContentProps) {
   const hasCriticalNotification = criticalNotifications.count > 0;
@@ -861,6 +868,7 @@ function AppContent({
     sendSeedReviewDraft,
     sendCrewWake,
     sendCrewSleep,
+    sendSessionList,
   } = useDaemonApi();
 
   const presentationBySessionId = useMemo(
@@ -1015,6 +1023,7 @@ function AppContent({
   const [seedPopoverRequest, setSeedPopoverRequest] = useState<{ sessionId: string; nonce: number }>();
   const [usagePopoverRequest, setUsagePopoverRequest] = useState<{ sessionId: string; nonce: number }>();
   const [workspaceContextsOpen, setWorkspaceContextsOpen] = useState(false);
+  const [sessionsOpen, setSessionsOpen] = useState(false);
   const [notebookOpen, setNotebookOpen] = useState(false);
   const [notebookRequestedPath, setNotebookRequestedPath] = useState<string | null>(null);
   const [notificationsPanelOpen, setNotificationsPanelOpen] = useState(false);
@@ -1585,6 +1594,7 @@ function AppContent({
     || shortcutEditorOpen
     || actionMenuOpen
     || workspaceContextsOpen
+    || sessionsOpen
     || notebookOpen
     || gardenHoldsWindow
     || chiefTransferTarget !== null
@@ -1658,6 +1668,17 @@ function AppContent({
     () => new Set(daemonSessions.map((session) => session.id)),
     [daemonSessions],
   );
+
+  const workspaceNamesById = useMemo(() => {
+    const names: Record<string, string> = {};
+    for (const workspace of daemonWorkspaces) names[workspace.id] = workspace.name || workspace.id;
+    return names;
+  }, [daemonWorkspaces]);
+
+  const seedForSession = useCallback((sessionId: string) => {
+    const seed = seeds.find((candidate) => candidate.tender_session === sessionId);
+    return seed ? { id: seed.id, title: seed.title } : null;
+  }, [seeds]);
   const gardenSessionLabels = useMemo(
     () => new Map(daemonSessions.map((session) => [session.id, session.label])),
     [daemonSessions],
@@ -1798,6 +1819,15 @@ function AppContent({
       run: openWorkspaceContextNavigator,
     },
     {
+      id: 'sessions',
+      title: 'Open the sessions list',
+      description: 'Every session this machine ran, live and closed, with reopen',
+      keywords: ['sessions', 'ledger', 'closed', 'history', 'reopen', 'past'],
+      icon: <ContextActionIcon />,
+      shortcut: [shortcutTokens('sessions.open')],
+      run: () => setSessionsOpen(true),
+    },
+    {
       id: 'attention',
       title: 'Open attention drawer',
       description: 'Show sessions and pull requests that need a response',
@@ -1859,7 +1889,7 @@ function AppContent({
       return;
     }
     if (settingsOpen || shortcutsOpen || locationPickerOpen || whatsNew.isOpen
-      || workspaceContextsOpen || notebookOpen || gardenHoldsWindow
+      || workspaceContextsOpen || sessionsOpen || notebookOpen || gardenHoldsWindow
       || chiefTransferTarget !== null || contextCapPromptSession !== null
       || appViewParamsPrompt !== null || pendingSessionClose !== null
       || sessionCreationJob !== null || openPRLauncherJob !== null) {
@@ -1879,6 +1909,7 @@ function AppContent({
     shortcutsOpen,
     whatsNew.isOpen,
     workspaceContextsOpen,
+    sessionsOpen,
     notebookOpen,
     gardenHoldsWindow,
   ]);
@@ -3355,6 +3386,7 @@ function AppContent({
     && !markdownOpenerOpen
     && !shortcutEditorOpen
     && !workspaceContextsOpen
+    && !sessionsOpen
     && !notebookOpen;
   useKeyboardShortcuts({
     onNewSession: () => handleNewSession('vertical'),
@@ -3382,6 +3414,7 @@ function AppContent({
     onOpenFile: handleOpenMarkdownFile,
     onOpenNotebookTile: handleOpenNotebookTile,
     onOpenNotebookFullscreen: openNotebookBrowser,
+    onOpenSessions: () => setSessionsOpen((prev) => !prev),
     onOpenGarden: toggleGardenFrame,
     onQuit: handleQuitApp,
     enabled: appShortcutsEnabled && !gardenHoldsWindow,
@@ -3867,6 +3900,17 @@ function AppContent({
         <div className="input-diagnostics-copied" role="status">Terminal input diagnostics copied</div>
       )}
       <ChordLeaderHud />
+      <SessionsPanel
+        isOpen={sessionsOpen}
+        onClose={() => setSessionsOpen(false)}
+        listSessions={sendSessionList}
+        workspaceNames={workspaceNamesById}
+        liveSessionIds={liveGardenSessions}
+        seedForSession={seedForSession}
+        onFocusSession={handleSelectSession}
+        onOpenSeed={handleOpenSeedTile}
+        closeNotice={sessionCloseNotice}
+      />
       <WorkspaceContextNavigator
         isOpen={workspaceContextsOpen}
         contexts={workspaceContextViews}

@@ -263,8 +263,8 @@ func (s *Store) addCheckedLocked(session *protocol.Session, rejectTeardown bool)
 	// pinned_at is deliberately absent from the column list and the conflict update: leaving it out is what makes a respawn unable to clear the pin.
 	_, err = s.db.Exec(`
 		INSERT INTO sessions
-		(id, label, agent, directory, endpoint_id, workspace_id, branch, is_worktree, main_repo, state, state_since, state_updated_at, last_model_request_at, parent_session_id, todos, last_seen)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		(id, label, agent, directory, endpoint_id, workspace_id, branch, is_worktree, main_repo, repository, state, state_since, state_updated_at, last_model_request_at, parent_session_id, todos, last_seen)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			label = excluded.label,
 			agent = excluded.agent,
@@ -274,6 +274,7 @@ func (s *Store) addCheckedLocked(session *protocol.Session, rejectTeardown bool)
 			branch = excluded.branch,
 			is_worktree = excluded.is_worktree,
 			main_repo = excluded.main_repo,
+			repository = excluded.repository,
 			state = excluded.state,
 			state_since = excluded.state_since,
 			state_updated_at = excluded.state_updated_at,
@@ -293,6 +294,7 @@ func (s *Store) addCheckedLocked(session *protocol.Session, rejectTeardown bool)
 		protocol.Deref(session.Branch),
 		boolToInt(protocol.Deref(session.IsWorktree)),
 		protocol.Deref(session.MainRepo),
+		protocol.Deref(session.Repository),
 		string(session.State),
 		session.StateSince,
 		session.StateUpdatedAt,
@@ -322,10 +324,10 @@ func (s *Store) Get(id string) *protocol.Session {
 	var stateSince, stateUpdatedAt, lastSeen string
 	var isWorktree int
 	var contextWindowCap int
-	var endpointID, workspaceID, branch, mainRepo, pinnedAt, parentSessionID, activity, activityAt, lastModelRequestAt sql.NullString
+	var endpointID, workspaceID, branch, mainRepo, repository, pinnedAt, parentSessionID, activity, activityAt, lastModelRequestAt sql.NullString
 
 	err := s.db.QueryRow(`
-		SELECT id, label, agent, directory, endpoint_id, workspace_id, branch, is_worktree, main_repo, state, state_since, state_updated_at, last_model_request_at, pinned_at, context_window_cap, parent_session_id, activity, activity_at, todos, last_seen
+		SELECT id, label, agent, directory, endpoint_id, workspace_id, branch, is_worktree, main_repo, repository, state, state_since, state_updated_at, last_model_request_at, pinned_at, context_window_cap, parent_session_id, activity, activity_at, todos, last_seen
 		FROM sessions WHERE id = ? AND closed_at = ''`, id).Scan(
 		&session.ID,
 		&session.Label,
@@ -336,6 +338,7 @@ func (s *Store) Get(id string) *protocol.Session {
 		&branch,
 		&isWorktree,
 		&mainRepo,
+		&repository,
 		&session.State,
 		&stateSince,
 		&stateUpdatedAt,
@@ -377,6 +380,9 @@ func (s *Store) Get(id string) *protocol.Session {
 	}
 	if mainRepo.Valid && mainRepo.String != "" {
 		session.MainRepo = protocol.Ptr(mainRepo.String)
+	}
+	if repository.Valid && repository.String != "" {
+		session.Repository = protocol.Ptr(repository.String)
 	}
 	session.StateSince = stateSince
 	session.StateUpdatedAt = stateUpdatedAt
@@ -484,11 +490,11 @@ func (s *Store) List(stateFilter string) []*protocol.Session {
 
 	if stateFilter == "" {
 		rows, err = s.db.Query(`
-			SELECT id, label, agent, directory, endpoint_id, workspace_id, branch, is_worktree, main_repo, state, state_since, state_updated_at, last_model_request_at, pinned_at, context_window_cap, parent_session_id, activity, activity_at, todos, last_seen
+			SELECT id, label, agent, directory, endpoint_id, workspace_id, branch, is_worktree, main_repo, repository, state, state_since, state_updated_at, last_model_request_at, pinned_at, context_window_cap, parent_session_id, activity, activity_at, todos, last_seen
 			FROM sessions WHERE closed_at = '' ORDER BY label, id`)
 	} else {
 		rows, err = s.db.Query(`
-			SELECT id, label, agent, directory, endpoint_id, workspace_id, branch, is_worktree, main_repo, state, state_since, state_updated_at, last_model_request_at, pinned_at, context_window_cap, parent_session_id, activity, activity_at, todos, last_seen
+			SELECT id, label, agent, directory, endpoint_id, workspace_id, branch, is_worktree, main_repo, repository, state, state_since, state_updated_at, last_model_request_at, pinned_at, context_window_cap, parent_session_id, activity, activity_at, todos, last_seen
 			FROM sessions WHERE state = ? AND closed_at = '' ORDER BY label, id`, stateFilter)
 	}
 	if err != nil {
@@ -503,7 +509,7 @@ func (s *Store) List(stateFilter string) []*protocol.Session {
 		var stateSince, stateUpdatedAt, lastSeen string
 		var isWorktree int
 		var contextWindowCap int
-		var endpointID, workspaceID, branch, mainRepo, pinnedAt, parentSessionID, activity, activityAt, lastModelRequestAt sql.NullString
+		var endpointID, workspaceID, branch, mainRepo, repository, pinnedAt, parentSessionID, activity, activityAt, lastModelRequestAt sql.NullString
 
 		err := rows.Scan(
 			&session.ID,
@@ -515,6 +521,7 @@ func (s *Store) List(stateFilter string) []*protocol.Session {
 			&branch,
 			&isWorktree,
 			&mainRepo,
+			&repository,
 			&session.State,
 			&stateSince,
 			&stateUpdatedAt,
@@ -556,6 +563,9 @@ func (s *Store) List(stateFilter string) []*protocol.Session {
 		}
 		if mainRepo.Valid && mainRepo.String != "" {
 			session.MainRepo = protocol.Ptr(mainRepo.String)
+		}
+		if repository.Valid && repository.String != "" {
+			session.Repository = protocol.Ptr(repository.String)
 		}
 		session.StateSince = stateSince
 		session.StateUpdatedAt = stateUpdatedAt
@@ -711,7 +721,7 @@ func (s *Store) UpdateTodos(id string, todos []string) {
 	}
 }
 
-func (s *Store) UpdateBranch(id, branch string, isWorktree bool, mainRepo string) {
+func (s *Store) UpdateBranch(id, branch string, isWorktree bool, mainRepo, repository string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -728,12 +738,17 @@ func (s *Store) UpdateBranch(id, branch string, isWorktree bool, mainRepo string
 			} else {
 				session.MainRepo = nil
 			}
+			if repository != "" {
+				session.Repository = protocol.Ptr(repository)
+			} else {
+				session.Repository = nil
+			}
 		}
 		return
 	}
 
-	_, err := s.db.Exec(`UPDATE sessions SET branch = ?, is_worktree = ?, main_repo = ? WHERE id = ? AND closed_at = ''`,
-		branch, boolToInt(isWorktree), mainRepo, id)
+	_, err := s.db.Exec(`UPDATE sessions SET branch = ?, is_worktree = ?, main_repo = ?, repository = ? WHERE id = ? AND closed_at = ''`,
+		branch, boolToInt(isWorktree), mainRepo, repository, id)
 	if err != nil {
 		log.Printf("[store] UpdateBranch: failed for session %s: %v", id, err)
 	}

@@ -100,6 +100,8 @@ export const MAC_SHORTCUTS = {
 
   'board.open': { key: 't', meta: true, shift: true },
 
+  'sessions.open': { key: 'l', meta: true, shift: true },
+
   // `editableTarget: 'native'` keeps the capture-phase dispatcher out of inputs — the
   // annotation popover's own ⌘Enter must win there.
   'markdown.sendAnnotations': { key: 'Enter', meta: true, editableTarget: 'native' },
@@ -163,6 +165,7 @@ export const LINUX_SHORTCUTS = {
   'notebook.openFullscreen': { key: 'f', code: 'KeyF', meta: true, alt: true, shift: true },
   'file.open': { key: 'p', meta: true, shift: true },
   'board.open': { key: 'g', meta: true, alt: true },
+  'sessions.open': { key: 'l', code: 'KeyL', meta: true, alt: true },
   'markdown.sendAnnotations': { key: 'Enter', meta: true, shift: true, editableTarget: 'native' },
   'terminal.sendAnnotations': { key: 'Enter', meta: true, shift: true, editableTarget: 'native' },
 } as const satisfies ShortcutRegistry;

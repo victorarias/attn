@@ -89,6 +89,11 @@ var wireFixtures = map[string]wireFixture{
 		events:  []string{protocol.EventSessionTodosUpdated},
 		subject: (*wireWorld).session,
 	},
+	FactSessionClosed: {
+		events:  []string{protocol.EventSessionClosed},
+		subject: (*wireWorld).session,
+		payload: func(w *wireWorld) any { return w.d.store.SessionLedgerEntry(w.sessionID) },
+	},
 	FactSessionUnregistered: {
 		events:  []string{protocol.EventSessionUnregistered, protocol.EventGardenSeedsUpdated},
 		subject: (*wireWorld).session,
@@ -321,7 +326,6 @@ var factsWithoutWire = map[string]string{
 	FactTicketAssigned:               ticketFactsHaveNoClient,
 	FactTicketAttached:               ticketFactsHaveNoClient,
 	FactTicketChanged:                ticketFactsHaveNoClient,
-	FactSessionClosed:                "the app learns a session left through session.unregistered, which already removes the row; the ledger row it records is read on demand through session_list and session_show",
 }
 
 const ticketFactsHaveNoClient = "no WebSocket client renders a ticket; the read verbs and subscribing apps read these off the durable log"

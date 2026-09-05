@@ -154,7 +154,7 @@ func TestClosePaneWinsOverInFlightExecutionCapture(t *testing.T) {
 				}
 			}
 			d.store.SetResumeSessionID(sessionID, "native-current")
-			d.store.UpdateBranch(sessionID, "feature/newer", true, "/projects/repo")
+			d.store.UpdateBranch(sessionID, "feature/newer", true, "/projects/repo", "/projects/repo")
 			d.handleWorkspaceLayoutClosePane(client, &protocol.WorkspaceLayoutClosePaneMessage{
 				Cmd: protocol.CmdWorkspaceLayoutClosePane, WorkspaceID: workspaceID, PaneID: paneID,
 			})

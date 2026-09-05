@@ -284,10 +284,14 @@ commands:
         read provider-neutral, timestamped, redacted conversation and tool
         events. --after resumes strictly after a prior cursor; --follow polls
         until interrupted; --json emits one event per line.
-  list [--closed | --all] [--limit <n>] [--before <id>] [--json]
+  list [--closed | --all] [--limit <n>] [--before <id>] [--workspace <id>]
+       [--repository <path>] [--last <preset> | --since <when> [--until <when>]] [--json]
         read the session ledger, newest first: live sessions by default,
         --closed for the ones that ended, --all for both. When rows are
         omitted the notice names the id to pass to --before for the next page.
+        Filters combine and are applied before paging. --last takes today,
+        yesterday, 7d or 30d; --since/--until take a date or an RFC3339 instant
+        and are half-open, so --until excludes its own instant.
   show <id>
         read one ledger row, live or closed, including who closed it and why.
 `)

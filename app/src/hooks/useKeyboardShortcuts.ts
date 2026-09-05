@@ -32,6 +32,7 @@ interface KeyboardShortcutsConfig {
   onOpenGarden?: () => void;
   /** Keep the Garden shortcut live fullscreen so the same key can switch frames. */
   gardenShortcutEnabled?: boolean;
+  onOpenSessions?: () => void;
   onQuit?: () => void;
   enabled: boolean;
 }
@@ -64,6 +65,7 @@ export function useKeyboardShortcuts({
   onOpenNotebookFullscreen,
   onOpenGarden,
   gardenShortcutEnabled,
+  onOpenSessions,
   onQuit,
   enabled,
 }: KeyboardShortcutsConfig) {
@@ -112,6 +114,8 @@ export function useKeyboardShortcuts({
   useShortcut('notebook.openFullscreen', onOpenNotebookFullscreen ?? (() => {}), enabled && !!onOpenNotebookFullscreen);
 
   useShortcut('board.open', onOpenGarden ?? (() => {}), (gardenShortcutEnabled ?? enabled) && !!onOpenGarden);
+
+  useShortcut('sessions.open', onOpenSessions ?? (() => {}), !!onOpenSessions);
 
   useEffect(() => {
     const preventWindowCloseShortcut = (e: KeyboardEvent) => {

@@ -188,6 +188,7 @@ model Session {
   branch?: string;              // Optional: might not be in git repo
   is_worktree?: boolean;        // Optional: false if not worktree
   main_repo?: string;           // Optional: only set if worktree
+  repository?: string;          // Local path of the repository the session ran in: the main repository for a worktree, the checkout itself otherwise
   state: SessionState;
   state_since: string;          // ISO timestamp, always set
   state_updated_at: string;     // ISO timestamp, always set
@@ -793,17 +794,28 @@ model SessionTranscriptMessage {
 // sighting for a live one.
 model SessionListMessage {
   cmd: "session_list";
+  request_id?: string; // set by the WS frontend to correlate the result event
   closed?: boolean;
   all?: boolean;
   // Rows per page. Absent takes the daemon's default.
   limit?: int32;
   // The id of the last row of the previous page; this page starts after it.
   before?: string;
+  // Filters, all optional and combined with AND. The daemon applies them before
+  // paging, so a page is the newest rows that match, not the newest rows filtered.
+  workspace_id?: string;
+  // A repository as a local path, matched exactly against the row's repository.
+  repository?: string;
+  // Half-open window over the row's instant (the close for a closed row, the
+  // last sighting for a live one): since is inclusive, until exclusive. RFC3339.
+  since?: string;
+  until?: string;
 }
 
 // Reads one ledger row, live or closed, by exact session id.
 model SessionShowMessage {
   cmd: "session_show";
+  request_id?: string; // set by the WS frontend to correlate the result event
   session_id: string;
 }
 
@@ -6491,6 +6503,9 @@ model SessionLedgerEntry {
   branch?: string;
   is_worktree?: boolean;
   main_repo?: string;
+  // The repository the session ran in, as a local path. Empty on rows written
+  // before the daemon started recording it.
+  repository?: string;
   // The state the session held when it closed, or its live state.
   state: SessionState;
   last_seen: string;
@@ -6502,6 +6517,20 @@ model SessionLedgerEntry {
   close_reason?: string;
 }
 
+// One value a filter can take and how many rows carry it. Counted over the
+// scope and date window alone, so choosing a repository never empties the
+// workspace choices, or the other way round.
+model SessionLedgerFacet {
+  value: string;
+  count: int32;
+}
+
+// The values worth offering as filters, from the rows the ledger actually holds.
+model SessionLedgerFacets {
+  repositories: SessionLedgerFacet[];
+  workspaces: SessionLedgerFacet[];
+}
+
 model SessionListResult {
   entries: SessionLedgerEntry[];
   // Rows matching the query that this page left out, all of them older than
@@ -6509,6 +6538,9 @@ model SessionListResult {
   omitted: int32;
   // The id to pass back as `before` for the next page. Absent when nothing is omitted.
   next_before?: string;
+  // Absent on a page fetched with `before`: the choices belong to the query, not
+  // to the page, so paging never re-sends them.
+  facets?: SessionLedgerFacets;
 }
 
 model SessionShowResult {
@@ -6764,6 +6796,35 @@ model NotificationListResultMessage {
   critical_title?: string;
 }
 
+// Result of session_list over the WebSocket. The ledger page and its filter
+// choices travel whole, so the surface renders one answer rather than assembling
+// a page from a broadcast it might have missed.
+model SessionListResultMessage {
+  event: "session_list_result";
+  request_id: string;
+  success: boolean;
+  error?: string;
+  result?: SessionListResult;
+}
+
+// Result of session_show over the WebSocket. Absent entry with success false
+// means the daemon never ran that session.
+model SessionShowResultMessage {
+  event: "session_show_result";
+  request_id: string;
+  success: boolean;
+  error?: string;
+  entry?: SessionLedgerEntry;
+}
+
+// A session just closed, carrying the ledger row it became. Distinct from
+// session_unregistered, which says the live session left: this one says where
+// it went, so an open ledger surface updates in place instead of re-listing.
+model SessionClosedMessage {
+  event: "session_closed";
+  session_ledger_entry: SessionLedgerEntry;
+}
+
 // Result of notification_mark_read. unread_count is the post-mark count so the
 // caller can update its badge without a re-list.
 model NotificationMarkReadResultMessage {
@@ -7001,6 +7062,7 @@ model WebSocketEvent {
   plugins?: PluginInfo[];
   plugin_issues?: PluginIssue[];
   operation?: GitOperation;
+  session_ledger_entry?: SessionLedgerEntry;
   branches?: Branch[];
   recent_locations?: RecentLocation[];
   settings?: Record<string>;
@@ -7169,6 +7231,9 @@ alias DaemonEvent =
   | TaskListResultMessage
   | TaskRetryResultMessage
   | TasksChangedMessage
+  | SessionListResultMessage
+  | SessionShowResultMessage
+  | SessionClosedMessage
   | NotificationListResultMessage
   | NotificationMarkReadResultMessage
   | NotificationsUpdatedMessage

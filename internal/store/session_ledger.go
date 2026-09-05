@@ -40,11 +40,21 @@ const (
 	SessionLedgerAll    SessionLedgerScope = "all"
 )
 
-// Before is the id of the last row of the previous page; this page starts after it.
+// Before is the previous page's last row. Filters combine with AND and apply
+// before paging, so a page is the newest matching rows, not a filtered page.
 type SessionLedgerQuery struct {
-	Scope  SessionLedgerScope
-	Limit  int
-	Before string
+	Scope       SessionLedgerScope
+	Limit       int
+	Before      string
+	WorkspaceID string
+	// A repository as a local path, matched exactly.
+	Repository string
+	// Half-open over the row's instant: Since inclusive, Until exclusive.
+	Since time.Time
+	Until time.Time
+	// Facets costs two extra GROUP BYs; a page fetched with Before skips them
+	// because the choices belong to the query, not to the page.
+	Facets bool
 }
 
 type SessionLedgerPage struct {
@@ -52,6 +62,8 @@ type SessionLedgerPage struct {
 	// Omitted counts the rows this page left out, all older than its last entry.
 	Omitted    int
 	NextBefore string
+	// Nil unless the query asked for them.
+	Facets *protocol.SessionLedgerFacets
 }
 
 // ErrUnknownLedgerCursor names the id a stale --before failed on.
@@ -281,21 +293,56 @@ func (s *Store) SessionLedger(query SessionLedgerQuery) (SessionLedgerPage, erro
 }
 
 const ledgerSelect = `SELECT id, label, agent, directory, workspace_id, branch, is_worktree, main_repo,
-	state, last_seen, closed_at, closed_by, close_reason`
+	repository, state, last_seen, closed_at, closed_by, close_reason`
 
 const ledgerAt = `CASE WHEN closed_at <> '' THEN closed_at ELSE last_seen END`
 
-func (s *Store) sessionLedgerDB(query SessionLedgerQuery, limit int) (SessionLedgerPage, error) {
-	where := []string{}
-	switch query.Scope {
+// Filters that belong to the whole query: the facets are counted over these
+// alone, so choosing a repository never empties the workspace choices.
+func (q SessionLedgerQuery) scopeAndWindow() ([]string, []any) {
+	var where []string
+	var args []any
+	switch q.Scope {
 	case SessionLedgerClosed:
 		where = append(where, "closed_at <> ''")
 	case SessionLedgerAll:
 	default:
 		where = append(where, "closed_at = ''")
 	}
+	if !q.Since.IsZero() {
+		where = append(where, ledgerAt+" >= ?")
+		args = append(args, q.Since.UTC().Format(time.RFC3339Nano))
+	}
+	if !q.Until.IsZero() {
+		where = append(where, ledgerAt+" < ?")
+		args = append(args, q.Until.UTC().Format(time.RFC3339Nano))
+	}
+	return where, args
+}
 
-	var args []any
+func (q SessionLedgerQuery) selection() ([]string, []any) {
+	where, args := q.scopeAndWindow()
+	if workspace := strings.TrimSpace(q.WorkspaceID); workspace != "" {
+		where = append(where, "workspace_id = ?")
+		args = append(args, workspace)
+	}
+	if repository := strings.TrimSpace(q.Repository); repository != "" {
+		where = append(where, "repository = ?")
+		args = append(args, repository)
+	}
+	return where, args
+}
+
+func whereClause(where []string) string {
+	if len(where) == 0 {
+		return ""
+	}
+	return " WHERE " + strings.Join(where, " AND ")
+}
+
+func (s *Store) sessionLedgerDB(query SessionLedgerQuery, limit int) (SessionLedgerPage, error) {
+	where, args := query.selection()
+
 	if cursor := strings.TrimSpace(query.Before); cursor != "" {
 		var at string
 		err := s.db.QueryRow("SELECT "+ledgerAt+" FROM sessions WHERE id = ?", cursor).Scan(&at)
@@ -309,10 +356,7 @@ func (s *Store) sessionLedgerDB(query SessionLedgerQuery, limit int) (SessionLed
 		args = append(args, at, at, cursor)
 	}
 
-	clause := ""
-	if len(where) > 0 {
-		clause = " WHERE " + strings.Join(where, " AND ")
-	}
+	clause := whereClause(where)
 
 	var matching int
 	if err := s.db.QueryRow("SELECT COUNT(*) FROM sessions"+clause, args...).Scan(&matching); err != nil {
@@ -337,19 +381,100 @@ func (s *Store) sessionLedgerDB(query SessionLedgerQuery, limit int) (SessionLed
 	if err := rows.Err(); err != nil {
 		return SessionLedgerPage{}, fmt.Errorf("read ledger rows: %w", err)
 	}
-	return finishLedgerPage(page, matching), nil
+	page = finishLedgerPage(page, matching)
+
+	if query.Facets {
+		facets, err := s.ledgerFacetsDB(query)
+		if err != nil {
+			return SessionLedgerPage{}, err
+		}
+		page.Facets = facets
+	}
+	return page, nil
+}
+
+func (s *Store) ledgerFacetsDB(query SessionLedgerQuery) (*protocol.SessionLedgerFacets, error) {
+	where, args := query.scopeAndWindow()
+	clause := whereClause(where)
+
+	count := func(column string) ([]protocol.SessionLedgerFacet, error) {
+		rows, err := s.db.Query("SELECT "+column+", COUNT(*) FROM sessions"+clause+
+			" GROUP BY "+column+" ORDER BY "+column, args...)
+		if err != nil {
+			return nil, fmt.Errorf("count ledger %s: %w", column, err)
+		}
+		defer rows.Close()
+		facets := []protocol.SessionLedgerFacet{}
+		for rows.Next() {
+			var value sql.NullString
+			var total int
+			if err := rows.Scan(&value, &total); err != nil {
+				return nil, fmt.Errorf("count ledger %s: %w", column, err)
+			}
+			if !value.Valid || value.String == "" {
+				continue
+			}
+			facets = append(facets, protocol.SessionLedgerFacet{Value: value.String, Count: total})
+		}
+		return facets, rows.Err()
+	}
+
+	repositories, err := count("repository")
+	if err != nil {
+		return nil, err
+	}
+	workspaces, err := count("workspace_id")
+	if err != nil {
+		return nil, err
+	}
+	return &protocol.SessionLedgerFacets{Repositories: repositories, Workspaces: workspaces}, nil
+}
+
+func (q SessionLedgerQuery) matches(entry protocol.SessionLedgerEntry) bool {
+	if workspace := strings.TrimSpace(q.WorkspaceID); workspace != "" && entry.WorkspaceID != workspace {
+		return false
+	}
+	if repository := strings.TrimSpace(q.Repository); repository != "" && protocol.Deref(entry.Repository) != repository {
+		return false
+	}
+	return q.withinWindow(entry)
+}
+
+func (q SessionLedgerQuery) withinWindow(entry protocol.SessionLedgerEntry) bool {
+	at := ledgerInstant(entry)
+	if !q.Since.IsZero() && at < q.Since.UTC().Format(time.RFC3339Nano) {
+		return false
+	}
+	if !q.Until.IsZero() && at >= q.Until.UTC().Format(time.RFC3339Nano) {
+		return false
+	}
+	return true
 }
 
 func (s *Store) sessionLedgerMemory(query SessionLedgerQuery, limit int) (SessionLedgerPage, error) {
-	entries := make([]protocol.SessionLedgerEntry, 0, len(s.sessions)+len(s.sessionCloses))
+	scoped := make([]protocol.SessionLedgerEntry, 0, len(s.sessions)+len(s.sessionCloses))
 	if query.Scope != SessionLedgerClosed {
 		for _, session := range s.sessions {
-			entries = append(entries, ledgerEntryFromSession(session, sessionCloseMark{}))
+			scoped = append(scoped, ledgerEntryFromSession(session, sessionCloseMark{}))
 		}
 	}
 	if query.Scope == SessionLedgerClosed || query.Scope == SessionLedgerAll {
 		for _, mark := range s.sessionCloses {
-			entries = append(entries, ledgerEntryFromSession(mark.session, mark))
+			scoped = append(scoped, ledgerEntryFromSession(mark.session, mark))
+		}
+	}
+
+	windowed := scoped[:0]
+	for _, entry := range scoped {
+		if query.withinWindow(entry) {
+			windowed = append(windowed, entry)
+		}
+	}
+
+	entries := make([]protocol.SessionLedgerEntry, 0, len(windowed))
+	for _, entry := range windowed {
+		if query.matches(entry) {
+			entries = append(entries, entry)
 		}
 	}
 	sort.Slice(entries, func(i, j int) bool {
@@ -380,7 +505,37 @@ func (s *Store) sessionLedgerMemory(query SessionLedgerQuery, limit int) (Sessio
 	if len(entries) > limit {
 		entries = entries[:limit]
 	}
-	return finishLedgerPage(SessionLedgerPage{Entries: entries}, matching), nil
+	page := finishLedgerPage(SessionLedgerPage{Entries: entries}, matching)
+	if query.Facets {
+		page.Facets = ledgerFacetsMemory(windowed)
+	}
+	return page, nil
+}
+
+func ledgerFacetsMemory(entries []protocol.SessionLedgerEntry) *protocol.SessionLedgerFacets {
+	repositories := map[string]int{}
+	workspaces := map[string]int{}
+	for _, entry := range entries {
+		if repository := protocol.Deref(entry.Repository); repository != "" {
+			repositories[repository]++
+		}
+		if entry.WorkspaceID != "" {
+			workspaces[entry.WorkspaceID]++
+		}
+	}
+	return &protocol.SessionLedgerFacets{
+		Repositories: sortedFacets(repositories),
+		Workspaces:   sortedFacets(workspaces),
+	}
+}
+
+func sortedFacets(counts map[string]int) []protocol.SessionLedgerFacet {
+	facets := make([]protocol.SessionLedgerFacet, 0, len(counts))
+	for value, count := range counts {
+		facets = append(facets, protocol.SessionLedgerFacet{Value: value, Count: count})
+	}
+	sort.Slice(facets, func(i, j int) bool { return facets[i].Value < facets[j].Value })
+	return facets
 }
 
 // The in-memory mirror of the writers' closed_at predicate: closing takes the row
@@ -437,6 +592,7 @@ func ledgerEntryFromSession(session *protocol.Session, mark sessionCloseMark) pr
 		Branch:      session.Branch,
 		IsWorktree:  session.IsWorktree,
 		MainRepo:    session.MainRepo,
+		Repository:  session.Repository,
 		State:       session.State,
 		LastSeen:    session.LastSeen,
 	}
@@ -457,7 +613,7 @@ type ledgerScanner interface {
 func scanLedgerEntry(row ledgerScanner) (protocol.SessionLedgerEntry, error) {
 	var entry protocol.SessionLedgerEntry
 	var isWorktree int
-	var branch, mainRepo, workspaceID sql.NullString
+	var branch, mainRepo, repository, workspaceID sql.NullString
 	var closedAt, closedBy, closeReason string
 
 	err := row.Scan(
@@ -469,6 +625,7 @@ func scanLedgerEntry(row ledgerScanner) (protocol.SessionLedgerEntry, error) {
 		&branch,
 		&isWorktree,
 		&mainRepo,
+		&repository,
 		&entry.State,
 		&entry.LastSeen,
 		&closedAt,
@@ -489,6 +646,9 @@ func scanLedgerEntry(row ledgerScanner) (protocol.SessionLedgerEntry, error) {
 	}
 	if mainRepo.Valid && mainRepo.String != "" {
 		entry.MainRepo = protocol.Ptr(mainRepo.String)
+	}
+	if repository.Valid && repository.String != "" {
+		entry.Repository = protocol.Ptr(repository.String)
 	}
 	if closedAt != "" {
 		entry.ClosedAt = protocol.Ptr(closedAt)

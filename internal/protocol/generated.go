@@ -8015,6 +8015,9 @@ type Session struct {
 	// PullRequests corresponds to the JSON schema field "pull_requests".
 	PullRequests []SessionPullRequest `json:"pull_requests,omitempty,omitzero"`
 
+	// Repository corresponds to the JSON schema field "repository".
+	Repository *string `json:"repository,omitempty,omitzero"`
+
 	// SeedID corresponds to the JSON schema field "seed_id".
 	SeedID *string `json:"seed_id,omitempty,omitzero"`
 
@@ -8232,6 +8235,14 @@ type SessionAnnotationsSubmitResultMessage struct {
 	Success bool `json:"success"`
 }
 
+type SessionClosedMessage struct {
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// SessionLedgerEntry corresponds to the JSON schema field "session_ledger_entry".
+	SessionLedgerEntry SessionLedgerEntry `json:"session_ledger_entry"`
+}
+
 type SessionContextWindowCapResultMessage struct {
 	// Cap corresponds to the JSON schema field "cap".
 	Cap int `json:"cap"`
@@ -8332,11 +8343,30 @@ type SessionLedgerEntry struct {
 	// MainRepo corresponds to the JSON schema field "main_repo".
 	MainRepo *string `json:"main_repo,omitempty,omitzero"`
 
+	// Repository corresponds to the JSON schema field "repository".
+	Repository *string `json:"repository,omitempty,omitzero"`
+
 	// State corresponds to the JSON schema field "state".
 	State SessionState `json:"state"`
 
 	// WorkspaceID corresponds to the JSON schema field "workspace_id".
 	WorkspaceID string `json:"workspace_id"`
+}
+
+type SessionLedgerFacet struct {
+	// Count corresponds to the JSON schema field "count".
+	Count int `json:"count"`
+
+	// Value corresponds to the JSON schema field "value".
+	Value string `json:"value"`
+}
+
+type SessionLedgerFacets struct {
+	// Repositories corresponds to the JSON schema field "repositories".
+	Repositories []SessionLedgerFacet `json:"repositories"`
+
+	// Workspaces corresponds to the JSON schema field "workspaces".
+	Workspaces []SessionLedgerFacet `json:"workspaces"`
 }
 
 type SessionListMessage struct {
@@ -8354,17 +8384,52 @@ type SessionListMessage struct {
 
 	// Limit corresponds to the JSON schema field "limit".
 	Limit *int `json:"limit,omitempty,omitzero"`
+
+	// Repository corresponds to the JSON schema field "repository".
+	Repository *string `json:"repository,omitempty,omitzero"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID *string `json:"request_id,omitempty,omitzero"`
+
+	// Since corresponds to the JSON schema field "since".
+	Since *string `json:"since,omitempty,omitzero"`
+
+	// Until corresponds to the JSON schema field "until".
+	Until *string `json:"until,omitempty,omitzero"`
+
+	// WorkspaceID corresponds to the JSON schema field "workspace_id".
+	WorkspaceID *string `json:"workspace_id,omitempty,omitzero"`
 }
 
 type SessionListResult struct {
 	// Entries corresponds to the JSON schema field "entries".
 	Entries []SessionLedgerEntry `json:"entries"`
 
+	// Facets corresponds to the JSON schema field "facets".
+	Facets *SessionLedgerFacets `json:"facets,omitempty,omitzero"`
+
 	// NextBefore corresponds to the JSON schema field "next_before".
 	NextBefore *string `json:"next_before,omitempty,omitzero"`
 
 	// Omitted corresponds to the JSON schema field "omitted".
 	Omitted int `json:"omitted"`
+}
+
+type SessionListResultMessage struct {
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty,omitzero"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID string `json:"request_id"`
+
+	// Result corresponds to the JSON schema field "result".
+	Result *SessionListResult `json:"result,omitempty,omitzero"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
 }
 
 type SessionMessage struct {
@@ -8481,6 +8546,9 @@ type SessionShowMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
 
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID *string `json:"request_id,omitempty,omitzero"`
+
 	// SessionID corresponds to the JSON schema field "session_id".
 	SessionID string `json:"session_id"`
 }
@@ -8488,6 +8556,23 @@ type SessionShowMessage struct {
 type SessionShowResult struct {
 	// Entry corresponds to the JSON schema field "entry".
 	Entry SessionLedgerEntry `json:"entry"`
+}
+
+type SessionShowResultMessage struct {
+	// Entry corresponds to the JSON schema field "entry".
+	Entry *SessionLedgerEntry `json:"entry,omitempty,omitzero"`
+
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty,omitzero"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID string `json:"request_id"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
 }
 
 type SessionState string
@@ -9767,6 +9852,9 @@ type WebSocketEvent struct {
 
 	// SessionID corresponds to the JSON schema field "session_id".
 	SessionID *string `json:"session_id,omitempty,omitzero"`
+
+	// SessionLedgerEntry corresponds to the JSON schema field "session_ledger_entry".
+	SessionLedgerEntry *SessionLedgerEntry `json:"session_ledger_entry,omitempty,omitzero"`
 
 	// Sessions corresponds to the JSON schema field "sessions".
 	Sessions []Session `json:"sessions,omitempty,omitzero"`

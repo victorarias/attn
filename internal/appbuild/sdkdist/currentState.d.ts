@@ -69,6 +69,7 @@ export interface Session {
     readonly parent_session_id?: string;
     readonly pinned_at?: string;
     readonly pull_requests?: readonly SessionPullRequest[];
+    readonly repository?: string;
     readonly seed_id?: string;
     readonly state: "idle" | "launching" | "pending_approval" | "recoverable" | "scheduled" | "unknown" | "waiting_input" | "working";
     readonly state_reason?: string;

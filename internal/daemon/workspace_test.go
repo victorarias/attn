@@ -589,11 +589,15 @@ func TestUnregisterWorkspace_CascadeClosesMemberSessions(t *testing.T) {
 	}
 
 	events := cap.snapshot()
-	if len(events) != 3 {
-		t.Fatalf("expected 3 broadcasts (2 session_unregistered + 1 workspace_unregistered), got %d: %+v", len(events), events)
+	// Each session leaves twice over: once as a ledger row that closed, once as a
+	// live session that is gone.
+	if len(events) != 5 {
+		t.Fatalf("expected 5 broadcasts (2 session_closed + 2 session_unregistered + 1 workspace_unregistered), got %d: %+v", len(events), events)
 	}
 	for i, want := range []string{
+		protocol.EventSessionClosed,
 		protocol.EventSessionUnregistered,
+		protocol.EventSessionClosed,
 		protocol.EventSessionUnregistered,
 		protocol.EventWorkspaceUnregistered,
 	} {

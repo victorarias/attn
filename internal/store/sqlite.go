@@ -1191,6 +1191,7 @@ CREATE TABLE IF NOT EXISTS app_reconcile_progress (
 			WHERE read_at = '';
 	`},
 	{134, "closing a session records it instead of deleting it", ""},
+	{135, "name the repository a session ran in so the ledger can filter by it", ""},
 }
 
 const migration99SQL = `
@@ -1324,7 +1325,12 @@ func migrateDB(db *sql.DB, dbPath string) error {
 			return fmt.Errorf("starting transaction for migration %d: %w", m.version, err)
 		}
 
-		if m.version == 134 {
+		if m.version == 135 {
+			if err := applyMigration135(tx); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
+			}
+		} else if m.version == 134 {
 			if err := applyMigration134(tx); err != nil {
 				tx.Rollback()
 				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
@@ -1857,8 +1863,34 @@ func applyMigration20(tx *sql.Tx) error {
 	return nil
 }
 
-// Rewind-safe like every other column add here: the migration tests un-record
-// versions and re-run migrateDB over a database that already has the columns.
+// Rewind-safe, like every other column add here. A plain checkout's repository
+// is unknowable without git, so it is written on the next registration instead.
+func applyMigration135(tx *sql.Tx) error {
+	exists, err := columnExists(tx, "sessions", "repository")
+	if err != nil {
+		return err
+	}
+	if !exists {
+		if _, err := tx.Exec("ALTER TABLE sessions ADD COLUMN repository TEXT NOT NULL DEFAULT ''"); err != nil {
+			return err
+		}
+		// A DB old enough to predate main_repo has nothing to carry over.
+		hasMainRepo, err := columnExists(tx, "sessions", "main_repo")
+		if err != nil {
+			return err
+		}
+		if hasMainRepo {
+			if _, err := tx.Exec("UPDATE sessions SET repository = main_repo WHERE repository = '' AND main_repo IS NOT NULL"); err != nil {
+				return err
+			}
+		}
+	}
+	if _, err := tx.Exec("CREATE INDEX IF NOT EXISTS idx_sessions_repository ON sessions(repository)"); err != nil {
+		return err
+	}
+	return nil
+}
+
 func applyMigration134(tx *sql.Tx) error {
 	columns := map[string]string{
 		"closed_at":    "ALTER TABLE sessions ADD COLUMN closed_at TEXT NOT NULL DEFAULT ''",

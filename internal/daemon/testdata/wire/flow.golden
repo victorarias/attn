@@ -152,7 +152,22 @@
     "title": "Renamed"
   }
 }
---- 11 session_unregistered
+--- 11 session_closed
+{
+  "event": "session_closed",
+  "session_ledger_entry": {
+    "agent": "claude",
+    "closed_at": "<timestamp>",
+    "closed_by": "user",
+    "directory": "<tmp>/workspace",
+    "id": "sess-1",
+    "label": "renamed",
+    "last_seen": "<timestamp>",
+    "state": "launching",
+    "workspace_id": "workspace-1"
+  }
+}
+--- 12 session_unregistered
 {
   "event": "session_unregistered",
   "session": {
@@ -172,13 +187,13 @@
     "workspace_muted": true
   }
 }
---- 12 garden_seeds_updated
+--- 13 garden_seeds_updated
 {
   "event": "garden_seeds_updated",
   "seeds": null,
   "total": 0
 }
---- 13 workspace_unregistered
+--- 14 workspace_unregistered
 {
   "event": "workspace_unregistered",
   "workspace": {
@@ -191,7 +206,7 @@
     "title": "Renamed"
   }
 }
---- 14 sessions_updated
+--- 15 sessions_updated
 {
   "event": "sessions_updated"
 }

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/victorarias/attn/internal/protocol"
 )
@@ -94,6 +95,65 @@ func TestSessionShowRendersTheCloseAndItsReason(t *testing.T) {
 	for _, want := range []string{"sess-1", "feat/x", "/repo", "sess-boss", "brief delivered", "closed"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("session show output is missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestSessionListPresetsAreCalendarDaysInTheLocalTimezone(t *testing.T) {
+	now := time.Date(2026, 9, 5, 14, 30, 0, 0, time.Local)
+	midnight := func(daysBack int) string {
+		return time.Date(2026, 9, 5-daysBack, 0, 0, 0, 0, time.Local).Format(time.RFC3339)
+	}
+
+	cases := map[string]struct{ since, until string }{
+		"today":     {midnight(0), ""},
+		"yesterday": {midnight(1), midnight(0)},
+		"7d":        {midnight(6), ""},
+		"30d":       {midnight(29), ""},
+	}
+	for name, want := range cases {
+		since, until, err := sessionListPresetWindow(name, now)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if since != want.since || until != want.until {
+			t.Errorf("%s window = [%s, %s), want [%s, %s)", name, since, until, want.since, want.until)
+		}
+	}
+
+	if _, _, err := sessionListPresetWindow("last-fortnight", now); err == nil {
+		t.Error("an unknown preset was accepted; it must name the ones that exist")
+	} else if !strings.Contains(err.Error(), "today") {
+		t.Errorf("unknown preset error = %q, want it to list the presets", err)
+	}
+}
+
+func TestSessionListTakesTheFiltersTheAppOffers(t *testing.T) {
+	parsed, err := parseSessionListArgs([]string{
+		"--all", "--workspace", "ws-1", "--repository", "/repos/attn",
+		"--since", "2026-09-01T00:00:00Z", "--until", "2026-09-04T00:00:00Z",
+	})
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if parsed.workspace != "ws-1" || parsed.repository != "/repos/attn" {
+		t.Errorf("parsed = %+v, want the workspace and repository filters", parsed)
+	}
+	if parsed.since != "2026-09-01T00:00:00Z" || parsed.until != "2026-09-04T00:00:00Z" {
+		t.Errorf("parsed window = [%s, %s)", parsed.since, parsed.until)
+	}
+
+	// --last resolves to the same window the app computes, so the two agree on
+	// what "today" is; naming both would be two answers to one question.
+	bad := [][]string{
+		{"--last", "7d", "--since", "2026-09-01T00:00:00Z"},
+		{"--last", "7d", "--until", "2026-09-01T00:00:00Z"},
+		{"--last", "fortnight"},
+		{"--since", "yesterday"},
+	}
+	for _, args := range bad {
+		if _, err := parseSessionListArgs(args); err == nil {
+			t.Errorf("parseSessionListArgs(%v) accepted arguments it should refuse", args)
 		}
 	}
 }

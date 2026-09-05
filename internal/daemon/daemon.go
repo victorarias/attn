@@ -2826,6 +2826,9 @@ func (d *Daemon) handleRegister(conn net.Conn, msg *protocol.RegisterMessage) {
 		if branchInfo.MainRepo != "" {
 			session.MainRepo = protocol.Ptr(branchInfo.MainRepo)
 		}
+		if branchInfo.Repository != "" {
+			session.Repository = protocol.Ptr(branchInfo.Repository)
+		}
 	}
 	workspaceID := strings.TrimSpace(msg.WorkspaceID)
 	if workspaceID == "" {
@@ -4034,8 +4037,9 @@ func (d *Daemon) checkAllBranches() {
 				continue
 			}
 
-			if info.Branch != protocol.Deref(session.Branch) || info.IsWorktree != protocol.Deref(session.IsWorktree) {
-				d.store.UpdateBranch(session.ID, info.Branch, info.IsWorktree, info.MainRepo)
+			if info.Branch != protocol.Deref(session.Branch) || info.IsWorktree != protocol.Deref(session.IsWorktree) ||
+				info.Repository != protocol.Deref(session.Repository) {
+				d.store.UpdateBranch(session.ID, info.Branch, info.IsWorktree, info.MainRepo, info.Repository)
 				d.logf("Branch changed: session=%s branch=%s isWorktree=%v", session.ID, info.Branch, info.IsWorktree)
 				d.publishFact(FactSessionBranchChanged, session.ID, nil)
 			}

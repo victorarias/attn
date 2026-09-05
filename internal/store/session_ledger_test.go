@@ -2,6 +2,7 @@ package store
 
 import (
 	"errors"
+	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -509,4 +510,129 @@ func TestEverySessionWriterCarriesTheClosedRowPredicate(t *testing.T) {
 			offset = start + 1
 		}
 	}
+}
+
+// A session with everything the ledger filters on, so a filter test can vary
+// exactly one field.
+func addLedgerSession(t *testing.T, s *Store, id, workspace, repository string, lastSeen time.Time) {
+	t.Helper()
+	s.Add(&protocol.Session{
+		ID:          id,
+		Label:       id,
+		Directory:   "/tmp/" + id,
+		WorkspaceID: workspace,
+		Repository:  protocol.Ptr(repository),
+		State:       protocol.SessionStateIdle,
+		StateSince:  protocol.NewTimestamp(lastSeen).String(),
+		LastSeen:    protocol.NewTimestamp(lastSeen).String(),
+	})
+}
+
+func ledgerBackings() map[string]func(*testing.T) *Store {
+	return map[string]func(*testing.T) *Store{
+		"sqlite": newSessionOwnedTableStore,
+		"maps":   func(*testing.T) *Store { return newMapBackedStore() },
+	}
+}
+
+func TestSessionLedgerFiltersByWorkspaceAndRepository(t *testing.T) {
+	for name, newStore := range ledgerBackings() {
+		t.Run(name, func(t *testing.T) {
+			s := newStore(t)
+			at := time.Date(2026, 9, 5, 12, 0, 0, 0, time.UTC)
+			addLedgerSession(t, s, "attn-one", "ws-attn", "/repos/attn", at)
+			addLedgerSession(t, s, "attn-two", "ws-side", "/repos/attn", at.Add(time.Minute))
+			addLedgerSession(t, s, "other", "ws-attn", "/repos/other", at.Add(2*time.Minute))
+
+			byRepo, err := s.SessionLedger(SessionLedgerQuery{Scope: SessionLedgerAll, Repository: "/repos/attn"})
+			if err != nil {
+				t.Fatalf("repository page: %v", err)
+			}
+			if got := ledgerIDs(byRepo); len(got) != 2 || !slices.Contains(got, "attn-one") || !slices.Contains(got, "attn-two") {
+				t.Errorf("repository page = %v, want both attn rows", got)
+			}
+
+			byWorkspace, err := s.SessionLedger(SessionLedgerQuery{Scope: SessionLedgerAll, WorkspaceID: "ws-attn"})
+			if err != nil {
+				t.Fatalf("workspace page: %v", err)
+			}
+			if got := ledgerIDs(byWorkspace); len(got) != 2 || !slices.Contains(got, "attn-one") || !slices.Contains(got, "other") {
+				t.Errorf("workspace page = %v, want both ws-attn rows", got)
+			}
+
+			both, err := s.SessionLedger(SessionLedgerQuery{
+				Scope: SessionLedgerAll, WorkspaceID: "ws-attn", Repository: "/repos/attn",
+			})
+			if err != nil {
+				t.Fatalf("combined page: %v", err)
+			}
+			if got := ledgerIDs(both); len(got) != 1 || got[0] != "attn-one" {
+				t.Errorf("combined page = %v, want the one row matching both", got)
+			}
+		})
+	}
+}
+
+func TestSessionLedgerWindowIsHalfOpenOverTheRowsInstant(t *testing.T) {
+	for name, newStore := range ledgerBackings() {
+		t.Run(name, func(t *testing.T) {
+			s := newStore(t)
+			day := time.Date(2026, 9, 5, 0, 0, 0, 0, time.UTC)
+			addLedgerSession(t, s, "before", "ws", "/repos/attn", day.Add(-time.Minute))
+			addLedgerSession(t, s, "inside", "ws", "/repos/attn", day.Add(time.Hour))
+			addLedgerSession(t, s, "at-until", "ws", "/repos/attn", day.Add(24*time.Hour))
+			// A closed row is placed by when it closed, not by when it was last seen.
+			addLedgerSession(t, s, "closed-inside", "ws", "/repos/attn", day.Add(-48*time.Hour))
+			closeAt(t, s, "closed-inside", SessionClose{By: SessionClosedByUser}, day.Add(2*time.Hour))
+
+			page, err := s.SessionLedger(SessionLedgerQuery{
+				Scope: SessionLedgerAll, Since: day, Until: day.Add(24 * time.Hour),
+			})
+			if err != nil {
+				t.Fatalf("window page: %v", err)
+			}
+			got := ledgerIDs(page)
+			if len(got) != 2 || !slices.Contains(got, "inside") || !slices.Contains(got, "closed-inside") {
+				t.Errorf("window page = %v, want only the rows inside [since, until)", got)
+			}
+		})
+	}
+}
+
+func TestSessionLedgerFacetsCountEveryChoiceTheOtherFilterWouldHide(t *testing.T) {
+	for name, newStore := range ledgerBackings() {
+		t.Run(name, func(t *testing.T) {
+			s := newStore(t)
+			at := time.Date(2026, 9, 5, 12, 0, 0, 0, time.UTC)
+			addLedgerSession(t, s, "attn-one", "ws-attn", "/repos/attn", at)
+			addLedgerSession(t, s, "attn-two", "ws-attn", "/repos/attn", at.Add(time.Minute))
+			addLedgerSession(t, s, "other", "ws-side", "/repos/other", at.Add(2*time.Minute))
+
+			page, err := s.SessionLedger(SessionLedgerQuery{
+				Scope: SessionLedgerAll, Repository: "/repos/attn", Facets: true,
+			})
+			if err != nil {
+				t.Fatalf("faceted page: %v", err)
+			}
+			if page.Facets == nil {
+				t.Fatal("facets = nil, want them when the query asks")
+			}
+			// Choosing a repository must not empty the workspace choices, or the
+			// user could never get back to the one they just left.
+			if got := facetCounts(page.Facets.Workspaces); !maps.Equal(got, map[string]int{"ws-attn": 2, "ws-side": 1}) {
+				t.Errorf("workspace facets = %v, want every workspace in scope", got)
+			}
+			if got := facetCounts(page.Facets.Repositories); !maps.Equal(got, map[string]int{"/repos/attn": 2, "/repos/other": 1}) {
+				t.Errorf("repository facets = %v, want every repository in scope", got)
+			}
+		})
+	}
+}
+
+func facetCounts(facets []protocol.SessionLedgerFacet) map[string]int {
+	counts := make(map[string]int, len(facets))
+	for _, facet := range facets {
+		counts[facet.Value] = facet.Count
+	}
+	return counts
 }

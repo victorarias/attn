@@ -38,6 +38,11 @@ export function buildCheatsheet(): CheatsheetCategory[] {
         { label: 'Snooze this agent', combos: [fromId('session.snooze')] },
         { label: 'Stop the countdown, or keep the next turn', combos: [fromId('session.cancelCountdown')] },
         { label: 'Toggle sidebar', combos: [fromId('session.toggleSidebar')] },
+        {
+          label: 'Sessions list, live and closed',
+          combos: [fromId('sessions.open')],
+          note: 'Reopen a closed session from here.',
+        },
       ],
     },
     {

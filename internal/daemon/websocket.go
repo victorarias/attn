@@ -1012,6 +1012,10 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 	case protocol.CmdTaskRetry: // wire: task_retry
 		nbTaskRetry := msg.(*protocol.TaskRetryMessage)
 		go d.sendTaskRetryWSResult(client, protocol.Deref(nbTaskRetry.RequestID), nbTaskRetry.TaskID)
+	case protocol.CmdSessionList: // wire: session_list
+		go d.sendSessionListWSResult(client, msg.(*protocol.SessionListMessage))
+	case protocol.CmdSessionShow: // wire: session_show
+		go d.sendSessionShowWSResult(client, msg.(*protocol.SessionShowMessage))
 	case protocol.CmdNotificationList: // wire: notification_list
 		notifList := msg.(*protocol.NotificationListMessage)
 		go d.sendNotificationListWSResult(client, protocol.Deref(notifList.RequestID))

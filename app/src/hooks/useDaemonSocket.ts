@@ -41,6 +41,7 @@ import type {
   AttachBlock as GeneratedAttachBlock,
   GardenReview as GeneratedGardenReview,
   SeedSendToChiefResult as GeneratedSeedSendToChiefResult,
+  SessionLedgerEntry,
 } from '../types/generated';
 import type { SessionMessageWindowStatus } from './daemonSessionAnnotationEvents';
 import { noteTerminalInputTransport } from '../utils/terminalInputDiagnostics';
@@ -89,6 +90,8 @@ import {
 } from './daemonAutoModeEvents';
 import { handleFsDaemonEvent } from './daemonFsEvents';
 import { handleSeedArtifactDaemonEvent } from './daemonSeedArtifactEvents';
+import { handleSessionLedgerDaemonEvent } from './daemonSessionLedgerEvents';
+import type { SessionLedgerPage, SessionLedgerQuery } from './daemonSessionLedgerEvents';
 import { handleNotebookDaemonEvent } from './daemonNotebookEvents';
 import {
   DocumentSubscriptions,
@@ -290,7 +293,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 
-export const PROTOCOL_VERSION = '287';
+export const PROTOCOL_VERSION = '288';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 const CLIENT_INSTANCE_ID =
@@ -575,6 +578,7 @@ export interface RecentFile {
 interface UseDaemonSocketOptions {
   onSessionsUpdate: (sessions: DaemonSession[]) => void;
   onNotebookChanged?: (origin: string, paths: string[]) => void;
+  onSessionClosed?: (entry: SessionLedgerEntry) => void;
   onTasksChanged?: () => void;
   onNotificationsUpdated?: (unreadCount: number, critical: CriticalNotificationState) => void;
   onFsChanged?: (origin: string, paths: string[], root: string) => void;
@@ -826,6 +830,7 @@ export async function retryTransientAttachRequest<T>(
 export function useDaemonSocket({
   onSessionsUpdate,
   onNotebookChanged,
+  onSessionClosed,
   onTasksChanged,
   onNotificationsUpdated,
   onFsChanged,
@@ -861,6 +866,7 @@ export function useDaemonSocket({
   const callbacksRef = useRef({
     onSessionsUpdate,
     onNotebookChanged,
+    onSessionClosed,
     onTasksChanged,
     onNotificationsUpdated,
     onFsChanged,
@@ -885,6 +891,7 @@ export function useDaemonSocket({
   callbacksRef.current = {
     onSessionsUpdate,
     onNotebookChanged,
+    onSessionClosed,
     onTasksChanged,
     onNotificationsUpdated,
     onFsChanged,
@@ -2858,6 +2865,7 @@ export function useDaemonSocket({
           default: {
             const pending = pendingActionsRef.current;
             if (handleSeedArtifactDaemonEvent(data, pending)) break;
+            if (handleSessionLedgerDaemonEvent(data, { pending, onSessionClosed: callbacksRef.current.onSessionClosed })) break;
             if (handleFsDaemonEvent(data, { pending, onFsChanged: callbacksRef.current.onFsChanged })) break;
             if (handleNotebookDaemonEvent(data, { pending, onNotebookChanged: callbacksRef.current.onNotebookChanged })) break;
             if (handleMarkdownAnnotationDaemonEvent(data, mdAnnotationsPendingRef.current)) break;
@@ -3147,6 +3155,14 @@ export function useDaemonSocket({
   const sendAgentSetModel = useCallback((id: string, model: string) => {
     sendOrQueueCommand({ cmd: 'agent_set_model', id, model }, { waitForInitialState: true });
   }, [sendOrQueueCommand]);
+
+  const sendSessionList = useCallback((query: SessionLedgerQuery = {}): Promise<SessionLedgerPage> => {
+    return sendRequest<SessionLedgerPage>('session_list', { ...query }, 'Reading the session ledger timed out');
+  }, [sendRequest]);
+
+  const sendSessionShow = useCallback((sessionId: string): Promise<SessionLedgerEntry> => {
+    return sendRequest<SessionLedgerEntry>('session_show', { session_id: sessionId }, 'Reading that session timed out');
+  }, [sendRequest]);
 
   const sendListPastConversations = useCallback((): Promise<PastConversationsResult> => {
     return sendRequest<PastConversationsResult>(
@@ -5423,6 +5439,8 @@ export function useDaemonSocket({
     sendAgentAttach,
     sendAgentHistory,
     sendAgentSetModel,
+    sendSessionList,
+    sendSessionShow,
     sendListPastConversations,
     sendBusStatusGet,
     sendAutoModeGet,

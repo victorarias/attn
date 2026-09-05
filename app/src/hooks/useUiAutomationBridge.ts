@@ -1605,6 +1605,55 @@ function getLocationPickerOverlay() {
   return overlay instanceof HTMLElement ? overlay : null;
 }
 
+function collectSessionsPanelUiState() {
+  const root = document.querySelector('.sessions-panel');
+  if (!root) {
+    return { open: false, scope: '', range: '', workspace: '', repository: '', rows: [], footer: '', canLoadMore: false, state: '' };
+  }
+  const selectValue = (label: string) => {
+    const select = Array.from(root.querySelectorAll('label.sessions-filter'))
+      .find((entry) => entry.querySelector('span')?.textContent?.trim() === label)
+      ?.querySelector('select');
+    return select instanceof HTMLSelectElement ? select.value : '';
+  };
+  const rows = Array.from(root.querySelectorAll('tbody tr')).map((row) => {
+    const cells = Array.from(row.querySelectorAll('td')).map((cell) => cell.textContent?.trim() || '');
+    return {
+      id: row.querySelector('.sessions-id')?.textContent?.trim() || '',
+      label: row.querySelector('.sessions-label')?.textContent?.trim() || '',
+      agent: cells[1] || '',
+      state: row.querySelector('.sessions-state-chip')?.textContent?.trim() || '',
+      workspace: cells[3] || '',
+      where: cells[4] || '',
+      seed: cells[5] || '',
+      when: cells[6] || '',
+      verdict: cells[7] || '',
+      refreshing: !!row.querySelector('.sessions-verdict-refreshing'),
+      actions: Array.from(row.querySelectorAll('.sessions-actions button')).map((button) => button.textContent?.trim() || ''),
+    };
+  });
+  const loadMore = Array.from(root.querySelectorAll('.sessions-footer button'))
+    .find((button) => (button.textContent || '').startsWith('Load'));
+  return {
+    open: true,
+    scope: Array.from(root.querySelectorAll('.sessions-scope button'))
+      .find((button) => button.getAttribute('aria-pressed') === 'true')?.textContent?.trim() || '',
+    range: selectValue('When'),
+    workspace: selectValue('Workspace'),
+    repository: selectValue('Repository'),
+    rows,
+    footer: root.querySelector('.sessions-footer span')?.textContent?.trim() || '',
+    canLoadMore: !!loadMore,
+    state: root.querySelector('.sessions-state')?.textContent?.trim() || '',
+  };
+}
+
+function sessionsPanelRoot(): Element {
+  const root = document.querySelector('.sessions-panel');
+  if (!root) throw new Error('the Sessions surface is not open');
+  return root;
+}
+
 function collectMarkdownOpenerUiState() {
   const root = document.querySelector('.markdown-opener');
   if (!root) {
@@ -2700,6 +2749,61 @@ export function useUiAutomationBridge({
         return {
           label: await invoke<string | null>('browser_host_focus_state'),
         };
+      case 'sessions_get_state':
+        return collectSessionsPanelUiState();
+      case 'sessions_set_filter': {
+        const root = sessionsPanelRoot();
+        const { scope, range, workspace, repository, from, to } = payload as {
+          scope?: string; range?: string; workspace?: string; repository?: string; from?: string; to?: string;
+        };
+        if (scope) {
+          const button = Array.from(root.querySelectorAll('.sessions-scope button'))
+            .find((entry) => entry.textContent?.trim() === scope);
+          if (!(button instanceof HTMLElement)) throw new Error(`no ${scope} scope button`);
+          clickElement(button);
+          await settleUi(2);
+        }
+        const setSelect = (label: string, value: string) => {
+          const select = Array.from(root.querySelectorAll('label.sessions-filter'))
+            .find((entry) => entry.querySelector('span')?.textContent?.trim() === label)
+            ?.querySelector('select');
+          if (!(select instanceof HTMLSelectElement)) throw new Error(`no ${label} filter`);
+          setControlValue(select, value);
+        };
+        if (range !== undefined) setSelect('When', range);
+        if (workspace !== undefined) setSelect('Workspace', workspace);
+        if (repository !== undefined) setSelect('Repository', repository);
+        for (const [label, value] of [['From', from], ['To', to]] as const) {
+          if (value === undefined) continue;
+          const input = Array.from(root.querySelectorAll('.sessions-custom-range label'))
+            .find((entry) => entry.querySelector('span')?.textContent?.trim() === label)
+            ?.querySelector('input');
+          if (!(input instanceof HTMLInputElement)) throw new Error(`no ${label} date input`);
+          setControlValue(input, value);
+        }
+        await settleUi(3);
+        return collectSessionsPanelUiState();
+      }
+      case 'sessions_load_more': {
+        const button = Array.from(sessionsPanelRoot().querySelectorAll('.sessions-footer button'))
+          .find((entry) => (entry.textContent || '').startsWith('Load'));
+        if (!(button instanceof HTMLElement)) throw new Error('nothing older to load');
+        clickElement(button);
+        await settleUi(4);
+        return collectSessionsPanelUiState();
+      }
+      case 'sessions_row_action': {
+        const { sessionId, action } = payload as { sessionId: string; action: string };
+        const row = Array.from(sessionsPanelRoot().querySelectorAll('tbody tr'))
+          .find((entry) => entry.querySelector('.sessions-id')?.textContent?.trim() === sessionId);
+        if (!row) throw new Error(`no row for session ${sessionId}`);
+        const button = Array.from(row.querySelectorAll('.sessions-actions button'))
+          .find((entry) => entry.textContent?.trim() === action);
+        if (!(button instanceof HTMLElement)) throw new Error(`row ${sessionId} offers no ${action}`);
+        clickElement(button);
+        await settleUi(3);
+        return collectSessionsPanelUiState();
+      }
       case 'markdown_opener_get_state':
         return collectMarkdownOpenerUiState();
       case 'location_picker_get_state':

@@ -1,0 +1,7 @@
+kind: added
+area: sessions
+change: A Sessions surface (⌘⇧L, Ctrl+Alt+L on Linux) lists live and closed sessions together, filtered by workspace, repository and date, newest first with load-more.
+notes: |
+  Closed sessions used to be readable only through `attn session list`. The app
+  now reads the same ledger over the WebSocket, and a session that closes while
+  the list is open updates its row in place.
