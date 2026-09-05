@@ -129,8 +129,8 @@ var sessionCommandsAnsweredWhereTheyLand = map[string]string{
 
 	protocol.CmdUnregister: "handleUnregisterWS forwards to the endpoint itself",
 
-	protocol.CmdSessionList: sessionLedgerIsPerDaemon,
-	protocol.CmdSessionShow: sessionLedgerIsPerDaemon,
+	protocol.CmdSessionList:   sessionLedgerIsPerDaemon,
+	protocol.CmdSessionShow:   sessionLedgerIsPerDaemon,
 	protocol.CmdSessionReopen: sessionLedgerIsPerDaemon,
 
 	protocol.CmdTicketAttach:   "the ticket board is the hub's own store",

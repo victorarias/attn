@@ -130,9 +130,9 @@ type Daemon struct {
 	classifier                  Classifier
 	// What auto mode's repo_visibility slot knows, keyed "host/owner/name".
 	// A launch reads it and never waits on it; see automode_detect.go.
-	repoVisibilityKnown               map[string]string
-	repoVisibilityPending             map[string]bool
-	repoVisibilityMu                  sync.Mutex
+	repoVisibilityKnown   map[string]string
+	repoVisibilityPending map[string]bool
+	repoVisibilityMu      sync.Mutex
 	// What the last inspect_branch saw, so a reopen verdict is served from stored
 	// state and git runs off the request path.
 	branchInspections                 map[string]branchInspection
