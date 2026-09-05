@@ -1,0 +1,4 @@
+kind: changed
+area: pi
+change: Auto-mode denials stop parking above the prompt. The footer counts held calls, `/auto blocked` prints them with retries grouped, and pi footer statuses tint to match the footer instead of floating in white.
+symptom: A denied call left a wall of classifier prose sitting above the composer until the next message, in plain white text that did not match the footer.
