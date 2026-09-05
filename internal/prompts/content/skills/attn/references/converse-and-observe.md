@@ -1,9 +1,9 @@
 # Reaching another agent
 
 You are not alone on this daemon. Other sessions are running beside you, and
-three commands reach them: `attn agent list` names them, `attn agent peek` shows
-you what one is doing, and `attn agent msg` speaks to one. Run
-`attn agent --help` for the exact flags; this file is the rules.
+four commands reach them: `attn agent list` names them, `attn agent peek` shows
+you what one is doing, `attn agent msg` speaks to one, and `attn agent close`
+ends one. Run `attn agent --help` for the exact flags; this file is the rules.
 
 ## Who else is here
 
@@ -46,6 +46,30 @@ The header is the daemon's, not yours: it composes the attribution from the
 session the request names as its sender, so you cannot dress up that line inside
 your own text. It is not proof of origin, though — anything that can reach the
 daemon's socket can name any session as the sender.
+
+## Closing a session
+
+`attn agent close <session-or-seed> -m "reason"` ends a session for good. Three
+rules decide whether you may, and a refusal names all three: a session may close
+itself, it may close a session it dispatched, and the chief of staff may close
+any. The chief of staff and a session a crew member is working in are protected
+from every closer, including themselves.
+
+The reason is required and it is not paperwork. The session row stays in the
+ledger — `attn session show <id>` reads it back, `attn session list --closed`
+lists them — so the reason is what the next reader gets about why the work
+stopped. If the closed session was tending a seed, the reason lands there as a
+note. The seed does not move: it still names that session as its tender, so
+whoever comes next takes it or parks it.
+
+Naming a seed instead of a session closes whoever tends it, which is usually
+what an orchestrator wants: `attn agent close s-7k3f9m -m "its report landed"`.
+
+This is an immediate kill, not a request. There is no goodbye turn and nothing
+queued for that session will be read, so read what you needed first — the seed
+log, the last message, the diff — and close after. Closing yourself is allowed
+and ends your session mid-command; everything you meant to write must already
+be written.
 
 ## Receiving a message
 

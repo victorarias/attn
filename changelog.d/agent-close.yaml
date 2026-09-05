@@ -1,0 +1,9 @@
+kind: added
+area: agents
+change: An agent can close a session with `attn agent close <session-or-seed> -m "reason"`.
+symptom: Delegates that had finished stayed open, and only the user could close them.
+notes: >
+  A session may close itself and the sessions it dispatched; the chief of staff
+  may close any. The chief and crew-bound sessions stay protected, and every
+  refusal names the rule. The reason is required and lands as a note on the seed
+  the closed session was tending; the seed keeps its tender and does not move.

@@ -43,6 +43,12 @@ func runAgent() {
 			return
 		}
 		runAgentMsg(os.Args[3:])
+	case "close":
+		if hasHelpFlag(os.Args[3:]) {
+			writeAgentHelp(os.Stdout)
+			return
+		}
+		runAgentClose(os.Args[3:])
 	case "inbox":
 		if hasHelpFlag(os.Args[3:]) {
 			writeAgentHelp(os.Stdout)
@@ -411,6 +417,93 @@ func agentMsgErrorMessage(parsed agentMsgArgs, err error) string {
 	return message
 }
 
+type agentCloseArgs struct {
+	target string
+	reason string
+	source string
+	json   bool
+}
+
+func parseAgentCloseArgs(args []string, envSessionID string) (agentCloseArgs, error) {
+	const usage = `usage: attn agent close <session-or-seed> -m "reason" [--source-session <id>]`
+	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
+		return agentCloseArgs{}, errors.New(usage)
+	}
+	fs := flag.NewFlagSet("agent close", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	reason := fs.String("m", "", "why this session is done")
+	source := fs.String("source-session", "", "closing session id (defaults to ATTN_SESSION_ID)")
+	jsonOut := fs.Bool("json", false, "print the machine result as JSON")
+	if err := fs.Parse(args[1:]); err != nil {
+		return agentCloseArgs{}, err
+	}
+	if fs.NArg() != 0 {
+		return agentCloseArgs{}, errors.New(usage + "; quote the reason as one argument")
+	}
+	parsed := agentCloseArgs{
+		target: strings.TrimSpace(args[0]),
+		reason: strings.TrimSpace(*reason),
+		source: strings.TrimSpace(*source),
+		json:   *jsonOut,
+	}
+	if parsed.target == "" {
+		return agentCloseArgs{}, errors.New(usage)
+	}
+	if parsed.reason == "" {
+		return agentCloseArgs{}, errors.New(
+			`a close needs a reason: -m "why this session is done". The session row stays in the ledger and the reason is what the next reader gets`)
+	}
+	if parsed.source == "" {
+		parsed.source = strings.TrimSpace(envSessionID)
+	}
+	if parsed.source == "" {
+		return agentCloseArgs{}, errors.New(
+			"no caller: this shell is not an attn session, so pass --source-session <id> (`attn agent list` names the sessions)")
+	}
+	return parsed, nil
+}
+
+func runAgentClose(args []string) {
+	parsed, err := parseAgentCloseArgs(args, os.Getenv("ATTN_SESSION_ID"))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "agent close: %v\n", err)
+		os.Exit(2)
+	}
+	result, err := client.New("").AgentClose(parsed.target, parsed.source, parsed.reason)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "agent close: %s\n", agentCloseErrorMessage(parsed, err))
+		os.Exit(1)
+	}
+	if parsed.json {
+		printJSON(result)
+		return
+	}
+	printAgentClose(os.Stdout, result)
+}
+
+func printAgentClose(w io.Writer, result *protocol.AgentCloseResult) {
+	fmt.Fprintf(w, "closed session %s (%s): %s\n", agentShortID(result.TargetSessionID), result.Label, result.Reason)
+	for _, seedID := range result.SeedIds {
+		fmt.Fprintf(w, "noted on %s, which it was tending\n", seedID)
+	}
+	fmt.Fprintf(w, "the session is kept: `attn session show %s` reads it back\n", agentShortID(result.TargetSessionID))
+}
+
+func agentCloseErrorMessage(parsed agentCloseArgs, err error) string {
+	message := strings.TrimSpace(err.Error())
+	code := client.ErrorCode(err)
+	if code == "" {
+		code = strings.TrimSpace(strings.TrimPrefix(message, "daemon error: "))
+	}
+	switch code {
+	case "sender_session_not_found":
+		return fmt.Sprintf("the caller %q is not a session on this daemon", parsed.source)
+	case "sender_ambiguous_session":
+		return fmt.Sprintf("the caller %q matches more than one session; give more of the id", parsed.source)
+	}
+	return message
+}
+
 type agentMailboxArgs struct {
 	messageID string
 	sessionID string
@@ -628,6 +721,13 @@ commands:
         (ATTN_SESSION_ID); pass --source-session when running outside one.
         A seed id reaches whoever is tending it.
         A message that starts with - goes after --, as: agent msg -- <target> "-text"
+  close <session-or-seed> -m "reason" [--source-session <id>] [--json]
+        close a session for good. A session may close itself and the sessions it
+        dispatched; the chief of staff may close any. The reason is required: the
+        session row stays in the ledger, and the reason is what the next reader
+        gets. It is immediate, so say what you have to say first. A seed id closes
+        whoever tends it, and the seed keeps its tender with a note about the close.
+        The caller defaults to this session (ATTN_SESSION_ID).
   inbox [message-id] [--limit <count>] [--session <id>] [--json]
         read up to 20 unread notifications in FIFO order, or one notified peer
         message by id. Each returned item gets its durable read receipt. The batch

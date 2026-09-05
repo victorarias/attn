@@ -61,6 +61,8 @@ Delegating:
         --new-workspace | --workspace <id> | --cwd <path>    where it runs; --worktree <branch> gives it its own checkout
     attn agent msg <seed-id> "…"            reaches whoever tends it now; an untended seed refuses by name
     attn seed show <id>                     the delegate's report, once it lands; no need to watch the session
+    attn agent close <seed-or-session> -m "…"   ends a session you dispatched once you have what you needed; the reason
+                                              is required and lands as a note on the seed, which keeps its tender and does not move
 
 Use attn agent msg for attn-managed sessions; keep Claude's SendMessage for follow-ups to the native subagents this session spawned.
 
