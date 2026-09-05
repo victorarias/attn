@@ -290,6 +290,13 @@ func (s *Store) sessionLedgerMemory(query SessionLedgerQuery, limit int) (Sessio
 	return finishLedgerPage(SessionLedgerPage{Entries: entries}, matching), nil
 }
 
+// The in-memory mirror of the writers' closed_at predicate: closing takes the row
+// out of s.sessions, so the maps keyed beside it stop taking writes with it.
+func (s *Store) sessionIsLiveLocked(id string) bool {
+	_, live := s.sessions[id]
+	return live
+}
+
 func (s *Store) ledgerEntryMemoryLocked(id string) *protocol.SessionLedgerEntry {
 	if mark, closed := s.sessionCloses[id]; closed {
 		entry := ledgerEntryFromSession(mark.session, mark)

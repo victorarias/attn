@@ -227,40 +227,81 @@ func ledgerIDs(page SessionLedgerPage) []string {
 }
 
 func TestALateWriteCannotRewriteAClosedSession(t *testing.T) {
-	s := newSessionOwnedTableStore(t)
-	addSessionInDirectory(t, s, "s1", "/tmp/one")
-	if !s.UpdateState("s1", string(protocol.SessionStateWorking)) {
-		t.Fatal("UpdateState before the close reported no row")
+	backings := map[string]func(*testing.T) *Store{
+		"sqlite": newSessionOwnedTableStore,
+		"maps":   func(*testing.T) *Store { return newMapBackedStore() },
 	}
+	for name, newStore := range backings {
+		t.Run(name, func(t *testing.T) {
+			s := newStore(t)
+			addSessionInDirectory(t, s, "s1", "/tmp/one")
+			if !s.UpdateState("s1", string(protocol.SessionStateWorking)) {
+				t.Fatal("UpdateState before the close reported no row")
+			}
+			if !s.SnoozeTurn("s1", time.Now().Add(time.Hour), time.Now()) {
+				t.Fatal("SnoozeTurn before the close reported no row")
+			}
+			if err := s.SetSessionCostCursor("s1", "cursor-before-the-close"); err != nil {
+				t.Fatalf("SetSessionCostCursor before the close: %v", err)
+			}
+			if !s.BeginAgentDriverRun("s1", "plugin", "run-1") {
+				t.Fatal("BeginAgentDriverRun before the close reported no row")
+			}
 
-	closeAt(t, s, "s1", SessionClose{By: SessionClosedByUser}, time.Now())
-	snapshot := *s.SessionLedgerEntry("s1")
+			closeAt(t, s, "s1", SessionClose{By: SessionClosedByUser}, time.Now())
+			snapshot := *s.SessionLedgerEntry("s1")
+			stampsAtClose := s.TurnStamps("s1")
+			costAtClose, err := s.SessionCost("s1")
+			if err != nil {
+				t.Fatalf("SessionCost at the close: %v", err)
+			}
 
-	if s.UpdateState("s1", string(protocol.SessionStateWaitingInput)) {
-		t.Error("UpdateState after the close reported a row, want the closed row refused")
-	}
-	s.Touch("s1")
-	s.UpdateSessionLabel("s1", "renamed after the close")
-	s.AssignSessionWorkspace("s1", "workspace-elsewhere")
-	if s.SettleTurn("s1", time.Now()) {
-		t.Error("SettleTurn after the close reported a row, want the closed row refused")
-	}
+			if s.UpdateState("s1", string(protocol.SessionStateWaitingInput)) {
+				t.Error("UpdateState after the close reported a row, want the closed row refused")
+			}
+			s.Touch("s1")
+			s.UpdateSessionLabel("s1", "renamed after the close")
+			s.AssignSessionWorkspace("s1", "workspace-elsewhere")
+			if s.SettleTurn("s1", time.Now()) {
+				t.Error("SettleTurn after the close reported a row, want the closed row refused")
+			}
+			if s.WakeTurn("s1") {
+				t.Error("WakeTurn after the close reported a row, want the closed row refused")
+			}
+			if err := s.SetSessionCostCursor("s1", "cursor-after-the-close"); err != nil {
+				t.Fatalf("SetSessionCostCursor after the close: %v", err)
+			}
+			if run := s.EndAgentDriverRun("s1"); run.RunID != "" {
+				t.Errorf("EndAgentDriverRun after the close = %+v, want the closed row refused", run)
+			}
 
-	after := s.SessionLedgerEntry("s1")
-	if after == nil {
-		t.Fatal("SessionLedgerEntry(s1) = nil after the late writes")
-	}
-	if after.State != snapshot.State {
-		t.Errorf("state = %q after a late write, want the closed snapshot %q", after.State, snapshot.State)
-	}
-	if after.LastSeen != snapshot.LastSeen {
-		t.Errorf("last_seen = %q after a late touch, want %q", after.LastSeen, snapshot.LastSeen)
-	}
-	if after.Label != snapshot.Label {
-		t.Errorf("label = %q after a late rename, want %q", after.Label, snapshot.Label)
-	}
-	if after.WorkspaceID != snapshot.WorkspaceID {
-		t.Errorf("workspace = %q after a late assignment, want %q", after.WorkspaceID, snapshot.WorkspaceID)
+			after := s.SessionLedgerEntry("s1")
+			if after == nil {
+				t.Fatal("SessionLedgerEntry(s1) = nil after the late writes")
+			}
+			if after.State != snapshot.State {
+				t.Errorf("state = %q after a late write, want the closed snapshot %q", after.State, snapshot.State)
+			}
+			if after.LastSeen != snapshot.LastSeen {
+				t.Errorf("last_seen = %q after a late touch, want %q", after.LastSeen, snapshot.LastSeen)
+			}
+			if after.Label != snapshot.Label {
+				t.Errorf("label = %q after a late rename, want %q", after.Label, snapshot.Label)
+			}
+			if after.WorkspaceID != snapshot.WorkspaceID {
+				t.Errorf("workspace = %q after a late assignment, want %q", after.WorkspaceID, snapshot.WorkspaceID)
+			}
+			if stamps := s.TurnStamps("s1"); stamps != stampsAtClose {
+				t.Errorf("turn stamps = %+v after a late settle and wake, want %+v", stamps, stampsAtClose)
+			}
+			cost, err := s.SessionCost("s1")
+			if err != nil {
+				t.Fatalf("SessionCost after the late writes: %v", err)
+			}
+			if cost.Cursor != costAtClose.Cursor {
+				t.Errorf("cost cursor = %q after a late observation, want %q", cost.Cursor, costAtClose.Cursor)
+			}
+		})
 	}
 }
 

@@ -80,19 +80,23 @@ type LaunchIntent struct {
 func New() *Store {
 	db, err := OpenDB(":memory:")
 	if err != nil {
-		return &Store{
-			sessions:        make(map[string]*protocol.Session),
-			agentDriverRuns: make(map[string]AgentDriverReportCursor),
-			teardownIntents: make(map[string]SessionTeardownIntent),
-			sessionCloses:   make(map[string]sessionCloseMark),
-			sessionCosts:    make(map[string]SessionCostState),
-			agentMetadata:   make(map[string]string),
-			profileRoles:    make(map[string]string),
-			workspaces:      make(map[string]workspacelayout.WorkspaceLayout),
-			recentLocations: make(map[string]*protocol.RecentLocation),
-		}
+		return newMapBackedStore()
 	}
 	return &Store{db: db}
+}
+
+func newMapBackedStore() *Store {
+	return &Store{
+		sessions:        make(map[string]*protocol.Session),
+		agentDriverRuns: make(map[string]AgentDriverReportCursor),
+		teardownIntents: make(map[string]SessionTeardownIntent),
+		sessionCloses:   make(map[string]sessionCloseMark),
+		sessionCosts:    make(map[string]SessionCostState),
+		agentMetadata:   make(map[string]string),
+		profileRoles:    make(map[string]string),
+		workspaces:      make(map[string]workspacelayout.WorkspaceLayout),
+		recentLocations: make(map[string]*protocol.RecentLocation),
+	}
 }
 
 func cloneSession(session *protocol.Session) *protocol.Session {
@@ -1252,7 +1256,7 @@ func (s *Store) EndAgentDriverRun(id string) AgentDriverReportCursor {
 
 	if s.db == nil {
 		cursor := s.agentDriverRuns[id]
-		if cursor.RunID == "" {
+		if cursor.RunID == "" || !s.sessionIsLiveLocked(id) {
 			return AgentDriverReportCursor{}
 		}
 		delete(s.agentDriverRuns, id)

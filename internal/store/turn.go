@@ -113,7 +113,7 @@ func (s *Store) WakeTurnAtAndOpenIfClosed(id string, deadline, openedAt time.Tim
 
 	if s.db == nil {
 		current, ok := s.turnStamps[id]
-		if !ok || current.SnoozedUntil.IsZero() {
+		if !ok || current.SnoozedUntil.IsZero() || !s.sessionIsLiveLocked(id) {
 			return false
 		}
 		if !sameTurnStamp(current.SnoozedUntil, deadline) {
@@ -147,7 +147,7 @@ func (s *Store) clearSnooze(id string, deadline *time.Time) bool {
 
 	if s.db == nil {
 		current, ok := s.turnStamps[id]
-		if !ok || current.SnoozedUntil.IsZero() {
+		if !ok || current.SnoozedUntil.IsZero() || !s.sessionIsLiveLocked(id) {
 			return false
 		}
 		if deadline != nil && !sameTurnStamp(current.SnoozedUntil, *deadline) {

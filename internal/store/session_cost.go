@@ -201,6 +201,9 @@ func (s *Store) updateSessionCost(sessionID string, mutate func(*SessionCostStat
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.db == nil {
+		if !s.sessionIsLiveLocked(sessionID) {
+			return nil
+		}
 		if s.sessionCosts == nil {
 			s.sessionCosts = make(map[string]SessionCostState)
 		}
