@@ -1,0 +1,14 @@
+kind: added
+area: worktrees
+change: >-
+  attn reclaims worktrees whose work has landed, and a Worktrees panel shows
+  every worktree of every repository it tracks with why each one is kept.
+notes: >-
+  A background pass refreshes worktree state hourly and removes only a worktree
+  that is merged, clean, unstashed, fully pushed, idle 14 days, with no live
+  session and no open seed pointing at it. Every other row says which of those
+  held it back. "Keep forever" pins a worktree the sweep must never touch, and
+  every removal — the sweep's or your own delete — lands in a sweep log and as a
+  note on the seeds that worked there. Turn it off under Settings › Files and
+  locations › Worktree sweep. The CLI mirror is `attn worktree list | keep |
+  unkeep | delete | log | refresh`.

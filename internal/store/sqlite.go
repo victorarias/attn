@@ -1190,6 +1190,37 @@ CREATE TABLE IF NOT EXISTS app_reconcile_progress (
 			ON agent_mailbox_items(recipient_session_id, created_at, id)
 			WHERE read_at = '';
 	`},
+	{135, "observed worktree state, the keep pin and the sweep log", `
+		CREATE TABLE IF NOT EXISTS worktree_sweep_log (
+			id          TEXT PRIMARY KEY,
+			path        TEXT NOT NULL,
+			main_repo   TEXT NOT NULL,
+			branch      TEXT NOT NULL DEFAULT '',
+			action      TEXT NOT NULL,
+			reason      TEXT NOT NULL DEFAULT '',
+			at          TEXT NOT NULL
+		);
+		CREATE INDEX IF NOT EXISTS idx_worktree_sweep_log_at
+			ON worktree_sweep_log(at DESC, id DESC);
+
+		CREATE TABLE IF NOT EXISTS repo_integration_branches (
+			main_repo   TEXT PRIMARY KEY,
+			branch      TEXT NOT NULL,
+			source      TEXT NOT NULL,
+			resolved_at TEXT NOT NULL
+		);
+
+		CREATE TABLE IF NOT EXISTS repo_merged_branches (
+			main_repo   TEXT NOT NULL,
+			branch      TEXT NOT NULL,
+			merged_at   TEXT NOT NULL DEFAULT '',
+			number      INTEGER NOT NULL DEFAULT 0,
+			url         TEXT NOT NULL DEFAULT '',
+			head_sha    TEXT NOT NULL DEFAULT '',
+			observed_at TEXT NOT NULL,
+			PRIMARY KEY (main_repo, branch)
+		);
+	`},
 }
 
 const migration99SQL = `
@@ -1637,6 +1668,11 @@ func migrateDB(db *sql.DB, dbPath string) error {
 				tx.Rollback()
 				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
 			}
+		} else if m.version == 135 {
+			if err := applyMigration135(tx, m.sql); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
+			}
 		} else {
 			if _, err := tx.Exec(m.sql); err != nil {
 				tx.Rollback()
@@ -1696,6 +1732,46 @@ func applyMigration128(tx *sql.Tx) error {
 		return nil
 	}
 	_, err = tx.Exec(`ALTER TABLE session_pull_requests ADD COLUMN status_checked_at TEXT NOT NULL DEFAULT ''`)
+	return err
+}
+
+// Observed state lives on the row so no surface runs git. The columns default to
+// empty, which reads as "never refreshed" until the background pass writes them.
+func applyMigration135(tx *sql.Tx, schema string) error {
+	columns := []struct {
+		name string
+		sql  string
+	}{
+		{"origin", `ALTER TABLE worktrees ADD COLUMN origin TEXT NOT NULL DEFAULT ''`},
+		{"pinned_at", `ALTER TABLE worktrees ADD COLUMN pinned_at TEXT NOT NULL DEFAULT ''`},
+		{"observed_at", `ALTER TABLE worktrees ADD COLUMN observed_at TEXT NOT NULL DEFAULT ''`},
+		{"head_sha", `ALTER TABLE worktrees ADD COLUMN head_sha TEXT NOT NULL DEFAULT ''`},
+		{"detached", `ALTER TABLE worktrees ADD COLUMN detached INTEGER NOT NULL DEFAULT 0`},
+		{"dirty", `ALTER TABLE worktrees ADD COLUMN dirty INTEGER NOT NULL DEFAULT 0`},
+		{"dirty_files", `ALTER TABLE worktrees ADD COLUMN dirty_files INTEGER NOT NULL DEFAULT 0`},
+		{"stashes", `ALTER TABLE worktrees ADD COLUMN stashes INTEGER NOT NULL DEFAULT 0`},
+		{"unpushed", `ALTER TABLE worktrees ADD COLUMN unpushed INTEGER NOT NULL DEFAULT 0`},
+		{"merged_signal", `ALTER TABLE worktrees ADD COLUMN merged_signal TEXT NOT NULL DEFAULT ''`},
+		{"prunable", `ALTER TABLE worktrees ADD COLUMN prunable INTEGER NOT NULL DEFAULT 0`},
+		{"last_activity_at", `ALTER TABLE worktrees ADD COLUMN last_activity_at TEXT NOT NULL DEFAULT ''`},
+		{"sweep_status", `ALTER TABLE worktrees ADD COLUMN sweep_status TEXT NOT NULL DEFAULT ''`},
+		{"sweep_reason", `ALTER TABLE worktrees ADD COLUMN sweep_reason TEXT NOT NULL DEFAULT ''`},
+		{"sweep_at", `ALTER TABLE worktrees ADD COLUMN sweep_at TEXT NOT NULL DEFAULT ''`},
+		{"refresh_error", `ALTER TABLE worktrees ADD COLUMN refresh_error TEXT NOT NULL DEFAULT ''`},
+	}
+	for _, column := range columns {
+		has, err := columnExists(tx, "worktrees", column.name)
+		if err != nil {
+			return err
+		}
+		if has {
+			continue
+		}
+		if _, err := tx.Exec(column.sql); err != nil {
+			return err
+		}
+	}
+	_, err := tx.Exec(schema)
 	return err
 }
 

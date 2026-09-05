@@ -220,6 +220,18 @@ var wireFixtures = map[string]wireFixture{
 		events:  []string{protocol.EventWorktreeDeleted},
 		subject: (*wireWorld).worktree,
 	},
+	FactWorktreeStateChanged: {
+		events:  []string{protocol.EventWorktreeStateChanged},
+		subject: (*wireWorld).worktree,
+		payload: func(w *wireWorld) any { return protocol.Worktree{Path: w.worktreePath} },
+	},
+	FactWorktreeSwept: {
+		events:  []string{protocol.EventWorktreeSwept},
+		subject: (*wireWorld).worktree,
+		payload: func(w *wireWorld) any {
+			return protocol.WorktreeSweepEntry{ID: "swept-1", Path: w.worktreePath, Action: "removed"}
+		},
+	},
 	FactWorktreeListReconciled: {
 		events:  []string{protocol.EventWorktreesUpdated},
 		subject: (*wireWorld).worktree,

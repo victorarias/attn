@@ -302,6 +302,7 @@ func (d *Daemon) startJobQueueWithStore(queueStore jobs.Store) {
 		}
 		d.registerCrewLifecycleCron(runner)
 		d.registerSessionPullRequestRefreshCron(runner)
+		d.registerWorktreeSweepCron(runner)
 		if err := runner.RegisterCron(
 			automationScheduleKind,
 			automationScheduleInterval(),

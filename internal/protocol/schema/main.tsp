@@ -91,6 +91,10 @@ enum WorkspaceContextMaintenanceAction {
 
 enum GitOperationKind {
   delete_worktree,
+  // The background worktree refresh: one per repository for the list, the
+  // integration branch and the stash and tree probes, one per worktree row.
+  refresh_repository,
+  refresh_worktree,
 }
 
 enum GitOperationStatus {
@@ -508,6 +512,45 @@ model Worktree {
   branch: string;
   main_repo: string;
   created_at?: string; // ISO timestamp
+  // "attn" | "git" | "" — written at creation from now on; rows adopted before
+  // the column existed read empty and stay that way. Displayed, never a rule.
+  origin?: string;
+  pinned?: boolean;
+  pinned_at?: string;
+
+  // Observed by the background refresh. Absent means never refreshed.
+  observed_at?: string;
+  head_sha?: string;
+  detached?: boolean;
+  dirty?: boolean;
+  dirty_files?: int32;
+  stashes?: int32;
+  // Commits on the branch the merge does not account for; 0 when it does.
+  unpushed?: int32;
+  // "pull_request" | "ancestor" | "tree" — which rung of the merged ladder answered.
+  merged_signal?: string;
+  // git still lists it but the directory is gone.
+  prunable?: boolean;
+  last_activity_at?: string;
+  refresh_error?: string;
+
+  // "scheduled" | "pinned" | "kept_dirty" | "kept_unmerged" | "kept_unpushed" |
+  // "kept_detached" | "kept_live_session" | "kept_open_seed" | "kept_stale"
+  sweep_status?: string;
+  sweep_reason?: string;
+  // While scheduled, the date the worktree becomes eligible.
+  sweep_at?: string;
+}
+
+model WorktreeSweepEntry {
+  id: string;
+  path: string;
+  main_repo: string;
+  branch?: string;
+  // "removed" (the sweep decided) | "deleted" (you did) | "failed"
+  action: string;
+  reason?: string;
+  at: string;
 }
 
 model PluginInfo {
@@ -1622,6 +1665,64 @@ model DeleteWorktreeMessage {
   path: string;
   endpoint_id?: string;
   force?: boolean;
+}
+
+// The Worktrees surface: every worktree of every repository attn tracks, read
+// from the registry. Never runs git, so it answers at once however slow the
+// repository is.
+model WorktreeListMessage {
+  cmd: "worktree_list";
+  main_repo?: string;
+  limit?: int32;
+  request_id?: string; // set by the WS frontend to correlate the result event
+}
+
+model WorktreeListResult {
+  worktrees: Worktree[];
+  repositories: WorktreeRepository[];
+  omitted: int32;
+}
+
+model WorktreeRepository {
+  main_repo: string;
+  // The ref the merged ladder measures against, and where it came from.
+  integration_branch?: string;
+  integration_source?: string;
+}
+
+// Keep this worktree forever: the sweep names it pinned and never reclaims it.
+model WorktreeKeepMessage {
+  cmd: "worktree_keep";
+  path: string;
+  keep: boolean;
+  request_id?: string; // set by the WS frontend to correlate the result event
+}
+
+model WorktreeKeepResult {
+  worktree: Worktree;
+}
+
+model WorktreeSweepLogMessage {
+  cmd: "worktree_sweep_log";
+  main_repo?: string;
+  limit?: int32;
+  request_id?: string; // set by the WS frontend to correlate the result event
+}
+
+model WorktreeSweepLogResult {
+  entries: WorktreeSweepEntry[];
+  omitted: int32;
+}
+
+// Ask for a refresh now instead of waiting for the tick. Returns as soon as the
+// pass is queued; the rows update through worktree_state_changed.
+model WorktreeRefreshMessage {
+  cmd: "worktree_refresh";
+  request_id?: string; // set by the WS frontend to correlate the result event
+}
+
+model WorktreeRefreshResult {
+  queued: boolean;
 }
 
 model GetSettingsMessage {
@@ -3372,6 +3473,44 @@ model WorktreeCreatedEvent {
 model WorktreeDeletedEvent {
   event: "worktree_deleted";
   worktrees: Worktree[];
+}
+
+model WorktreeListResultEvent {
+  event: "worktree_list_result";
+  request_id?: string;
+  success: boolean;
+  worktree_list_result: WorktreeListResult;
+}
+
+model WorktreeKeepResultEvent {
+  event: "worktree_keep_result";
+  request_id?: string;
+  success: boolean;
+  error?: string;
+  worktrees?: Worktree[];
+}
+
+model WorktreeSweepLogResultEvent {
+  event: "worktree_sweep_log_result";
+  request_id?: string;
+  success: boolean;
+  worktree_sweep_log_result: WorktreeSweepLogResult;
+}
+
+model WorktreeRefreshResultEvent {
+  event: "worktree_refresh_result";
+  request_id?: string;
+  success: boolean;
+}
+
+model WorktreeStateChangedEvent {
+  event: "worktree_state_changed";
+  worktrees: Worktree[];
+}
+
+model WorktreeSweptEvent {
+  event: "worktree_swept";
+  sweep_entry: WorktreeSweepEntry;
 }
 
 model WorktreesUpdatedMessage {
@@ -6022,6 +6161,10 @@ model Response {
   ticket_list_result?: TicketListResult;
   ticket_show_result?: TicketShowResult;
   activity_status_result?: ActivityStatusResult;
+  worktree_list_result?: WorktreeListResult;
+  worktree_keep_result?: WorktreeKeepResult;
+  worktree_sweep_log_result?: WorktreeSweepLogResult;
+  worktree_refresh_result?: WorktreeRefreshResult;
   ticket_attach_result?: TicketAttachResult;
   ticket_create_result?: TicketCreateResult;
   ticket_comment_result?: TicketCommentResult;
@@ -6941,6 +7084,10 @@ model WebSocketEvent {
   repos?: RepoState[];
   authors?: AuthorState[];
   worktrees?: Worktree[];
+  sweep_entry?: WorktreeSweepEntry;
+  worktree_list_result?: WorktreeListResult;
+  worktree_sweep_log_result?: WorktreeSweepLogResult;
+  request_id?: string;
   plugins?: PluginInfo[];
   plugin_issues?: PluginIssue[];
   operation?: GitOperation;
@@ -7060,6 +7207,12 @@ alias DaemonEvent =
   | RateLimitedMessage
   | WorktreeCreatedEvent
   | WorktreeDeletedEvent
+  | WorktreeStateChangedEvent
+  | WorktreeSweptEvent
+  | WorktreeListResultEvent
+  | WorktreeKeepResultEvent
+  | WorktreeSweepLogResultEvent
+  | WorktreeRefreshResultEvent
   | WorktreesUpdatedMessage
   | CreateWorktreeResultMessage
   | DeleteWorktreeResultMessage

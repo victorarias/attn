@@ -1,0 +1,230 @@
+.worktrees-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  height: 100%;
+  padding: 16px;
+  overflow-y: auto;
+  color: var(--color-text-primary);
+  background: var(--color-bg-panel);
+  font-size: var(--font-size-sm);
+}
+
+.worktrees-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--color-border);
+  padding-bottom: 8px;
+}
+
+.worktrees-panel__kicker {
+  font-size: var(--font-size-xl);
+  font-weight: 600;
+}
+
+.worktrees-panel__header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.worktrees-panel__close {
+  background: transparent;
+  border: none;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font-size: var(--font-size-sm);
+  line-height: 1;
+  padding: 4px;
+}
+
+.worktrees-panel__close:hover {
+  color: var(--color-text-primary);
+}
+
+.worktrees-panel__action {
+  background: var(--color-bg-button);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  color: var(--color-text-primary);
+  cursor: pointer;
+  font-size: var(--font-size-xs);
+  padding: 3px 8px;
+}
+
+.worktrees-panel__action:hover:not(:disabled) {
+  border-color: var(--color-border-strong, var(--color-border));
+}
+
+.worktrees-panel__action:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.worktrees-panel__action--danger {
+  color: var(--color-danger, #e05252);
+}
+
+.worktrees-panel__error {
+  color: var(--color-danger, #e05252);
+  margin: 0;
+}
+
+.worktrees-panel__notice,
+.worktrees-panel__empty {
+  color: var(--color-text-secondary);
+  margin: 0;
+}
+
+.worktrees-panel__repo {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.worktrees-panel__repo-header {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  border-bottom: 1px solid var(--color-border);
+  padding-bottom: 4px;
+}
+
+.worktrees-panel__repo-name {
+  font-weight: 600;
+}
+
+.worktrees-panel__repo-integration,
+.worktrees-panel__refreshing {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+}
+
+.worktrees-panel__list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.worktrees-panel__row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 8px;
+}
+
+.worktrees-panel__row.is-pinned {
+  border-color: var(--color-accent, var(--color-border));
+}
+
+.worktrees-panel__row-main {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.worktrees-panel__name {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.worktrees-panel__branch {
+  color: var(--color-text-secondary);
+  font-family: var(--font-family-mono, monospace);
+  font-size: var(--font-size-xs);
+}
+
+.worktrees-panel__chips,
+.worktrees-panel__sessions,
+.worktrees-panel__row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.worktrees-panel__chip {
+  background: var(--color-bg-button);
+  border-radius: 10px;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  padding: 1px 7px;
+}
+
+.worktrees-panel__chip--error {
+  color: var(--color-danger, #e05252);
+}
+
+.worktrees-panel__session {
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  color: var(--color-text-primary);
+  cursor: pointer;
+  font-size: var(--font-size-xs);
+  padding: 1px 7px;
+}
+
+.worktrees-panel__sweep {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: var(--font-size-xs);
+}
+
+.worktrees-panel__sweep-status {
+  font-weight: 600;
+}
+
+.worktrees-panel__sweep-reason {
+  color: var(--color-text-secondary);
+}
+
+.worktrees-panel__log {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.worktrees-panel__log-title {
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  margin: 0;
+}
+
+.worktrees-panel__log-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.worktrees-panel__log-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: var(--font-size-xs);
+}
+
+.worktrees-panel__log-when,
+.worktrees-panel__log-reason {
+  color: var(--color-text-secondary);
+}
+
+.worktrees-panel__log-branch {
+  font-family: var(--font-family-mono, monospace);
+}
+
+.worktrees-panel__log-action {
+  color: var(--color-text-primary);
+  font-weight: 500;
+}
