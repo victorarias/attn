@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -525,5 +526,30 @@ func TestDeletingAWorktreeByHandLeavesTheSameTrailAsTheSweep(t *testing.T) {
 		if !strings.Contains(found, want) {
 			t.Errorf("removal note %q does not mention %q", found, want)
 		}
+	}
+}
+
+// The panel iterates both arrays. A nil slice marshals to null, and iterating
+// null takes the whole app down through its error boundary, not just the panel.
+func TestTheWorktreeSurfaceNeverPutsNullWhereTheAppExpectsAnArray(t *testing.T) {
+	d := newEnrolledDaemon(t, "")
+	t.Cleanup(d.stopEventBus)
+
+	list, err := json.Marshal(d.worktreeListResult("", 0))
+	if err != nil {
+		t.Fatalf("marshalling the empty list: %v", err)
+	}
+	for _, field := range []string{`"worktrees":[]`, `"repositories":[]`} {
+		if !strings.Contains(string(list), field) {
+			t.Fatalf("the empty worktree list is %s, want %s in it", list, field)
+		}
+	}
+
+	log, err := json.Marshal(d.worktreeSweepLogResult("", 0))
+	if err != nil {
+		t.Fatalf("marshalling the empty sweep log: %v", err)
+	}
+	if !strings.Contains(string(log), `"entries":[]`) {
+		t.Fatalf("the empty sweep log is %s, want \"entries\":[] in it", log)
 	}
 }

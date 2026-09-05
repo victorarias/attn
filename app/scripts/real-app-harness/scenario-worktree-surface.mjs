@@ -48,6 +48,17 @@ function runJSON(binary, args, env, options) {
   return JSON.parse(run(binary, args, env, options));
 }
 
+// The fixture lives under /var/folders, a symlink to /private/var on macOS, and
+// the two sides of this comparison do not always agree on which form they hold.
+function sameDir(left, right) {
+  if (!left || !right) return false;
+  try {
+    return fs.realpathSync(left) === fs.realpathSync(right);
+  } catch {
+    return left === right;
+  }
+}
+
 const GIT_ENV = {
   GIT_AUTHOR_NAME: 'harness', GIT_AUTHOR_EMAIL: 'harness@test',
   GIT_COMMITTER_NAME: 'harness', GIT_COMMITTER_EMAIL: 'harness@test',
@@ -135,6 +146,13 @@ function rowFor(state, worktreePath) {
   return (state?.rows || []).find((row) => row.path === worktreePath) || null;
 }
 
+// The registry outlives a run, so an earlier run's rows sit in the panel beside
+// this one's. Count only what this fixture put there.
+function fixtureRows(state, fixture) {
+  const root = path.dirname(fixture.main) + path.sep;
+  return (state?.rows || []).filter((row) => row.path.startsWith(root));
+}
+
 function refreshingCount(state) {
   const rows = (state?.rows || []).filter((row) => row.refreshing).length;
   const repositories = (state?.repositories || []).filter((repo) => repo.refreshing).length;
@@ -212,6 +230,7 @@ async function main() {
 
     await runner.step('delegate_into_one_worktree', async () => {
       const before = seedIDs(binary, daemonEnv);
+      const known = new Set(observer.sessionsById.keys());
       run(binary, [
         'delegate', '--agent', 'shell', '--model', 'none', '--no-worktree',
         '--cwd', fixture.worktrees.merged, '--name', 'wtproof',
@@ -220,26 +239,30 @@ async function main() {
       const planted = [...seedIDs(binary, daemonEnv)].filter((id) => !before.has(id));
       runner.assert(planted.length === 1, 'the delegation planted exactly one seed', planted);
       seed = planted[0];
-      delegateSession = [...observer.sessionsById.values()]
-        .find((session) => session.directory === fixture.worktrees.merged)?.id || null;
-      runner.assert(Boolean(delegateSession), 'the delegate session runs in the worktree', {
-        seed, worktree: fixture.worktrees.merged,
-      });
+
+      // The CLI returns once the seed is planted; the session it spawns reaches
+      // the app a moment later, so wait for it rather than read the map now.
+      await observer.waitFor(() => {
+        delegateSession = [...observer.sessionsById.values()]
+          .find((session) => !known.has(session.id) && sameDir(session.directory, fixture.worktrees.merged))
+          ?.id || null;
+        return Boolean(delegateSession);
+      }, 'the delegate session runs in the worktree', DELEGATE_TIMEOUT_MS);
     });
 
     await runner.step('leg1_the_panel_says_what_it_would_do_and_why', async () => {
       await client.request('worktrees_open_panel');
       await client.request('worktrees_refresh');
+      // Rows arrive as the pass walks the repository and the verdicts come after
+      // all of them, so a decided row is the end of the pass. Earlier races it.
       const state = await poll(async () => {
         const current = await client.request('worktrees_get_state');
-        return rowFor(current, fixture.worktrees.dirty) && rowFor(current, fixture.worktrees.merged)
-          ? current : null;
-      }, 'the fixture worktrees to appear in the panel', PANEL_APPEAR_TIMEOUT_MS);
+        return fixtureRows(current, fixture).length >= fixture.count
+          && rowFor(current, fixture.worktrees.dirty)?.reason
+          && rowFor(current, fixture.worktrees.merged) ? current : null;
+      }, 'every worktree of the repository to have a row saying what would happen to it',
+      PANEL_APPEAR_TIMEOUT_MS);
 
-      runner.assert(state.rows.length >= fixture.count,
-        'every worktree of the repository has a row, not only the ones attn made', {
-          rows: state.rows.length, want: fixture.count,
-        });
       const dirty = rowFor(state, fixture.worktrees.dirty);
       runner.assert(dirty.chips.some((chip) => chip.startsWith('dirty')),
         'the worktree with uncommitted work shows its dirty chip', dirty);
@@ -263,8 +286,9 @@ async function main() {
         const count = refreshingCount(current);
         // The panel reads the registry, so it must keep answering with every row
         // while git is still walking the repository behind it.
-        if (count > 0 && (current.rows || []).length >= fixture.count) {
-          return { refreshing: count, rows: current.rows.length, afterMs: Date.now() - started };
+        const rows = fixtureRows(current, fixture).length;
+        if (count > 0 && rows >= fixture.count) {
+          return { refreshing: count, rows, afterMs: Date.now() - started };
         }
         return null;
       }, 'a refresh in flight on the surface', REFRESH_VISIBLE_TIMEOUT_MS, 150);
@@ -275,8 +299,8 @@ async function main() {
         return refreshingCount(current) === 0 ? current : null;
       }, 'the refresh to finish', REFRESH_VISIBLE_TIMEOUT_MS);
       runner.log('refresh_pass', { visibleAfterMs: seen.afterMs, totalMs: Date.now() - started });
-      runner.assert(settled.rows.length >= fixture.count,
-        'every row survives the pass', { rows: settled.rows.length });
+      runner.assert(fixtureRows(settled, fixture).length >= fixture.count,
+        'every row survives the pass', { rows: fixtureRows(settled, fixture).length });
     });
 
     await runner.step('leg3_the_keep_pin_and_its_way_back', async () => {
@@ -289,7 +313,9 @@ async function main() {
       runner.assert(/kept forever/.test(pinned.sweep + pinned.reason),
         'a pinned row says it is kept forever', pinned);
 
-      const listed = runJSON(binary, ['worktree', 'list', '--json'], daemonEnv);
+      // Scoped to this repository: the CLI pages at 20 rows and the registry
+      // carries earlier runs, so an unscoped list can omit the row under test.
+      const listed = runJSON(binary, ['worktree', 'list', '--repo', fixture.main, '--json'], daemonEnv);
       const stored = (listed.worktrees || []).find((row) => row.path === target);
       runner.assert(stored?.pinned === true, 'the CLI sees the pin the app set', stored);
 

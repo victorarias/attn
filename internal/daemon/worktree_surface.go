@@ -43,9 +43,12 @@ func (d *Daemon) worktreeListResult(mainRepo string, limit int) *protocol.Worktr
 		rows = rows[:limit]
 	}
 
+	// Both are required arrays on the wire. A nil slice marshals to null, which
+	// the panel iterates and the app dies rendering.
 	result := &protocol.WorktreeListResult{
-		Worktrees: make([]protocol.Worktree, 0, len(rows)),
-		Omitted:   omitted,
+		Worktrees:    make([]protocol.Worktree, 0, len(rows)),
+		Repositories: make([]protocol.WorktreeRepository, 0),
+		Omitted:      omitted,
 	}
 	seenRepo := make(map[string]bool)
 	for _, row := range rows {
