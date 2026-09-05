@@ -446,6 +446,15 @@ func (d *Daemon) inspectBranchInBackground(sessionID, repo, branch string) <-cha
 	return done
 }
 
+// A verdict is served from the last inspection, which a fetch or a branch created
+// outside attn can outdate; asking refreshes it for the next ask.
+func (d *Daemon) refreshReopenBranch(verdict *sessionReopenVerdict) {
+	if verdict.BranchState == "" || verdict.BranchState == branchStateUnknown {
+		return
+	}
+	d.inspectBranchInBackground(verdict.SessionID, verdict.Execution.RepositoryRoot, verdict.Execution.Branch)
+}
+
 // forgetBranchInspections drops what a repository write just made stale.
 func (d *Daemon) forgetBranchInspections(repo string) {
 	prefix := attngit.CanonicalizePath(repo) + "\x00"

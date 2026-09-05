@@ -55,6 +55,7 @@ func (d *Daemon) handleSessionShow(conn net.Conn, msg *protocol.SessionShowMessa
 	result := &protocol.SessionShowResult{Entry: *entry}
 	if verdict, found := d.reopenVerdict(entry.ID); found {
 		result.Reopen = verdict.toProtocol()
+		d.refreshReopenBranch(verdict)
 	}
 	_ = json.NewEncoder(conn).Encode(protocol.Response{Ok: true, SessionShowResult: result})
 }

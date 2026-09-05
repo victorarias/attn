@@ -1,12 +1,15 @@
 package daemon
 
 import (
+	"encoding/json"
 	"errors"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	attngit "github.com/victorarias/attn/internal/git"
 	"github.com/victorarias/attn/internal/protocol"
@@ -265,5 +268,69 @@ func TestReopeningLeavesTheCostCursorWhereTheCloseLeftIt(t *testing.T) {
 	}
 	if after.Cursor != cursor {
 		t.Errorf("cost cursor = %q, want the close's cursor %q kept across the reopen", after.Cursor, cursor)
+	}
+}
+
+func sessionShowResult(t *testing.T, d *Daemon, sessionID string) protocol.SessionShowResult {
+	t.Helper()
+	server, client := net.Pipe()
+	defer client.Close()
+	go d.handleConnection(server)
+	if err := json.NewEncoder(client).Encode(protocol.SessionShowMessage{
+		Cmd: protocol.CmdSessionShow, SessionID: sessionID,
+	}); err != nil {
+		t.Fatalf("encode session_show: %v", err)
+	}
+	var response protocol.Response
+	_ = client.SetReadDeadline(time.Now().Add(5 * time.Second))
+	if err := json.NewDecoder(client).Decode(&response); err != nil {
+		t.Fatalf("decode session_show response: %v", err)
+	}
+	if !response.Ok || response.SessionShowResult == nil {
+		t.Fatalf("session_show failed: %+v", response)
+	}
+	return *response.SessionShowResult
+}
+
+// A verdict is served from the last inspection, so asking has to start the next
+// one: a branch pushed back into the repository must reach the following ask.
+func TestAskingForAVerdictRefreshesTheBranchItRead(t *testing.T) {
+	d, repo, _ := closedWorktreeWithDeletedDirectory(t, "refreshed", "feat/refreshed", false)
+	reopenDaemonWithBackend(t, d)
+	runGitDaemon(t, repo, "worktree", "prune")
+	runGitDaemon(t, repo, "branch", "-D", "feat/refreshed")
+
+	gone := decidedReopenVerdict(t, d, "refreshed")
+	if gone.BranchState != branchStateGone {
+		t.Fatalf("branch state = %q, want %q", gone.BranchState, branchStateGone)
+	}
+
+	shown := sessionShowResult(t, d, "refreshed")
+	if shown.Reopen == nil || protocol.Deref(shown.Reopen.BranchState) != branchStateGone {
+		t.Fatalf("session_show carried %+v, want the branch reported gone", shown.Reopen)
+	}
+
+	// Somebody pushes the branch back outside attn. The ask that follows serves the
+	// stale answer and must leave a fresh inspection behind it.
+	runGitDaemon(t, repo, "branch", "feat/refreshed", "main")
+	sessionShowResult(t, d, "refreshed")
+	waitForBranchInspection(t, d, repo, "feat/refreshed")
+
+	back := sessionShowResult(t, d, "refreshed")
+	if back.Reopen == nil || protocol.Deref(back.Reopen.BranchState) != branchStateLocal {
+		t.Fatalf("session_show carried %+v, want the branch back as local", back.Reopen)
+	}
+}
+
+// Waits on the inspection the last ask started, without starting one: a refresh
+// that never ran leaves neither a running check nor a fresher observation.
+func waitForBranchInspection(t *testing.T, d *Daemon, repo, branch string) {
+	t.Helper()
+	key := branchInspectionKey(repo, branch)
+	d.branchInspectionsMu.Lock()
+	running := d.branchInspectionsRunning[key]
+	d.branchInspectionsMu.Unlock()
+	if running != nil {
+		<-running
 	}
 }
